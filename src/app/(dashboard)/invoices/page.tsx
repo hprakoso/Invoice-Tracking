@@ -173,9 +173,9 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 font-mono text-xs text-gray-700 whitespace-nowrap">{inv.invoiceNumber}</td>
                     <td className="px-4 py-3 text-gray-700 max-w-[180px] truncate">{inv.vendor?.name}</td>
                     <td className="px-4 py-3 text-gray-500 hidden md:table-cell whitespace-nowrap">{formatDate(inv.invoiceDate)}</td>
-                    <td className={`px-4 py-3 hidden sm:table-cell whitespace-nowrap font-medium ${isOverdue(inv.dueDate, inv.status) ? 'text-red-600' : 'text-gray-500'}`}>
-                      {formatDate(inv.dueDate)}
-                      {isOverdue(inv.dueDate, inv.status) && <span className="ml-1 text-xs">(Terlambat)</span>}
+                    <td className={`px-4 py-3 hidden sm:table-cell font-medium ${isOverdue(inv.dueDate, inv.status) ? 'text-red-600' : 'text-gray-500'}`}>
+                      <div className="whitespace-nowrap">{formatDate(inv.dueDate)}</div>
+                      {isOverdue(inv.dueDate, inv.status) && <div className="text-xs text-red-500 font-semibold mt-0.5">(Terlambat)</div>}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap">{formatIDR(inv.totalAmount)}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>

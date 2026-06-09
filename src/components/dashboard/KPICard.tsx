@@ -48,7 +48,7 @@ export function KPICard({ title, value, icon, color, format = 'number', subtitle
           {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
         </div>
         <div className={`rounded-lg p-2 ${c.bg}`}>
-          <span className={c.icon}>{icon}</span>
+          <span className={c.icon} aria-hidden="true">{icon}</span>
         </div>
       </div>
     </motion.div>

@@ -90,7 +90,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             {session?.user?.name?.charAt(0) ?? '?'}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-900 truncate">{session?.user?.name}</p>
+            <p className="text-xs font-medium text-gray-900 truncate" title={session?.user?.name}>{session?.user?.name}</p>
             <p className="text-xs text-gray-500">{role}</p>
           </div>
         </div>

@@ -192,7 +192,7 @@ export default function ChatPage() {
                 <button
                   key={prompt}
                   onClick={() => send(prompt)}
-                  className="text-left text-xs px-3 py-2.5 bg-white border rounded-xl hover:border-blue-400 hover:bg-blue-50 text-gray-600 hover:text-blue-700 transition-all shadow-sm"
+                  className="text-left text-sm px-3 py-2.5 bg-white border rounded-xl hover:border-blue-400 hover:bg-blue-50 text-gray-600 hover:text-blue-700 transition-all shadow-sm"
                 >
                   {prompt}
                 </button>
