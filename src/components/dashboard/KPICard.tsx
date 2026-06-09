@@ -1,12 +1,12 @@
 'use client'
+import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { useCountUp } from '@/hooks/useCountUp'
-import { LucideIcon } from 'lucide-react'
 
 interface KPICardProps {
   title: string
   value: number
-  icon: LucideIcon
+  icon: ReactNode
   color: 'blue' | 'green' | 'red' | 'orange'
   format?: 'number' | 'currency'
   subtitle?: string
@@ -28,7 +28,7 @@ function formatValue(val: number, format: 'number' | 'currency') {
   return val.toLocaleString('id-ID')
 }
 
-export function KPICard({ title, value, icon: Icon, color, format = 'number', subtitle }: KPICardProps) {
+export function KPICard({ title, value, icon, color, format = 'number', subtitle }: KPICardProps) {
   const animated = useCountUp(value)
   const c = colorMap[color]
 
@@ -48,7 +48,7 @@ export function KPICard({ title, value, icon: Icon, color, format = 'number', su
           {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
         </div>
         <div className={`rounded-lg p-2 ${c.bg}`}>
-          <Icon className={`h-5 w-5 ${c.icon}`} />
+          <span className={c.icon}>{icon}</span>
         </div>
       </div>
     </motion.div>

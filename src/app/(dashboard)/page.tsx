@@ -32,10 +32,10 @@ async function DashboardContent() {
     <div className="space-y-6">
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <KPICard title="Total Invoice" value={data.totalInvoices} icon={FileText} color="blue" />
-        <KPICard title="Total Tagihan" value={data.totalPayable} icon={DollarSign} color="green" format="currency" subtitle="Belum dibayar" />
-        <KPICard title="Terlambat" value={data.overdueCount} icon={AlertTriangle} color="red" subtitle="Lewat jatuh tempo" />
-        <KPICard title="Menunggu Approval" value={data.pendingApprovalCount} icon={Clock} color="orange" />
+        <KPICard title="Total Invoice" value={data.totalInvoices} icon={<FileText className="h-5 w-5" />} color="blue" />
+        <KPICard title="Total Tagihan" value={data.totalPayable} icon={<DollarSign className="h-5 w-5" />} color="green" format="currency" subtitle="Belum dibayar" />
+        <KPICard title="Terlambat" value={data.overdueCount} icon={<AlertTriangle className="h-5 w-5" />} color="red" subtitle="Lewat jatuh tempo" />
+        <KPICard title="Menunggu Approval" value={data.pendingApprovalCount} icon={<Clock className="h-5 w-5" />} color="orange" />
       </div>
 
       {/* Charts */}
