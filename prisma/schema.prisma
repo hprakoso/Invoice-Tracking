@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  FINANCE
+  VIEWER
+}
+
+enum InvoiceStatus {
+  PENDING_OCR
+  PENDING_REVIEW
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  name          String
+  role          Role
+  passwordHash  String   @map("password_hash")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  createdInvoices   Invoice[]          @relation("CreatedBy")
+  approvals         ApprovalWorkflow[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+
+  @@map("users")
+}
+
+model Vendor {
+  id           String   @id @default(uuid())
+  name         String
+  npwp         String?
+  contactName  String?  @map("contact_name")
+  contactEmail String?  @map("contact_email")
+  bankName     String?  @map("bank_name")
+  bankAccount  String?  @map("bank_account")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  invoices     Invoice[]
+
+  @@map("vendors")
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  vendorId       String        @map("vendor_id")
+  invoiceNumber  String        @map("invoice_number")
+  invoiceDate    DateTime?     @map("invoice_date")
+  dueDate        DateTime?     @map("due_date")
+  currency       String        @default("IDR")
+  subtotal       Decimal?      @db.Decimal(15, 2)
+  taxAmount      Decimal?      @map("tax_amount") @db.Decimal(15, 2)
+  totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
+  status         InvoiceStatus @default(PENDING_OCR)
+  ocrConfidence  Float?        @map("ocr_confidence")
+  filePath       String?       @map("file_path")
+  fileType       String?       @map("file_type")
+  notes          String?
+  createdById    String        @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  vendor         Vendor             @relation(fields: [vendorId], references: [id])
+  createdBy      User               @relation("CreatedBy", fields: [createdById], references: [id])
+  items          InvoiceItem[]
+  approvals      ApprovalWorkflow[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String   @map("invoice_id")
+  description String
+  quantity    Decimal? @db.Decimal(10, 3)
+  unitPrice   Decimal? @map("unit_price") @db.Decimal(15, 2)
+  total       Decimal  @db.Decimal(15, 2)
+  sortOrder   Int      @default(0) @map("sort_order")
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+model ApprovalWorkflow {
+  id          String         @id @default(uuid())
+  invoiceId   String         @map("invoice_id")
+  step        Int
+  approverId  String?        @map("approver_id")
+  status      ApprovalStatus @default(PENDING)
+  comment     String?
+  actionedAt  DateTime?      @map("actioned_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  invoice     Invoice        @relation(fields: [invoiceId], references: [id])
+  approver    User?          @relation(fields: [approverId], references: [id])
+
+  @@map("approval_workflows")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  invoiceId  String?  @map("invoice_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User?    @relation(fields: [userId], references: [id])
+  invoice    Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  invoiceId String?   @map("invoice_id")
+  type      String
+  title     String
+  body      String
+  isRead    Boolean   @default(false) @map("is_read")
+  createdAt DateTime  @default(now()) @map("created_at")
+  readAt    DateTime? @map("read_at")
+
+  user      User     @relation(fields: [userId], references: [id])
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@map("notifications")
+}
