@@ -76,7 +76,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             href={item.href}
             label={item.label}
             icon={item.icon}
-            active={pathname === item.href || (item.href !== '/' && item.href !== '/invoices/upload' && pathname.startsWith(item.href + '/'))}
+            active={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/') && !NAV_ITEMS.some(n => n.href !== item.href && pathname === n.href))}
           />
         ))}
       </nav>
