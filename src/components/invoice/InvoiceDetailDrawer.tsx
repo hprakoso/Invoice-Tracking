@@ -203,8 +203,8 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Alur Persetujuan</p>
                 <div className="space-y-3">
-                  <ApprovalStep step={1} approval={invoice.approvals.find(a => a.step === 1)} />
-                  <ApprovalStep step={2} approval={invoice.approvals.find(a => a.step === 2)} />
+                  <ApprovalStep step={1} approval={(invoice.approvals ?? []).find(a => a.step === 1)} />
+                  <ApprovalStep step={2} approval={(invoice.approvals ?? []).find(a => a.step === 2)} />
                 </div>
               </div>
 
