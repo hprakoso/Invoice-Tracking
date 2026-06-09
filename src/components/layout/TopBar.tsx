@@ -1,11 +1,12 @@
 'use client'
 
 import { signOut, useSession } from 'next-auth/react'
-import { Bell, LogOut, User } from 'lucide-react'
+import { Bell, LogOut, User, Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MobileSidebar } from './Sidebar'
 import { useNotificationStream } from '@/hooks/useNotificationStream'
+import { useTheme } from '@/hooks/useTheme'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
@@ -58,6 +59,7 @@ export function TopBar() {
 
   const role = (session?.user as { role?: string })?.role ?? 'VIEWER'
   const pathname = usePathname()
+  const { theme, toggle, mounted } = useTheme()
   const pageTitle = Object.entries(PAGE_TITLES)
     .sort((a, b) => b[0].length - a[0].length)
     .find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1] ?? 'Invoice Intelligence'
@@ -68,6 +70,18 @@ export function TopBar() {
 
       <p className="lg:hidden text-sm font-semibold text-gray-800 truncate flex-1">{pageTitle}</p>
       <div className="hidden lg:block flex-1" />
+
+      {/* Theme Toggle */}
+      {mounted && (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          onClick={toggle}
+        >
+          {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+        </Button>
+      )}
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
