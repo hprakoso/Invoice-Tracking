@@ -55,10 +55,10 @@ export function TopBar() {
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors">
+        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} notifikasi belum dibaca` : 'Notifikasi'} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold animate-pulse">
+            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold">
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
@@ -98,7 +98,7 @@ export function TopBar() {
           <User className="h-3 w-3" />
           {session?.user?.name?.split(' ')[0]}
         </div>
-        <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: '/login' })}>
+        <Button variant="ghost" size="icon" aria-label="Logout" onClick={() => signOut({ callbackUrl: '/login' })}>
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

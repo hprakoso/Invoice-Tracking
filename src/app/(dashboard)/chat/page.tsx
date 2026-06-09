@@ -143,7 +143,7 @@ export default function ChatPage() {
   const isEmpty = messages.length === 0
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] max-w-3xl mx-auto">
+    <div className="flex flex-col h-[calc(100dvh-7rem)] max-w-3xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between pb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
