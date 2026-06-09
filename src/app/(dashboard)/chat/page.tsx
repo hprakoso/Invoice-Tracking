@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Send, Bot, User, Sparkles, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface Message {
+  id: number
   role: 'user' | 'assistant'
   content: string
 }
@@ -20,6 +21,7 @@ const SUGGESTED_PROMPTS = [
 ]
 
 function TypingIndicator() {
+  const reduced = useReducedMotion()
   return (
     <div className="flex items-end gap-2">
       <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
@@ -31,7 +33,7 @@ function TypingIndicator() {
             <motion.div
               key={i}
               className="h-2 w-2 rounded-full bg-gray-400"
-              animate={{ y: [0, -6, 0] }}
+              animate={reduced ? {} : { y: [0, -6, 0] }}
               transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
             />
           ))}
@@ -85,8 +87,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const idRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  const nextId = () => ++idRef.current
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -96,7 +101,7 @@ export default function ChatPage() {
     const trimmed = text.trim()
     if (!trimmed || loading) return
 
-    const userMsg: Message = { role: 'user', content: trimmed }
+    const userMsg: Message = { id: nextId(), role: 'user', content: trimmed }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
     setLoading(true)
@@ -112,11 +117,12 @@ export default function ChatPage() {
       })
       const data = await res.json()
       const answer = data.answer ?? 'Maaf, tidak ada respons dari AI.'
-      setMessages((prev) => [...prev, { role: 'assistant', content: answer }])
+      setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content: answer }])
     } catch {
       setMessages((prev) => [
         ...prev,
         {
+          id: nextId(),
           role: 'assistant',
           content: 'Koneksi ke layanan AI gagal. Pastikan AI service berjalan.',
         },
@@ -196,8 +202,8 @@ export default function ChatPage() {
         ) : (
           <>
             <AnimatePresence initial={false}>
-              {messages.map((msg, i) => (
-                <ChatBubble key={i} msg={msg} />
+              {messages.map((msg) => (
+                <ChatBubble key={msg.id} msg={msg} />
               ))}
             </AnimatePresence>
             {loading && <TypingIndicator />}

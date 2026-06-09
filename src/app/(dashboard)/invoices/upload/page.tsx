@@ -350,7 +350,7 @@ export default function UploadPage() {
                     onChange={(e) =>
                       setEditableValues((prev) => ({ ...prev, [field.key]: e.target.value }))
                     }
-                    className="h-8 text-sm"
+                    className="h-10 text-sm"
                   />
                   <ConfidenceBar confidence={field.confidence} />
                 </div>

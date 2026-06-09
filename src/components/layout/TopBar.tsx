@@ -7,7 +7,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { MobileSidebar } from './Sidebar'
 import { useNotificationStream } from '@/hooks/useNotificationStream'
 import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+
+const PAGE_TITLES: Record<string, string> = {
+  '/': 'Dashboard',
+  '/invoices': 'Invoices',
+  '/invoices/upload': 'Upload Invoice',
+  '/approvals': 'Approvals',
+  '/reminders': 'Reminders',
+  '/chat': 'AI Assistant',
+  '/audit': 'Audit Log',
+}
 
 interface Notification {
   id: string
@@ -46,12 +57,17 @@ export function TopBar() {
   }
 
   const role = (session?.user as { role?: string })?.role ?? 'VIEWER'
+  const pathname = usePathname()
+  const pageTitle = Object.entries(PAGE_TITLES)
+    .sort((a, b) => b[0].length - a[0].length)
+    .find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1] ?? 'Invoice Intelligence'
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-white px-4">
       <MobileSidebar />
 
-      <div className="flex-1" />
+      <p className="lg:hidden text-sm font-semibold text-gray-800 truncate flex-1">{pageTitle}</p>
+      <div className="hidden lg:block flex-1" />
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
@@ -94,9 +110,10 @@ export function TopBar() {
 
       {/* User */}
       <div className="flex items-center gap-2">
-        <div className={`hidden sm:flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${roleColors[role]}`}>
+        <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${roleColors[role]}`}>
           <User className="h-3 w-3" />
-          {session?.user?.name?.split(' ')[0]}
+          <span className="hidden sm:inline">{session?.user?.name?.split(' ')[0]}</span>
+          <span className="sm:hidden">{role}</span>
         </div>
         <Button variant="ghost" size="icon" aria-label="Logout" onClick={() => signOut({ callbackUrl: '/login' })}>
           <LogOut className="h-4 w-4" />

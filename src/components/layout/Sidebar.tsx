@@ -14,25 +14,26 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'] },
-  { href: '/invoices', label: 'Invoices', icon: FileText, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'] },
-  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'FINANCE'] },
-  { href: '/approvals', label: 'Approvals', icon: CheckSquare, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
-  { href: '/reminders', label: 'Reminders', icon: Bell, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
-  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'] },
-  { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'FINANCE'] },
+  { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'], indent: false },
+  { href: '/invoices', label: 'Invoices', icon: FileText, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'], indent: false },
+  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'FINANCE'], indent: true },
+  { href: '/approvals', label: 'Approvals', icon: CheckSquare, roles: ['ADMIN', 'MANAGER', 'FINANCE'], indent: false },
+  { href: '/reminders', label: 'Reminders', icon: Bell, roles: ['ADMIN', 'MANAGER', 'FINANCE'], indent: false },
+  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER'], indent: false },
+  { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'FINANCE'], indent: false },
 ]
 
-function NavItem({ href, label, icon: Icon, active }: { href: string; label: string; icon: React.ElementType; active: boolean }) {
+function NavItem({ href, label, icon: Icon, active, indent }: { href: string; label: string; icon: React.ElementType; active: boolean; indent: boolean }) {
   return (
-    <Link href={href}>
+    <Link href={href} className={indent ? 'pl-4 block' : 'block'}>
       <motion.div
         whileHover={{ x: 4 }}
         className={cn(
           'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
           active
             ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+          indent && 'text-[13px]'
         )}
       >
         <Icon className="h-4 w-4 flex-shrink-0" />
@@ -76,6 +77,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             href={item.href}
             label={item.label}
             icon={item.icon}
+            indent={item.indent}
             active={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/') && !NAV_ITEMS.some(n => n.href !== item.href && pathname === n.href))}
           />
         ))}

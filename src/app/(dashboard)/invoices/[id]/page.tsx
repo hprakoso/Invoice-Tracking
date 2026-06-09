@@ -23,7 +23,10 @@ const PDFPage = dynamic(() => import('react-pdf').then(m => m.Page), { ssr: fals
 // Configure react-pdf worker (client-side only)
 if (typeof window !== 'undefined') {
   import('react-pdf').then(({ pdfjs }) => {
-    pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString()
   })
 }
 
