@@ -19,13 +19,7 @@ async function getDashboardData() {
   return res.json()
 }
 
-function formatIDR(amount: number) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount)
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-}
+import { formatIDR, formatDate } from '@/lib/format'
 
 async function DashboardContent() {
   const data = await getDashboardData()

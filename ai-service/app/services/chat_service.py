@@ -1,4 +1,4 @@
-import os
+from functools import lru_cache
 from langchain_core.prompts import PromptTemplate
 from app.services.extraction_chain import get_llm
 
@@ -33,10 +33,16 @@ Common Indonesian invoice terms:
 - "Vendor/Pemasok" = supplier/vendor"""
 
 
+@lru_cache(maxsize=1)
+def _cached_llm():
+    """Return a module-level LLM singleton — constructed once per process."""
+    return get_llm()
+
+
 def chat(message: str, history: list) -> str:
     """Generate a chat response using the configured LLM."""
     try:
-        llm = get_llm()
+        llm = _cached_llm()
 
         # Format conversation history (last 3 exchanges)
         history_text = ""

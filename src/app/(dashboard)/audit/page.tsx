@@ -94,15 +94,7 @@ const ROLE_COLORS: Record<string, string> = {
   VIEWER: 'bg-gray-100 text-gray-600',
 }
 
-function formatDateTime(d: string) {
-  return new Date(d).toLocaleString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+import { formatDateTime } from '@/lib/format'
 
 export default function AuditPage() {
   const [data, setData] = useState<AuditResponse | null>(null)

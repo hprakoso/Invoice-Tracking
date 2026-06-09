@@ -8,12 +8,15 @@ export async function GET() {
 
   const role = session.user.role
 
-  // Finance sees step-1 pending, Manager sees step-2 pending
-  const step = role === 'MANAGER' ? 2 : 1
+  // Finance → step 1, Manager → step 2, Admin → all pending steps
+  const stepFilter =
+    role === 'MANAGER' ? { step: 2 } :
+    role === 'FINANCE' ? { step: 1 } :
+    {}  // ADMIN sees every pending step
 
   const pending = await prisma.approvalWorkflow.findMany({
     where: {
-      step,
+      ...stepFilter,
       status: 'PENDING',
     },
     include: {

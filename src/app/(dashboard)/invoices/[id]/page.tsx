@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
@@ -56,20 +56,7 @@ interface Invoice {
   approvals: Approval[]
 }
 
-function formatIDR(v: string | number | null | undefined) {
-  if (v == null) return '—'
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(v))
-}
-
-function formatDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
-function isOverdue(dueDate: string | null, status: string) {
-  if (!dueDate || ['PAID', 'REJECTED'].includes(status)) return false
-  return new Date(dueDate) < new Date()
-}
+import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
 function ConfidenceBar({ value }: { value: number }) {
   const color = value >= 80 ? 'bg-green-500' : value >= 50 ? 'bg-yellow-500' : 'bg-red-500'
@@ -190,17 +177,29 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: session } = useSession()
-  const router = useRouter()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<'notfound' | 'auth' | 'network' | null>(null)
   const [rejectComment, setRejectComment] = useState('')
   const [showReject, setShowReject] = useState(false)
   const [acting, setActing] = useState(false)
 
   const fetchInvoice = async () => {
-    const res = await fetch(`/api/invoices/${id}`)
-    if (res.ok) setInvoice(await res.json())
-    setLoading(false)
+    try {
+      const res = await fetch(`/api/invoices/${id}`)
+      if (res.status === 401 || res.status === 403) {
+        setFetchError('auth')
+      } else if (!res.ok) {
+        setFetchError('notfound')
+      } else {
+        setInvoice(await res.json())
+        setFetchError(null)
+      }
+    } catch {
+      setFetchError('network')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -243,14 +242,13 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  // router removed — was only suppressing an unused-variable lint warning with `void router`
+
   const role = (session?.user as { role?: string } | undefined)?.role
   const canAct = invoice?.status === 'PENDING_APPROVAL' &&
     ((role === 'FINANCE' && !invoice.approvals.find(a => a.step === 1 && a.status === 'APPROVED')) ||
      (role === 'MANAGER' && !!invoice.approvals.find(a => a.step === 1 && a.status === 'APPROVED') && !invoice.approvals.find(a => a.step === 2 && a.status !== 'PENDING')) ||
      role === 'ADMIN')
-
-  // router is used for potential programmatic navigation
-  void router
 
   if (loading) {
     return (
@@ -265,10 +263,16 @@ export default function InvoiceDetailPage() {
   }
 
   if (!invoice) {
+    const errorMsg =
+      fetchError === 'auth'
+        ? 'Sesi Anda telah berakhir. Silakan login kembali.'
+        : fetchError === 'network'
+        ? 'Gagal terhubung ke server. Periksa koneksi Anda.'
+        : 'Invoice tidak ditemukan.'
     return (
       <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-        <AlertTriangle className="h-8 w-8 mb-2" />
-        <p>Invoice tidak ditemukan.</p>
+        <AlertTriangle className="h-8 w-8 mb-2 text-yellow-500" />
+        <p>{errorMsg}</p>
         <Link href="/invoices"><Button variant="outline" className="mt-4">Kembali</Button></Link>
       </div>
     )

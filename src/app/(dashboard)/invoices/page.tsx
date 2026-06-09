@@ -45,19 +45,7 @@ const STATUSES = [
   { value: 'PAID', label: 'Dibayar' },
 ]
 
-function formatIDR(amount: string | number) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(amount))
-}
-
-function formatDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-function isOverdue(dueDate: string | null, status: string) {
-  if (!dueDate || ['PAID', 'REJECTED'].includes(status)) return false
-  return new Date(dueDate) < new Date()
-}
+import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
 export default function InvoicesPage() {
   const { data: session } = useSession()

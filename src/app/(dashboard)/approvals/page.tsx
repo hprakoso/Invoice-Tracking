@@ -44,23 +44,7 @@ interface ApprovalEntry {
   }
 }
 
-function formatIDR(v: string | number | null | undefined) {
-  if (v == null) return '—'
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(Number(v))
-}
-
-function formatDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-}
+import { formatIDR, formatDate } from '@/lib/format'
 
 function isOverdue(dueDate: string | null) {
   if (!dueDate) return false
