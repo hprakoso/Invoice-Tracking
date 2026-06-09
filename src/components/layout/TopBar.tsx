@@ -65,10 +65,10 @@ export function TopBar() {
     .find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1] ?? 'Invoice Intelligence'
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-white px-4">
+    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-white dark:bg-gray-900 dark:border-gray-800 px-4">
       <MobileSidebar />
 
-      <p className="lg:hidden text-sm font-semibold text-gray-800 truncate flex-1">{pageTitle}</p>
+      <p className="lg:hidden text-sm font-semibold text-gray-800 dark:text-gray-100 truncate flex-1">{pageTitle}</p>
       <div className="hidden lg:block flex-1" />
 
       {/* Theme Toggle */}
@@ -85,7 +85,7 @@ export function TopBar() {
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} notifikasi belum dibaca` : 'Notifikasi'} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors">
+        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} notifikasi belum dibaca` : 'Notifikasi'} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold">
@@ -104,12 +104,12 @@ export function TopBar() {
           </div>
           <div className="max-h-64 overflow-y-auto">
             {notifications.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-6">Tidak ada notifikasi baru</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">Tidak ada notifikasi baru</p>
             ) : (
               notifications.map(n => (
-                <div key={n.id} className="px-4 py-3 border-b last:border-0 hover:bg-gray-50">
-                  <p className="text-xs font-medium text-gray-900">{n.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{n.body}</p>
+                <div key={n.id} className="px-4 py-3 border-b last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800 dark:border-gray-800">
+                  <p className="text-xs font-medium text-gray-900 dark:text-gray-100">{n.title}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.body}</p>
                 </div>
               ))
             )}

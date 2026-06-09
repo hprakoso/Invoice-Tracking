@@ -32,7 +32,7 @@ function NavItem({ href, label, icon: Icon, active, indent }: { href: string; la
           'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
           active
             ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100',
           indent && 'text-[13px]'
         )}
       >
@@ -52,15 +52,15 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(role))
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
       {/* Logo */}
-      <div className="flex items-center gap-2 px-4 py-5 border-b">
+      <div className="flex items-center gap-2 px-4 py-5 border-b dark:border-gray-800">
         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
           <FileStack className="h-4 w-4 text-white" />
         </div>
         <div>
-          <p className="text-sm font-bold text-gray-900">Invoice Intelligence</p>
-          <p className="text-xs text-gray-500">AI-Powered AP System</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white">Invoice Intelligence</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">AI-Powered AP System</p>
         </div>
         {onClose && (
           <Button variant="ghost" size="icon" className="ml-auto" onClick={onClose}>
@@ -84,14 +84,14 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       </nav>
 
       {/* Role badge */}
-      <div className="px-4 py-3 border-t">
+      <div className="px-4 py-3 border-t dark:border-gray-800">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700">
+          <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-xs font-bold text-blue-700 dark:text-blue-300">
             {session?.user?.name?.charAt(0) ?? '?'}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-900 truncate" title={session?.user?.name}>{session?.user?.name}</p>
-            <p className="text-xs text-gray-500">{role}</p>
+            <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={session?.user?.name}>{session?.user?.name}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{role}</p>
           </div>
         </div>
       </div>
@@ -101,7 +101,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
 
 export function Sidebar() {
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:fixed lg:inset-y-0 border-r bg-white z-30">
+    <aside className="hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:fixed lg:inset-y-0 border-r dark:border-gray-800 bg-white dark:bg-gray-900 z-30">
       <SidebarContent />
     </aside>
   )

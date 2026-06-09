@@ -12,7 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <SessionProvider session={session}>
-      <div className="flex h-screen bg-gray-50">
+      <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
         <Sidebar />
         <div className="flex flex-col flex-1 lg:pl-56 xl:pl-64 min-w-0">
           <TopBar />
