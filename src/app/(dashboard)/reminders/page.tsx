@@ -77,8 +77,8 @@ function ReminderCard({
 
   return (
     <div
-      className={`flex gap-4 items-start rounded-xl border px-5 py-4 transition-all ${
-        notif.isRead ? 'bg-white opacity-70' : 'bg-white shadow-sm'
+      className={`flex gap-4 items-start rounded-xl border dark:border-gray-700 px-5 py-4 transition-all ${
+        notif.isRead ? 'bg-white dark:bg-gray-800 opacity-70' : 'bg-white dark:bg-gray-800 shadow-sm'
       }`}
     >
       {/* Type icon */}
@@ -94,15 +94,15 @@ function ReminderCard({
           <div className="min-w-0">
             <p
               className={`text-sm leading-snug ${
-                notif.isRead ? 'text-gray-500' : 'text-gray-900 font-semibold'
+                notif.isRead ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100 font-semibold'
               }`}
             >
               {notif.title}
             </p>
-            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{notif.body}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{notif.body}</p>
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className="text-[11px] text-gray-400 whitespace-nowrap">
+            <span className="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
               {timeAgo(notif.createdAt)}
             </span>
             {!notif.isRead && (
@@ -197,8 +197,8 @@ export default function RemindersPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Notifikasi &amp; Pengingat</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Notifikasi &amp; Pengingat</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
             Pantau jatuh tempo invoice dan status persetujuan
           </p>
         </div>
@@ -217,7 +217,7 @@ export default function RemindersPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 flex-wrap">
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-700 rounded-xl p-1 flex-wrap">
         {TABS.map((tab) => {
           const count =
             tab.id === 'all'
@@ -232,8 +232,8 @@ export default function RemindersPage() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex-1 min-w-fit px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 activeTab === tab.id
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
               {tab.label}
@@ -242,7 +242,7 @@ export default function RemindersPage() {
                   className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
                     activeTab === tab.id
                       ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-200 text-gray-500'
+                      : 'bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-400'
                   }`}
                 >
                   {count}
@@ -295,7 +295,7 @@ export default function RemindersPage() {
 
       {/* Summary footer */}
       {!loading && notifications.length > 0 && (
-        <p className="text-xs text-gray-400 text-center pb-4">
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center pb-4">
           {notifications.length} total notifikasi · {unreadCount} belum dibaca
         </p>
       )}

@@ -27,12 +27,12 @@ function TypingIndicator() {
       <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
         <Bot className="h-4 w-4 text-white" />
       </div>
-      <div className="bg-white border rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
+      <div className="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
         <div className="flex gap-1 items-center h-4">
           {[0, 1, 2].map((i) => (
             <motion.div
               key={i}
-              className="h-2 w-2 rounded-full bg-gray-400"
+              className="h-2 w-2 rounded-full bg-gray-400 dark:bg-gray-500"
               animate={reduced ? {} : { y: [0, -6, 0] }}
               transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
             />
@@ -69,7 +69,7 @@ function ChatBubble({ msg }: { msg: Message }) {
         className={`max-w-[75%] px-4 py-3 text-sm leading-relaxed shadow-sm ${
           isUser
             ? 'bg-blue-600 text-white rounded-2xl rounded-br-none'
-            : 'bg-white border text-gray-800 rounded-2xl rounded-bl-none'
+            : 'bg-white dark:bg-gray-800 border dark:border-gray-700 text-gray-800 dark:text-gray-200 rounded-2xl rounded-bl-none'
         }`}
       >
         {msg.content.split('\n').map((line, i, arr) => (
@@ -157,8 +157,8 @@ export default function ChatPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">Invoice Assistant</h1>
-            <p className="text-xs text-gray-500">Powered by AI · Tanya apa saja tentang invoice</p>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Invoice Assistant</h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Powered by AI · Tanya apa saja tentang invoice</p>
           </div>
         </div>
         {!isEmpty && (
@@ -181,8 +181,8 @@ export default function ChatPage() {
               <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mx-auto">
                 <Bot className="h-8 w-8 text-blue-600" />
               </div>
-              <p className="text-gray-700 font-semibold">Tanya saya tentang invoice Anda</p>
-              <p className="text-sm text-gray-400 max-w-xs">
+              <p className="text-gray-700 dark:text-gray-300 font-semibold">Tanya saya tentang invoice Anda</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">
                 Saya dapat membantu menganalisis invoice, vendor, pembayaran, dan status persetujuan.
               </p>
             </div>
@@ -192,7 +192,7 @@ export default function ChatPage() {
                 <button
                   key={prompt}
                   onClick={() => send(prompt)}
-                  className="text-left text-sm px-3 py-2.5 bg-white border rounded-xl hover:border-blue-400 hover:bg-blue-50 text-gray-600 hover:text-blue-700 transition-all shadow-sm"
+                  className="text-left text-sm px-3 py-2.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-blue-700 dark:hover:text-blue-400 transition-all shadow-sm"
                 >
                   {prompt}
                 </button>
@@ -213,8 +213,8 @@ export default function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0 border-t pt-4">
-        <div className="flex gap-2 items-end bg-white border rounded-2xl px-4 py-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-400 focus-within:border-transparent">
+      <div className="flex-shrink-0 border-t dark:border-gray-700 pt-4">
+        <div className="flex gap-2 items-end bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-2xl px-4 py-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-400 focus-within:border-transparent">
           <textarea
             ref={inputRef}
             value={input}
@@ -222,7 +222,7 @@ export default function ChatPage() {
             onKeyDown={handleKeyDown}
             placeholder="Ketik pertanyaan... (Enter kirim, Shift+Enter baris baru)"
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 focus:outline-none max-h-32"
+            className="flex-1 resize-none bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none max-h-32"
             style={{ lineHeight: '1.5rem' }}
             disabled={loading}
           />
@@ -235,7 +235,7 @@ export default function ChatPage() {
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-xs text-gray-400 text-center mt-2">
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center mt-2">
           AI dapat membuat kesalahan. Verifikasi informasi penting.
         </p>
       </div>

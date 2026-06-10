@@ -108,7 +108,7 @@ function ApprovalCard({
 
   return (
     <div
-      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md ${
+      className={`bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm overflow-hidden transition-shadow hover:shadow-md ${
         overdue ? 'border-l-4 border-l-red-400' : ''
       }`}
     >
@@ -116,7 +116,7 @@ function ApprovalCard({
       <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono font-bold text-gray-900 text-sm">
+            <span className="font-mono font-bold text-gray-900 dark:text-gray-100 text-sm">
               {invoice.invoiceNumber}
             </span>
             <StatusBadge status={invoice.status} />
@@ -127,7 +127,7 @@ function ApprovalCard({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1 mt-1 text-gray-500 text-sm">
+          <div className="flex items-center gap-1 mt-1 text-gray-500 dark:text-gray-400 text-sm">
             <Building2 className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">{invoice.vendor.name}</span>
           </div>
@@ -148,22 +148,22 @@ function ApprovalCard({
       {/* Card Details */}
       <div className="grid grid-cols-3 gap-3 px-5 py-3 text-sm">
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1 mb-0.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 mb-0.5">
             <DollarSign className="h-3 w-3" /> Total
           </p>
-          <p className="font-semibold text-blue-700">{formatIDR(invoice.totalAmount)}</p>
+          <p className="font-semibold text-blue-700 dark:text-blue-400">{formatIDR(invoice.totalAmount)}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1 mb-0.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 mb-0.5">
             <Calendar className="h-3 w-3" /> Tgl Invoice
           </p>
-          <p className="text-gray-700">{formatDate(invoice.invoiceDate)}</p>
+          <p className="text-gray-700 dark:text-gray-300">{formatDate(invoice.invoiceDate)}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1 mb-0.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 mb-0.5">
             <Clock className="h-3 w-3" /> Jatuh Tempo
           </p>
-          <p className={overdue ? 'text-red-600 font-semibold' : 'text-gray-700'}>
+          <p className={overdue ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-700 dark:text-gray-300'}>
             {formatDate(invoice.dueDate)}
           </p>
         </div>
@@ -172,17 +172,17 @@ function ApprovalCard({
       {/* Line Items Preview */}
       {invoice.items.length > 0 && (
         <div className="px-5 pb-3">
-          <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3 space-y-1">
             {invoice.items.slice(0, 3).map((item) => (
-              <div key={item.id} className="flex justify-between text-xs text-gray-500">
+              <div key={item.id} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
                 <span className="truncate mr-2">{item.description}</span>
-                <span className="flex-shrink-0 font-medium text-gray-700">
+                <span className="flex-shrink-0 font-medium text-gray-700 dark:text-gray-300">
                   {formatIDR(item.total)}
                 </span>
               </div>
             ))}
             {invoice.items.length > 3 && (
-              <p className="text-xs text-gray-400 italic">
+              <p className="text-xs text-gray-400 dark:text-gray-500 italic">
                 +{invoice.items.length - 3} item lainnya
               </p>
             )}
@@ -221,7 +221,7 @@ function ApprovalCard({
             className="space-y-2"
           >
             <textarea
-              className="w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+              className="w-full border dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
               placeholder="Alasan penolakan (wajib)..."
               rows={3}
               value={comment}
@@ -264,9 +264,9 @@ function EmptyState({ role }: { role: string }) {
       : 'Tidak ada invoice yang memerlukan tindakan Anda.'
 
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-      <CheckCircle className="h-12 w-12 mb-3 text-green-300" />
-      <p className="text-base font-medium text-gray-500">Semua selesai!</p>
+    <div className="flex flex-col items-center justify-center py-20 text-gray-400 dark:text-gray-500">
+      <CheckCircle className="h-12 w-12 mb-3 text-green-300 dark:text-green-600" />
+      <p className="text-base font-medium text-gray-500 dark:text-gray-400">Semua selesai!</p>
       <p className="text-sm mt-1">{message}</p>
     </div>
   )
@@ -307,8 +307,8 @@ export default function ApprovalsPage() {
       {/* Page header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Persetujuan Invoice</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{roleLabel}</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Persetujuan Invoice</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{roleLabel}</p>
         </div>
         {!loading && (
           <span className="text-sm bg-blue-50 text-blue-700 font-semibold px-3 py-1 rounded-full border border-blue-200">

@@ -6,4 +6,4 @@ When working in this repo:
 - Prefer small incremental commits
 - Use existing utils instead of creating new ones
 - Explain changes briefly in commit messages
-- Update the "memory.md" after finishing commit/ task
+- Update the "memory.md" after finishing commit/ task 
