@@ -107,18 +107,18 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 h-full w-full sm:w-[480px] xl:w-[540px] bg-white shadow-2xl z-50 flex flex-col"
+            className="fixed right-0 top-0 h-full w-full sm:w-[480px] xl:w-[540px] bg-white dark:bg-gray-900 shadow-2xl z-50 flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b dark:border-gray-800 flex-shrink-0">
               <div>
-                <p className="text-sm text-gray-500">Detail Invoice</p>
-                <h2 className="text-base font-bold text-gray-900 font-mono">{invoice.invoiceNumber}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Detail Invoice</p>
+                <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 font-mono">{invoice.invoiceNumber}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge status={invoice.status} />
-                <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                  <X className="h-4 w-4 text-gray-500" />
+                <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                  <X className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                 </button>
               </div>
             </div>
@@ -127,11 +127,11 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
               {/* Vendor */}
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                   <Building2 className="h-3 w-3" /> Vendor
                 </p>
-                <p className="text-sm font-semibold text-gray-900">{invoice.vendor?.name}</p>
-                {invoice.vendor?.npwp && <p className="text-xs text-gray-500">NPWP: {invoice.vendor.npwp}</p>}
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{invoice.vendor?.name}</p>
+                {invoice.vendor?.npwp && <p className="text-xs text-gray-500 dark:text-gray-400">NPWP: {invoice.vendor.npwp}</p>}
               </div>
 
               <Separator />
