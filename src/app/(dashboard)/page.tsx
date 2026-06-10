@@ -25,7 +25,7 @@ async function DashboardContent() {
   const data = await getDashboardData()
 
   if (!data) {
-    return <p className="text-gray-500">Gagal memuat data dashboard.</p>
+    return <p className="text-gray-500 dark:text-gray-400">Gagal memuat data dashboard.</p>
   }
 
   return (
@@ -40,30 +40,30 @@ async function DashboardContent() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border p-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Status Invoice</h3>
+        <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Status Invoice</h3>
           <StatusDonut data={data.statusBreakdown} />
         </div>
-        <div className="bg-white rounded-xl border p-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Analisa Aging (Rp)</h3>
+        <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Analisa Aging (Rp)</h3>
           <AgingBar data={data.agingBuckets} />
         </div>
       </div>
 
       {/* Recent Invoices */}
-      <div className="bg-white rounded-xl border">
-        <div className="px-4 sm:px-5 py-4 border-b">
-          <h3 className="text-sm font-semibold text-gray-700">Invoice Terbaru</h3>
+      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+        <div className="px-4 sm:px-5 py-4 border-b dark:border-gray-700">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Invoice Terbaru</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b bg-gray-50">
-                <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium">No. Invoice</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium">Vendor</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium hidden sm:table-cell">Jatuh Tempo</th>
-                <th className="text-right px-4 py-3 text-xs text-gray-500 font-medium">Total</th>
-                <th className="text-center px-4 py-3 text-xs text-gray-500 font-medium">Status</th>
+              <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">No. Invoice</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Vendor</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell">Jatuh Tempo</th>
+                <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Total</th>
+                <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -75,13 +75,13 @@ async function DashboardContent() {
                 totalAmount: string
                 status: string
               }) => (
-                <tr key={inv.id} className="border-b last:border-0 hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{inv.invoiceNumber}</td>
-                  <td className="px-4 py-3 text-gray-700">{inv.vendor?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">
+                <tr key={inv.id} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-gray-300">{inv.invoiceNumber}</td>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{inv.vendor?.name ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">
                     {inv.dueDate ? formatDate(inv.dueDate) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-700">
+                  <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300">
                     {formatIDR(Number(inv.totalAmount))}
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -101,8 +101,8 @@ export default function DashboardPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Ringkasan sistem invoice AP</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Ringkasan sistem invoice AP</p>
       </div>
       <Suspense fallback={<DashboardSkeleton />}>
         <DashboardContent />
