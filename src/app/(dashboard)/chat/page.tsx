@@ -12,12 +12,12 @@ interface Message {
 }
 
 const SUGGESTED_PROMPTS = [
-  'Invoice mana yang sudah jatuh tempo?',
-  'Berapa total tagihan yang belum dibayar?',
-  'Vendor mana yang memiliki invoice terbanyak?',
-  'Invoice mana yang sedang menunggu persetujuan?',
-  'Berapa total PPN dari semua invoice bulan ini?',
-  'Jelaskan alur persetujuan invoice di sistem ini',
+  'Which invoices are past due?',
+  'What is the total outstanding balance?',
+  'Which vendor has the most invoices?',
+  'Which invoices are pending approval?',
+  'What is the total VAT for all invoices this month?',
+  'Explain the invoice approval workflow in this system',
 ]
 
 function TypingIndicator() {
@@ -116,7 +116,7 @@ export default function ChatPage() {
         }),
       })
       const data = await res.json()
-      const answer = data.answer ?? 'Maaf, tidak ada respons dari AI.'
+      const answer = data.answer ?? 'Sorry, no response from AI.'
       setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content: answer }])
     } catch {
       setMessages((prev) => [
@@ -124,7 +124,7 @@ export default function ChatPage() {
         {
           id: nextId(),
           role: 'assistant',
-          content: 'Koneksi ke layanan AI gagal. Pastikan AI service berjalan.',
+          content: 'Failed to connect to AI service. Make sure the AI service is running.',
         },
       ])
     } finally {
@@ -158,7 +158,7 @@ export default function ChatPage() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Invoice Assistant</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Powered by AI · Tanya apa saja tentang invoice</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Powered by AI · Ask anything about your invoices</p>
           </div>
         </div>
         {!isEmpty && (
@@ -181,9 +181,9 @@ export default function ChatPage() {
               <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mx-auto">
                 <Bot className="h-8 w-8 text-blue-600" />
               </div>
-              <p className="text-gray-700 dark:text-gray-300 font-semibold">Tanya saya tentang invoice Anda</p>
+              <p className="text-gray-700 dark:text-gray-300 font-semibold">Ask me about your invoices</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">
-                Saya dapat membantu menganalisis invoice, vendor, pembayaran, dan status persetujuan.
+                I can help analyze invoices, vendors, payments, and approval status.
               </p>
             </div>
 
@@ -220,7 +220,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ketik pertanyaan... (Enter kirim, Shift+Enter baris baru)"
+            placeholder="Type a question... (Enter to send, Shift+Enter for new line)"
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none max-h-32"
             style={{ lineHeight: '1.5rem' }}
@@ -236,7 +236,7 @@ export default function ChatPage() {
           </Button>
         </div>
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center mt-2">
-          AI dapat membuat kesalahan. Verifikasi informasi penting.
+          AI can make mistakes. Verify important information.
         </p>
       </div>
     </div>

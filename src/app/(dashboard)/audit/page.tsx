@@ -38,42 +38,42 @@ const ACTION_META: Record<string, { icon: React.ReactNode; color: string; label:
   'invoice.created': {
     icon: <Upload className="h-3.5 w-3.5" />,
     color: 'bg-blue-100 text-blue-600',
-    label: 'Invoice Dibuat',
+    label: 'Invoice Created',
   },
   'invoice.uploaded': {
     icon: <Upload className="h-3.5 w-3.5" />,
     color: 'bg-blue-100 text-blue-600',
-    label: 'File Diupload',
+    label: 'File Uploaded',
   },
   'invoice.approved_step_1': {
     icon: <CheckCircle className="h-3.5 w-3.5" />,
     color: 'bg-green-100 text-green-600',
-    label: 'Disetujui Finance',
+    label: 'Approved by Finance',
   },
   'invoice.approved_step_2': {
     icon: <CheckCircle className="h-3.5 w-3.5" />,
     color: 'bg-emerald-100 text-emerald-600',
-    label: 'Disetujui Manager',
+    label: 'Approved by Manager',
   },
   'invoice.rejected': {
     icon: <XCircle className="h-3.5 w-3.5" />,
     color: 'bg-red-100 text-red-600',
-    label: 'Ditolak',
+    label: 'Rejected',
   },
   'invoice.updated': {
     icon: <Edit className="h-3.5 w-3.5" />,
     color: 'bg-yellow-100 text-yellow-600',
-    label: 'Diperbarui',
+    label: 'Updated',
   },
   'invoice.deleted': {
     icon: <Trash2 className="h-3.5 w-3.5" />,
     color: 'bg-red-100 text-red-500',
-    label: 'Dihapus',
+    label: 'Deleted',
   },
   'invoice.viewed': {
     icon: <Eye className="h-3.5 w-3.5" />,
     color: 'bg-gray-100 text-gray-500',
-    label: 'Dilihat',
+    label: 'Viewed',
   },
 }
 
@@ -130,7 +130,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Audit Log</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Semua aktivitas tercatat · {total} entri
+            All activity recorded · {total} entries
           </p>
         </div>
         <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium px-3 py-1.5 rounded-full">
@@ -149,7 +149,7 @@ export default function AuditPage() {
       ) : logs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
           <Activity className="h-10 w-10 mb-2 text-gray-200" />
-          <p className="text-sm">Belum ada aktivitas tercatat</p>
+          <p className="text-sm">No activity recorded yet</p>
         </div>
       ) : (
         <motion.div
@@ -211,7 +211,7 @@ export default function AuditPage() {
       {pages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Hal. {page} dari {pages}
+            Page {page} of {pages}
           </p>
           <div className="flex gap-2">
             <Button
@@ -222,7 +222,7 @@ export default function AuditPage() {
               className="gap-1"
             >
               <ChevronLeft className="h-4 w-4" />
-              Sebelumnya
+              Previous
             </Button>
             <Button
               variant="outline"
@@ -231,7 +231,7 @@ export default function AuditPage() {
               disabled={page >= pages}
               className="gap-1"
             >
-              Berikutnya
+              Next
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>

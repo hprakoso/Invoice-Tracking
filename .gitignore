@@ -45,9 +45,15 @@ next-env.d.ts
 .env.local
 uploads/invoices/*
 !uploads/invoices/.gitkeep
+.mailmap
 
 # Python
 __pycache__/
 *.py[cod]
 ai-service/venv/
 ai-service/.env
+
+# Claude
+AGENTS.md
+CLAUDE.md
+memory.md

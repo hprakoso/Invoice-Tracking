@@ -63,7 +63,7 @@ import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
 function ConfidenceBar({ value }: { value: number }) {
   const color = value >= 80 ? 'bg-green-500' : value >= 50 ? 'bg-yellow-500' : 'bg-red-500'
-  const label = value >= 80 ? 'Tinggi' : value >= 50 ? 'Sedang' : 'Rendah'
+  const label = value >= 80 ? 'High' : value >= 50 ? 'Medium' : 'Low'
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 bg-gray-200 rounded-full h-2">
@@ -111,7 +111,7 @@ function ApprovalTimeline({ approvals }: { approvals: Approval[] }) {
                 </div>
               )}
               {(!approval || status === 'PENDING') && (
-                <p className="text-xs text-gray-400 mt-0.5">Menunggu tindakan...</p>
+                <p className="text-xs text-gray-400 mt-0.5">Awaiting action...</p>
               )}
             </div>
           </div>
@@ -129,7 +129,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
     return (
       <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border-2 border-dashed text-gray-400">
         <FileText className="h-10 w-10 mb-2" />
-        <p className="text-sm">Dokumen belum diupload</p>
+        <p className="text-sm">No document uploaded</p>
       </div>
     )
   }
@@ -152,7 +152,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
           file={fileUrl}
           onLoadSuccess={({ numPages: n }: { numPages: number }) => setNumPages(n)}
           loading={<div className="flex items-center justify-center h-64"><Skeleton className="w-full h-64" /></div>}
-          error={<div className="flex items-center justify-center h-64 text-gray-400 text-sm">Gagal memuat PDF</div>}
+          error={<div className="flex items-center justify-center h-64 text-gray-400 text-sm">Failed to load PDF</div>}
         >
           <PDFPage
             pageNumber={pageNumber}
@@ -167,7 +167,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
           <Button variant="outline" size="icon" onClick={() => setPageNumber(p => Math.max(1, p - 1))} disabled={pageNumber <= 1}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm text-gray-500">Hal. {pageNumber} / {numPages}</span>
+          <span className="text-sm text-gray-500">Page {pageNumber} / {numPages}</span>
           <Button variant="outline" size="icon" onClick={() => setPageNumber(p => Math.min(numPages, p + 1))} disabled={pageNumber >= numPages}>
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -215,19 +215,19 @@ export default function InvoiceDetailPage() {
     const res = await fetch(`/api/approvals/${id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: 'Disetujui.' }),
+      body: JSON.stringify({ comment: 'Approved.' }),
     })
     setActing(false)
     if (res.ok) {
-      toast.success('Invoice disetujui')
+      toast.success('Invoice approved')
       fetchInvoice()
     } else {
-      toast.error('Gagal menyetujui invoice')
+      toast.error('Failed to approve invoice')
     }
   }
 
   const handleReject = async () => {
-    if (!rejectComment.trim()) { toast.error('Masukkan alasan penolakan'); return }
+    if (!rejectComment.trim()) { toast.error('Please enter a rejection reason'); return }
     setActing(true)
     const res = await fetch(`/api/approvals/${id}/reject`, {
       method: 'POST',
@@ -236,16 +236,14 @@ export default function InvoiceDetailPage() {
     })
     setActing(false)
     if (res.ok) {
-      toast.success('Invoice ditolak')
+      toast.success('Invoice rejected')
       setShowReject(false)
       setRejectComment('')
       fetchInvoice()
     } else {
-      toast.error('Gagal menolak invoice')
+      toast.error('Failed to reject invoice')
     }
   }
-
-  // router removed — was only suppressing an unused-variable lint warning with `void router`
 
   const role = (session?.user as { role?: string } | undefined)?.role
   const canAct = invoice?.status === 'PENDING_APPROVAL' &&
@@ -268,15 +266,15 @@ export default function InvoiceDetailPage() {
   if (!invoice) {
     const errorMsg =
       fetchError === 'auth'
-        ? 'Sesi Anda telah berakhir. Silakan login kembali.'
+        ? 'Your session has expired. Please log in again.'
         : fetchError === 'network'
-        ? 'Gagal terhubung ke server. Periksa koneksi Anda.'
-        : 'Invoice tidak ditemukan.'
+        ? 'Failed to connect to server. Check your connection.'
+        : 'Invoice not found.'
     return (
       <div className="flex flex-col items-center justify-center h-64 text-gray-500">
         <AlertTriangle className="h-8 w-8 mb-2 text-yellow-500" />
         <p>{errorMsg}</p>
-        <Link href="/invoices"><Button variant="outline" className="mt-4">Kembali</Button></Link>
+        <Link href="/invoices"><Button variant="outline" className="mt-4">Back</Button></Link>
       </div>
     )
   }
@@ -309,7 +307,7 @@ export default function InvoiceDetailPage() {
           {/* OCR Confidence */}
           {invoice.ocrConfidence != null && (
             <div className="bg-white rounded-xl border p-4 space-y-2">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Akurasi OCR</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">OCR Accuracy</p>
               <ConfidenceBar value={invoice.ocrConfidence} />
             </div>
           )}
@@ -326,14 +324,14 @@ export default function InvoiceDetailPage() {
             <Separator />
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Tgl Invoice</p>
+                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Invoice Date</p>
                 <p className="text-sm font-medium text-gray-700 mt-0.5">{formatDate(invoice.invoiceDate)}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Jatuh Tempo</p>
+                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Due Date</p>
                 <p className={`text-sm font-medium mt-0.5 ${overdue ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
                   {formatDate(invoice.dueDate)}
-                  {overdue && <span className="block text-xs text-red-500">Terlambat</span>}
+                  {overdue && <span className="block text-xs text-red-500">Overdue</span>}
                 </p>
               </div>
             </div>
@@ -341,7 +339,7 @@ export default function InvoiceDetailPage() {
 
           {/* Financial Summary */}
           <div className="bg-white rounded-xl border p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Ringkasan Keuangan</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Financial Summary</p>
             <div className="space-y-2">
               {invoice.subtotal && (
                 <div className="flex justify-between text-sm">
@@ -351,7 +349,7 @@ export default function InvoiceDetailPage() {
               )}
               {invoice.taxAmount && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">PPN</span>
+                  <span className="text-gray-500">VAT</span>
                   <span className="text-gray-700">{formatIDR(invoice.taxAmount)}</span>
                 </div>
               )}
@@ -367,15 +365,15 @@ export default function InvoiceDetailPage() {
           {invoice.items.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <div className="px-4 py-3 border-b bg-gray-50">
-                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Item Invoice</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Invoice Items</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left px-4 py-2 text-xs text-gray-500">Deskripsi</th>
+                      <th className="text-left px-4 py-2 text-xs text-gray-500">Description</th>
                       <th className="text-right px-4 py-2 text-xs text-gray-500">Qty</th>
-                      <th className="text-right px-4 py-2 text-xs text-gray-500 hidden sm:table-cell">Harga</th>
+                      <th className="text-right px-4 py-2 text-xs text-gray-500 hidden sm:table-cell">Price</th>
                       <th className="text-right px-4 py-2 text-xs text-gray-500">Total</th>
                     </tr>
                   </thead>
@@ -396,40 +394,40 @@ export default function InvoiceDetailPage() {
 
           {/* Approval Timeline */}
           <div className="bg-white rounded-xl border p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-4">Alur Persetujuan</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-4">Approval Workflow</p>
             <ApprovalTimeline approvals={invoice.approvals} />
           </div>
 
           {/* Action Buttons */}
           {canAct && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Tindakan</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Actions</p>
               {!showReject ? (
                 <div className="flex gap-2">
                   <Button onClick={handleApprove} disabled={acting} className="flex-1 bg-green-600 hover:bg-green-700">
                     <CheckCircle className="h-4 w-4 mr-2" />
-                    {role === 'FINANCE' ? 'Teruskan ke Manager' : 'Setujui'}
+                    {role === 'FINANCE' ? 'Forward to Manager' : 'Approve'}
                   </Button>
                   <Button variant="destructive" onClick={() => setShowReject(true)} disabled={acting} className="flex-1">
                     <XCircle className="h-4 w-4 mr-2" />
-                    Tolak
+                    Reject
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <textarea
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
-                    placeholder="Alasan penolakan (wajib diisi)..."
+                    placeholder="Rejection reason (required)..."
                     rows={3}
                     value={rejectComment}
                     onChange={e => setRejectComment(e.target.value)}
                   />
                   <div className="flex gap-2">
                     <Button variant="destructive" onClick={handleReject} disabled={acting || !rejectComment.trim()} className="flex-1">
-                      Konfirmasi Penolakan
+                      Confirm Rejection
                     </Button>
                     <Button variant="outline" onClick={() => { setShowReject(false); setRejectComment('') }} className="flex-1">
-                      Batal
+                      Cancel
                     </Button>
                   </div>
                 </div>
@@ -440,7 +438,7 @@ export default function InvoiceDetailPage() {
           {/* Notes */}
           {invoice.notes && (
             <div className="bg-white rounded-xl border p-4">
-              <p className="text-xs text-gray-400 mb-1">Catatan</p>
+              <p className="text-xs text-gray-400 mb-1">Notes</p>
               <p className="text-sm text-gray-600">{invoice.notes}</p>
             </div>
           )}

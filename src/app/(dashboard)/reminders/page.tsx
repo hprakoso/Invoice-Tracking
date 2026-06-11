@@ -35,17 +35,17 @@ const TYPE_META: Record<string, { icon: React.ReactNode; color: string; label: s
   due_soon: {
     icon: <Clock className="h-4 w-4" />,
     color: 'bg-yellow-100 text-yellow-600',
-    label: 'Segera Jatuh Tempo',
+    label: 'Due Soon',
   },
   overdue: {
     icon: <AlertTriangle className="h-4 w-4" />,
     color: 'bg-red-100 text-red-600',
-    label: 'Terlambat',
+    label: 'Overdue',
   },
   approval_required: {
     icon: <FileText className="h-4 w-4" />,
     color: 'bg-blue-100 text-blue-600',
-    label: 'Perlu Persetujuan',
+    label: 'Approval Required',
   },
 }
 
@@ -54,7 +54,7 @@ function getTypeMeta(type: string) {
     TYPE_META[type] ?? {
       icon: <Bell className="h-4 w-4" />,
       color: 'bg-gray-100 text-gray-600',
-      label: 'Notifikasi',
+      label: 'Notification',
     }
   )
 }
@@ -81,14 +81,12 @@ function ReminderCard({
         notif.isRead ? 'bg-white dark:bg-gray-800 opacity-70' : 'bg-white dark:bg-gray-800 shadow-sm'
       }`}
     >
-      {/* Type icon */}
       <div
         className={`flex-shrink-0 h-9 w-9 rounded-full flex items-center justify-center ${meta.color}`}
       >
         {meta.icon}
       </div>
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -111,7 +109,6 @@ function ReminderCard({
           </div>
         </div>
 
-        {/* Footer */}
         <div className="flex items-center gap-3 mt-2 flex-wrap">
           <span
             className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${meta.color}`}
@@ -133,7 +130,7 @@ function ReminderCard({
               className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1 transition-colors"
             >
               <CheckCircle className="h-3.5 w-3.5" />
-              Tandai dibaca
+              Mark as read
             </button>
           )}
         </div>
@@ -143,10 +140,10 @@ function ReminderCard({
 }
 
 const TABS: { id: FilterTab; label: string }[] = [
-  { id: 'all', label: 'Semua' },
-  { id: 'unread', label: 'Belum Dibaca' },
-  { id: 'due_soon', label: 'Segera Jatuh Tempo' },
-  { id: 'overdue', label: 'Terlambat' },
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'due_soon', label: 'Due Soon' },
+  { id: 'overdue', label: 'Overdue' },
 ]
 
 export default function RemindersPage() {
@@ -179,7 +176,7 @@ export default function RemindersPage() {
     const res = await fetch('/api/notifications', { method: 'PATCH' })
     if (res.ok) {
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
-      toast.success('Semua notifikasi ditandai dibaca')
+      toast.success('All notifications marked as read')
     }
   }
 
@@ -197,9 +194,9 @@ export default function RemindersPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Notifikasi &amp; Pengingat</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Notifications &amp; Reminders</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Pantau jatuh tempo invoice dan status persetujuan
+            Track invoice due dates and approval status
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -210,7 +207,7 @@ export default function RemindersPage() {
           {unreadCount > 0 && (
             <Button size="sm" onClick={markAllRead} className="gap-1.5">
               <CheckCheck className="h-3.5 w-3.5" />
-              Tandai Semua Dibaca
+              Mark All as Read
             </Button>
           )}
         </div>
@@ -265,13 +262,13 @@ export default function RemindersPage() {
           <Bell className="h-12 w-12 mb-3 text-gray-200" />
           <p className="text-base font-medium text-gray-500">
             {activeTab === 'unread'
-              ? 'Tidak ada notifikasi yang belum dibaca'
-              : 'Tidak ada notifikasi'}
+              ? 'No unread notifications'
+              : 'No notifications'}
           </p>
           <p className="text-sm mt-1">
             {activeTab === 'unread'
-              ? 'Semua sudah dibaca. Kerja bagus!'
-              : 'Notifikasi akan muncul di sini'}
+              ? 'All caught up. Great work!'
+              : 'Notifications will appear here'}
           </p>
         </div>
       ) : (
@@ -296,7 +293,7 @@ export default function RemindersPage() {
       {/* Summary footer */}
       {!loading && notifications.length > 0 && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center pb-4">
-          {notifications.length} total notifikasi · {unreadCount} belum dibaca
+          {notifications.length} total notifications · {unreadCount} unread
         </p>
       )}
     </div>

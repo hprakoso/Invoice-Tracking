@@ -36,13 +36,13 @@ interface Invoice {
 interface Vendor { id: string; name: string }
 
 const STATUSES = [
-  { value: '', label: 'Semua Status' },
+  { value: '', label: 'All Statuses' },
   { value: 'PENDING_OCR', label: 'OCR' },
   { value: 'PENDING_REVIEW', label: 'Review' },
   { value: 'PENDING_APPROVAL', label: 'Approval' },
-  { value: 'APPROVED', label: 'Disetujui' },
-  { value: 'REJECTED', label: 'Ditolak' },
-  { value: 'PAID', label: 'Dibayar' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'PAID', label: 'Paid' },
 ]
 
 import { formatIDR, formatDate, isOverdue } from '@/lib/format'
@@ -85,8 +85,8 @@ export default function InvoicesPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Invoice</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{invoices.length} invoice ditemukan</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Invoices</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{invoices.length} invoices found</p>
         </div>
         {canUpload && (
           <Link href="/invoices/upload">
@@ -104,7 +104,7 @@ export default function InvoicesPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Cari nomor invoice..."
+              placeholder="Search invoice number..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-9"
@@ -122,7 +122,7 @@ export default function InvoicesPage() {
             onChange={e => setVendorId(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">Semua Vendor</option>
+            <option value="">All Vendors</option>
             {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
         </div>
@@ -134,10 +134,10 @@ export default function InvoicesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">No. Invoice</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">Invoice No.</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Vendor</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden md:table-cell whitespace-nowrap">Tgl Invoice</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell whitespace-nowrap">Jatuh Tempo</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden md:table-cell whitespace-nowrap">Invoice Date</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell whitespace-nowrap">Due Date</th>
                 <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">Total</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Status</th>
                 <th className="w-8 px-2"></th>
@@ -155,7 +155,7 @@ export default function InvoicesPage() {
               ) : invoices.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
-                    Tidak ada invoice ditemukan.
+                    No invoices found.
                   </td>
                 </tr>
               ) : (
@@ -175,7 +175,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell whitespace-nowrap">{formatDate(inv.invoiceDate)}</td>
                     <td className={`px-4 py-3 hidden sm:table-cell font-medium ${isOverdue(inv.dueDate, inv.status) ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
                       <div className="whitespace-nowrap">{formatDate(inv.dueDate)}</div>
-                      {isOverdue(inv.dueDate, inv.status) && <div className="text-xs text-red-500 dark:text-red-400 font-semibold mt-0.5">(Terlambat)</div>}
+                      {isOverdue(inv.dueDate, inv.status) && <div className="text-xs text-red-500 dark:text-red-400 font-semibold mt-0.5">(Overdue)</div>}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatIDR(inv.totalAmount)}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>

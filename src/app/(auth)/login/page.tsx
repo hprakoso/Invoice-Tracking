@@ -29,7 +29,7 @@ export default function LoginPage() {
     })
     setLoading(false)
     if (result?.error) {
-      setError('Email atau password salah.')
+      setError('Invalid email or password.')
     } else {
       router.push('/')
       router.refresh()
@@ -46,7 +46,7 @@ export default function LoginPage() {
     })
     setLoading(false)
     if (result?.error) {
-      setError('Login gagal.')
+      setError('Login failed.')
     } else {
       router.push('/')
       router.refresh()
@@ -89,7 +89,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? 'Masuk...' : 'Masuk'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
 
@@ -98,7 +98,7 @@ export default function LoginPage() {
               <div className="w-full border-t border-gray-200" />
             </div>
             <div className="relative flex justify-center text-xs text-gray-400">
-              <span className="bg-white px-2">Akun Demo</span>
+              <span className="bg-white px-2">Demo Accounts</span>
             </div>
           </div>
 

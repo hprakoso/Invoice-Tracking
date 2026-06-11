@@ -53,10 +53,10 @@ function ExtractedFieldCard({ field }: { field: ExtractedField }) {
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="bg-white border rounded-lg p-3"
+      className="bg-white dark:bg-gray-700 border dark:border-gray-600 rounded-lg p-3"
     >
-      <p className="text-xs text-gray-400 uppercase tracking-wide">{field.label}</p>
-      <p className="text-sm font-semibold text-gray-900 mt-0.5">{field.value ?? '—'}</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide">{field.label}</p>
+      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{field.value ?? '—'}</p>
       <ConfidenceBar confidence={field.confidence} />
     </motion.div>
   )
@@ -94,21 +94,21 @@ export default function UploadPage() {
 
   async function runOCR(uploadFile: File) {
     setStage('uploading')
-    setStatusMsg('Mengambil data vendor...')
+    setStatusMsg('Fetching vendor data...')
     setFields([])
     setLineItems([])
 
     try {
       // 0. Fetch first vendor as placeholder (vendorId is required in schema)
       const vendorsRes = await fetch('/api/vendors?limit=1')
-      if (!vendorsRes.ok) throw new Error('Gagal mengambil data vendor')
+      if (!vendorsRes.ok) throw new Error('Failed to fetch vendor data')
       const vendors = await vendorsRes.json()
       const placeholderVendorId: string | null =
         Array.isArray(vendors) && vendors.length > 0 ? vendors[0].id : null
-      if (!placeholderVendorId) throw new Error('Tidak ada vendor tersedia. Tambahkan vendor terlebih dahulu.')
+      if (!placeholderVendorId) throw new Error('No vendors available. Please add a vendor first.')
 
       // 1. Create invoice record
-      setStatusMsg('Membuat record invoice...')
+      setStatusMsg('Creating invoice record...')
       const createRes = await fetch('/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,24 +118,24 @@ export default function UploadPage() {
           totalAmount: 0,
         }),
       })
-      if (!createRes.ok) throw new Error('Gagal membuat record invoice')
+      if (!createRes.ok) throw new Error('Failed to create invoice record')
       const invoice = await createRes.json()
       const id: string = invoice.id
       setInvoiceId(id)
 
       // 2. Upload file
-      setStatusMsg('Mengunggah file...')
+      setStatusMsg('Uploading file...')
       const formData = new FormData()
       formData.append('file', uploadFile)
       const uploadRes = await fetch(`/api/invoices/${id}/upload`, {
         method: 'POST',
         body: formData,
       })
-      if (!uploadRes.ok) throw new Error('Gagal mengunggah file')
+      if (!uploadRes.ok) throw new Error('Failed to upload file')
 
       // 3. SSE OCR stream
       setStage('ocr')
-      setStatusMsg('Memulai OCR...')
+      setStatusMsg('Starting OCR...')
 
       const es = new EventSource(`/api/invoices/${id}/ocr`)
 
@@ -161,28 +161,28 @@ export default function UploadPage() {
         setStatusMsg(d.message)
         setStage('review')
         es.close()
-        toast.success('OCR selesai! Silakan periksa dan konfirmasi data.')
+        toast.success('OCR complete! Please review and confirm the data.')
       })
 
       es.addEventListener('error', (e) => {
         try {
           const d = JSON.parse((e as MessageEvent).data ?? '{}')
-          setStatusMsg(d.message ?? 'OCR gagal')
+          setStatusMsg(d.message ?? 'OCR failed')
         } catch {
-          setStatusMsg('OCR gagal')
+          setStatusMsg('OCR failed')
         }
         setStage('review')
         es.close()
-        toast.error('OCR gagal. Silakan masukkan data secara manual.')
+        toast.error('OCR failed. Please enter the data manually.')
       })
 
       es.onerror = () => {
         setStage('review')
         es.close()
-        toast.error('Koneksi ke AI service terputus. Silakan cek data secara manual.')
+        toast.error('Connection to AI service lost. Please check the data manually.')
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error tidak diketahui'
+      const msg = err instanceof Error ? err.message : 'Unknown error'
       toast.error(msg)
       setStage('drop')
     }
@@ -212,7 +212,7 @@ export default function UploadPage() {
     })
 
     setStage('done')
-    toast.success('Invoice berhasil dikonfirmasi dan dikirim untuk approval!')
+    toast.success('Invoice confirmed and submitted for approval!')
     setTimeout(() => router.push('/invoices'), 1500)
   }
 
@@ -226,8 +226,8 @@ export default function UploadPage() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Upload Invoice</h1>
-          <p className="text-sm text-gray-500">AI akan mengekstrak data otomatis</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Upload Invoice</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">AI will extract data automatically</p>
         </div>
       </div>
 
@@ -238,8 +238,8 @@ export default function UploadPage() {
             {...getRootProps()}
             className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
               isDragActive
-                ? 'border-blue-500 bg-blue-50 scale-[1.01]'
-                : 'border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50'
+                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]'
+                : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-gray-700'
             }`}
           >
             <input {...getInputProps()} />
@@ -247,17 +247,17 @@ export default function UploadPage() {
               animate={isDragActive ? { scale: 1.1 } : { scale: 1 }}
               transition={{ duration: 0.2 }}
             >
-              <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <Upload className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
             </motion.div>
-            <p className="text-base font-semibold text-gray-700">
-              {isDragActive ? 'Lepaskan file di sini...' : 'Seret & lepas file invoice'}
+            <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
+              {isDragActive ? 'Drop the file here...' : 'Drag & drop invoice file'}
             </p>
-            <p className="text-sm text-gray-500 mt-1">atau klik untuk memilih file</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">or click to browse files</p>
             <div className="flex items-center justify-center gap-4 mt-4">
               {(['PDF', 'JPG', 'PNG'] as const).map((ext) => (
                 <span
                   key={ext}
-                  className="flex items-center gap-1 text-xs text-gray-400 bg-white border rounded-md px-2 py-1"
+                  className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded-md px-2 py-1"
                 >
                   {ext === 'PDF' ? (
                     <FileText className="h-3 w-3" />
@@ -277,26 +277,25 @@ export default function UploadPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="bg-white rounded-2xl border p-6"
+          className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 p-6"
         >
           <div className="flex items-center gap-3 mb-4">
             <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
-            <p className="text-sm font-medium text-gray-700">{statusMsg}</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{statusMsg}</p>
           </div>
 
           {file && (
-            <div className="flex items-center gap-2 mb-6 text-sm text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 mb-6 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded-lg px-3 py-2">
               <FileText className="h-4 w-4 flex-shrink-0" />
               <span className="truncate">{file.name}</span>
               <span className="ml-auto text-xs">{(file.size / 1024).toFixed(0)} KB</span>
             </div>
           )}
 
-          {/* Field Reveal Animation */}
           {fields.length > 0 && (
             <div className="space-y-3">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                Data Terekstrak
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                Extracted Data
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {fields.map((field) => (
@@ -330,17 +329,17 @@ export default function UploadPage() {
             )}
             <div>
               <p className="text-sm font-medium text-gray-700">
-                {overallConfidence >= 80 ? 'Ekstraksi berhasil!' : 'Harap verifikasi data'}
+                {overallConfidence >= 80 ? 'Extraction successful!' : 'Please verify the data'}
               </p>
               <p className="text-xs text-gray-500">
-                Akurasi keseluruhan: {overallConfidence.toFixed(0)}%
+                Overall accuracy: {overallConfidence.toFixed(0)}%
               </p>
             </div>
           </div>
 
           {/* Editable Fields */}
           <div className="bg-white rounded-xl border p-4 sm:p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-700">Verifikasi &amp; Edit Data</h3>
+            <h3 className="text-sm font-semibold text-gray-700">Verify &amp; Edit Data</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {fields.map((field) => (
                 <div key={field.key}>
@@ -363,7 +362,7 @@ export default function UploadPage() {
                 <Separator />
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                    Item Invoice
+                    Invoice Items
                   </p>
                   <div className="space-y-1">
                     {lineItems.map((item, i) => (
@@ -386,7 +385,7 @@ export default function UploadPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
-              Konfirmasi &amp; Kirim untuk Approval
+              Confirm &amp; Submit for Approval
             </Button>
             <Button
               variant="outline"
@@ -400,7 +399,7 @@ export default function UploadPage() {
                 setOverallConfidence(0)
               }}
             >
-              Upload Ulang
+              Upload Again
             </Button>
           </div>
         </motion.div>
@@ -414,8 +413,8 @@ export default function UploadPage() {
           className="text-center py-12"
         >
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900">Invoice Berhasil Dikirim!</h2>
-          <p className="text-gray-500 mt-2">Mengarahkan ke daftar invoice...</p>
+          <h2 className="text-xl font-bold text-gray-900">Invoice Submitted Successfully!</h2>
+          <p className="text-gray-500 mt-2">Redirecting to invoice list...</p>
         </motion.div>
       )}
     </div>

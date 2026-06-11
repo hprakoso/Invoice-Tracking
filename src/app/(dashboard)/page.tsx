@@ -25,27 +25,27 @@ async function DashboardContent() {
   const data = await getDashboardData()
 
   if (!data) {
-    return <p className="text-gray-500 dark:text-gray-400">Gagal memuat data dashboard.</p>
+    return <p className="text-gray-500 dark:text-gray-400">Failed to load dashboard data.</p>
   }
 
   return (
     <div className="space-y-6">
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <KPICard title="Total Invoice" value={data.totalInvoices} icon={<FileText className="h-5 w-5" />} color="blue" />
-        <KPICard title="Total Tagihan" value={data.totalPayable} icon={<DollarSign className="h-5 w-5" />} color="green" format="currency" subtitle="Belum dibayar" />
-        <KPICard title="Terlambat" value={data.overdueCount} icon={<AlertTriangle className="h-5 w-5" />} color="red" subtitle="Lewat jatuh tempo" />
-        <KPICard title="Menunggu Approval" value={data.pendingApprovalCount} icon={<Clock className="h-5 w-5" />} color="orange" />
+        <KPICard title="Total Invoices" value={data.totalInvoices} icon={<FileText className="h-5 w-5" />} color="blue" />
+        <KPICard title="Total Payable" value={data.totalPayable} icon={<DollarSign className="h-5 w-5" />} color="green" format="currency" subtitle="Unpaid" />
+        <KPICard title="Overdue" value={data.overdueCount} icon={<AlertTriangle className="h-5 w-5" />} color="red" subtitle="Past due date" />
+        <KPICard title="Pending Approval" value={data.pendingApprovalCount} icon={<Clock className="h-5 w-5" />} color="orange" />
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Status Invoice</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Invoice Status</h3>
           <StatusDonut data={data.statusBreakdown} />
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Analisa Aging (Rp)</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Aging Analysis (Rp)</h3>
           <AgingBar data={data.agingBuckets} />
         </div>
       </div>
@@ -53,15 +53,15 @@ async function DashboardContent() {
       {/* Recent Invoices */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
         <div className="px-4 sm:px-5 py-4 border-b dark:border-gray-700">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Invoice Terbaru</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Recent Invoices</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">No. Invoice</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Invoice No.</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Vendor</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell">Jatuh Tempo</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell">Due Date</th>
                 <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Total</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Status</th>
               </tr>
@@ -102,7 +102,7 @@ export default function DashboardPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Ringkasan sistem invoice AP</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">AP invoice system overview</p>
       </div>
       <Suspense fallback={<DashboardSkeleton />}>
         <DashboardContent />

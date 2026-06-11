@@ -23,7 +23,7 @@ export function AgingBar({ data }: { data: AgingBucket[] }) {
         <Tooltip
           formatter={(value) => {
             const num = typeof value === 'number' ? value : Number(value)
-            return [`Rp ${num.toLocaleString('id-ID')}`, 'Jumlah']
+            return [`Rp ${num.toLocaleString('id-ID')}`, 'Amount']
           }}
           labelStyle={{ fontSize: 12 }}
         />

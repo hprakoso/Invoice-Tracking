@@ -71,24 +71,24 @@ function ApprovalCard({
     const res = await fetch(`/api/approvals/${invoice.id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: 'Disetujui.' }),
+      body: JSON.stringify({ comment: 'Approved.' }),
     })
     setActing(false)
     if (res.ok) {
       toast.success(
         role === 'FINANCE'
-          ? `Invoice ${invoice.invoiceNumber} diteruskan ke Manager`
-          : `Invoice ${invoice.invoiceNumber} disetujui`
+          ? `Invoice ${invoice.invoiceNumber} forwarded to Manager`
+          : `Invoice ${invoice.invoiceNumber} approved`
       )
       onDone(entry.id)
     } else {
-      toast.error('Gagal menyetujui invoice')
+      toast.error('Failed to approve invoice')
     }
   }
 
   const reject = async () => {
     if (!comment.trim()) {
-      toast.error('Masukkan alasan penolakan')
+      toast.error('Please enter a rejection reason')
       return
     }
     setActing(true)
@@ -99,10 +99,10 @@ function ApprovalCard({
     })
     setActing(false)
     if (res.ok) {
-      toast.success(`Invoice ${invoice.invoiceNumber} ditolak`)
+      toast.success(`Invoice ${invoice.invoiceNumber} rejected`)
       onDone(entry.id)
     } else {
-      toast.error('Gagal menolak invoice')
+      toast.error('Failed to reject invoice')
     }
   }
 
@@ -123,7 +123,7 @@ function ApprovalCard({
             {overdue && (
               <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
                 <AlertTriangle className="h-3 w-3" />
-                Terlambat
+                Overdue
               </span>
             )}
           </div>
@@ -155,13 +155,13 @@ function ApprovalCard({
         </div>
         <div>
           <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 mb-0.5">
-            <Calendar className="h-3 w-3" /> Tgl Invoice
+            <Calendar className="h-3 w-3" /> Invoice Date
           </p>
           <p className="text-gray-700 dark:text-gray-300">{formatDate(invoice.invoiceDate)}</p>
         </div>
         <div>
           <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 mb-0.5">
-            <Clock className="h-3 w-3" /> Jatuh Tempo
+            <Clock className="h-3 w-3" /> Due Date
           </p>
           <p className={overdue ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-700 dark:text-gray-300'}>
             {formatDate(invoice.dueDate)}
@@ -183,7 +183,7 @@ function ApprovalCard({
             ))}
             {invoice.items.length > 3 && (
               <p className="text-xs text-gray-400 dark:text-gray-500 italic">
-                +{invoice.items.length - 3} item lainnya
+                +{invoice.items.length - 3} more items
               </p>
             )}
           </div>
@@ -202,7 +202,7 @@ function ApprovalCard({
               className="flex-1 bg-green-600 hover:bg-green-700 text-white"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              {role === 'FINANCE' ? 'Teruskan ke Manager' : 'Setujui'}
+              {role === 'FINANCE' ? 'Forward to Manager' : 'Approve'}
             </Button>
             <Button
               variant="destructive"
@@ -211,7 +211,7 @@ function ApprovalCard({
               className="flex-1"
             >
               <XCircle className="h-4 w-4 mr-2" />
-              Tolak
+              Reject
             </Button>
           </div>
         ) : (
@@ -222,7 +222,7 @@ function ApprovalCard({
           >
             <textarea
               className="w-full border dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
-              placeholder="Alasan penolakan (wajib)..."
+              placeholder="Rejection reason (required)..."
               rows={3}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
@@ -235,7 +235,7 @@ function ApprovalCard({
                 disabled={acting || !comment.trim()}
                 className="flex-1"
               >
-                Konfirmasi Penolakan
+                Confirm Rejection
               </Button>
               <Button
                 variant="outline"
@@ -245,7 +245,7 @@ function ApprovalCard({
                 }}
                 className="flex-1"
               >
-                Batal
+                Cancel
               </Button>
             </div>
           </motion.div>
@@ -258,15 +258,15 @@ function ApprovalCard({
 function EmptyState({ role }: { role: string }) {
   const message =
     role === 'FINANCE'
-      ? 'Tidak ada invoice yang menunggu review Finance.'
+      ? 'No invoices awaiting Finance review.'
       : role === 'MANAGER'
-      ? 'Tidak ada invoice yang menunggu persetujuan Manager.'
-      : 'Tidak ada invoice yang memerlukan tindakan Anda.'
+      ? 'No invoices awaiting Manager approval.'
+      : 'No invoices require your action.'
 
   return (
     <div className="flex flex-col items-center justify-center py-20 text-gray-400 dark:text-gray-500">
       <CheckCircle className="h-12 w-12 mb-3 text-green-300 dark:text-green-600" />
-      <p className="text-base font-medium text-gray-500 dark:text-gray-400">Semua selesai!</p>
+      <p className="text-base font-medium text-gray-500 dark:text-gray-400">All done!</p>
       <p className="text-sm mt-1">{message}</p>
     </div>
   )
@@ -297,22 +297,22 @@ export default function ApprovalsPage() {
 
   const roleLabel =
     role === 'FINANCE'
-      ? 'Finance Review — Langkah 1'
+      ? 'Finance Review — Step 1'
       : role === 'MANAGER'
-      ? 'Manager Approval — Langkah 2'
-      : 'Antrian Persetujuan'
+      ? 'Manager Approval — Step 2'
+      : 'Approval Queue'
 
   return (
     <div className="space-y-6">
       {/* Page header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Persetujuan Invoice</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Invoice Approvals</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{roleLabel}</p>
         </div>
         {!loading && (
           <span className="text-sm bg-blue-50 text-blue-700 font-semibold px-3 py-1 rounded-full border border-blue-200">
-            {visible.length} menunggu
+            {visible.length} pending
           </span>
         )}
       </div>
@@ -352,7 +352,7 @@ export default function ApprovalsPage() {
       {!loading && role === 'VIEWER' && (
         <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-yellow-700 text-sm">
           <FileText className="h-4 w-4 flex-shrink-0" />
-          Role Viewer tidak memiliki akses untuk menyetujui atau menolak invoice.
+          Viewer role does not have access to approve or reject invoices.
         </div>
       )}
     </div>

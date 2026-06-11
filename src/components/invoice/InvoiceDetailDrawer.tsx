@@ -69,7 +69,7 @@ function ApprovalStep({ step, approval }: { step: number; approval?: Invoice['ap
           </>
         )}
         {(!approval || approval.status === 'PENDING') && (
-          <p className="text-xs text-gray-400 dark:text-gray-500">Menunggu...</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">Pending...</p>
         )}
       </div>
       <StatusBadge status={badgeStatus} />
@@ -112,7 +112,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b dark:border-gray-800 flex-shrink-0">
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Detail Invoice</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Invoice Detail</p>
                 <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 font-mono">{invoice.invoiceNumber}</h2>
               </div>
               <div className="flex items-center gap-2">
@@ -140,13 +140,13 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 mb-1">
-                    <Calendar className="h-3 w-3" /> Tanggal Invoice
+                    <Calendar className="h-3 w-3" /> Invoice Date
                   </p>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{formatDate(invoice.invoiceDate)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 mb-1">
-                    <Calendar className="h-3 w-3" /> Jatuh Tempo
+                    <Calendar className="h-3 w-3" /> Due Date
                   </p>
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{formatDate(invoice.dueDate)}</p>
                 </div>
@@ -157,7 +157,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               {/* Financial Summary */}
               <div>
                 <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                  <DollarSign className="h-3 w-3" /> Ringkasan Keuangan
+                  <DollarSign className="h-3 w-3" /> Financial Summary
                 </p>
                 <div className="space-y-2 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
                   {invoice.subtotal && (
@@ -168,7 +168,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
                   )}
                   {invoice.taxAmount && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">PPN (11%)</span>
+                      <span className="text-gray-500 dark:text-gray-400">VAT (11%)</span>
                       <span className="text-gray-700 dark:text-gray-300">{formatIDR(invoice.taxAmount)}</span>
                     </div>
                   )}
@@ -184,7 +184,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               {invoice.items.length > 0 && (
                 <div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                    <FileText className="h-3 w-3" /> Item
+                    <FileText className="h-3 w-3" /> Items
                   </p>
                   <div className="space-y-2">
                     {invoice.items.map(item => (
@@ -201,7 +201,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
 
               {/* Approval Timeline */}
               <div>
-                <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">Alur Persetujuan</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">Approval Workflow</p>
                 <div className="space-y-3">
                   <ApprovalStep step={1} approval={(invoice.approvals ?? []).find(a => a.step === 1)} />
                   <ApprovalStep step={2} approval={(invoice.approvals ?? []).find(a => a.step === 2)} />
@@ -211,7 +211,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               {/* OCR Confidence */}
               {invoice.ocrConfidence != null && (
                 <div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">Akurasi OCR</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">OCR Accuracy</p>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                       <div
@@ -233,7 +233,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
               {/* Notes */}
               {invoice.notes && (
                 <div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">Catatan</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">Notes</p>
                   <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">{invoice.notes}</p>
                 </div>
               )}
