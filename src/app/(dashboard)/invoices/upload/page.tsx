@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
+import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -64,6 +65,9 @@ function ExtractedFieldCard({ field }: { field: ExtractedField }) {
 
 export default function UploadPage() {
   const router = useRouter()
+  const { data: session } = useSession()
+  const isVendor = (session?.user as { role?: string })?.role === 'VENDOR'
+  const vendorId = (session?.user as { vendorId?: string | null })?.vendorId
   const [stage, setStage] = useState<UploadStage>('drop')
   const [file, setFile] = useState<File | null>(null)
   const [statusMsg, setStatusMsg] = useState('')
@@ -99,13 +103,18 @@ export default function UploadPage() {
     setLineItems([])
 
     try {
-      // 0. Fetch first vendor as placeholder (vendorId is required in schema)
-      const vendorsRes = await fetch('/api/vendors?limit=1')
-      if (!vendorsRes.ok) throw new Error('Failed to fetch vendor data')
-      const vendors = await vendorsRes.json()
-      const placeholderVendorId: string | null =
-        Array.isArray(vendors) && vendors.length > 0 ? vendors[0].id : null
-      if (!placeholderVendorId) throw new Error('No vendors available. Please add a vendor first.')
+      // 0. Determine vendorId — VENDOR users use their own, others fetch first vendor
+      let placeholderVendorId: string | null = null
+      if (isVendor && vendorId) {
+        placeholderVendorId = vendorId
+      } else {
+        const vendorsRes = await fetch('/api/vendors?limit=1')
+        if (!vendorsRes.ok) throw new Error('Failed to fetch vendor data')
+        const vendors = await vendorsRes.json()
+        placeholderVendorId =
+          Array.isArray(vendors) && vendors.length > 0 ? vendors[0].id : null
+        if (!placeholderVendorId) throw new Error('No vendors available. Please add a vendor first.')
+      }
 
       // 1. Create invoice record
       setStatusMsg('Creating invoice record...')

@@ -66,6 +66,8 @@ function ApprovalCard({
   const { invoice } = entry
   const overdue = isOverdue(invoice.dueDate)
 
+  const canAct = role === 'GA_MANAGER' || role === 'FINANCE' || role === 'MANAGER' || role === 'ADMIN'
+
   const approve = async () => {
     setActing(true)
     const res = await fetch(`/api/approvals/${invoice.id}/approve`, {
@@ -76,8 +78,8 @@ function ApprovalCard({
     setActing(false)
     if (res.ok) {
       toast.success(
-        role === 'FINANCE'
-          ? `Invoice ${invoice.invoiceNumber} forwarded to Manager`
+        role === 'GA_MANAGER'
+          ? `Invoice ${invoice.invoiceNumber} forwarded to Finance`
           : `Invoice ${invoice.invoiceNumber} approved`
       )
       onDone(entry.id)
@@ -194,7 +196,12 @@ function ApprovalCard({
 
       {/* Action Area */}
       <div className="px-5 py-4 space-y-3">
-        {!showReject ? (
+        {!canAct ? (
+          <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-700 rounded-lg px-3 py-2">
+            <FileText className="h-4 w-4 flex-shrink-0" />
+            Read-only view
+          </div>
+        ) : !showReject ? (
           <div className="flex gap-2">
             <Button
               onClick={approve}
@@ -202,7 +209,7 @@ function ApprovalCard({
               className="flex-1 bg-green-600 hover:bg-green-700 text-white"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              {role === 'FINANCE' ? 'Forward to Manager' : 'Approve'}
+              {role === 'GA_MANAGER' ? 'Forward to Finance' : 'Approve'}
             </Button>
             <Button
               variant="destructive"
@@ -257,10 +264,12 @@ function ApprovalCard({
 
 function EmptyState({ role }: { role: string }) {
   const message =
-    role === 'FINANCE'
-      ? 'No invoices awaiting Finance review.'
-      : role === 'MANAGER'
-      ? 'No invoices awaiting Manager approval.'
+    role === 'GA_MANAGER'
+      ? 'No invoices awaiting GA Manager review.'
+      : role === 'FINANCE'
+      ? 'No invoices awaiting Finance approval.'
+      : role === 'GA_STAFF'
+      ? 'No pending approvals to monitor.'
       : 'No invoices require your action.'
 
   return (
@@ -296,10 +305,12 @@ export default function ApprovalsPage() {
   const visible = items.filter((i) => !dismissed.has(i.id))
 
   const roleLabel =
-    role === 'FINANCE'
-      ? 'Finance Review — Step 1'
-      : role === 'MANAGER'
-      ? 'Manager Approval — Step 2'
+    role === 'GA_MANAGER'
+      ? 'GA Manager Review — Step 1'
+      : role === 'FINANCE'
+      ? 'Finance Approval — Step 2'
+      : role === 'GA_STAFF'
+      ? 'Approval Queue (Read-only)'
       : 'Approval Queue'
 
   return (
@@ -348,11 +359,11 @@ export default function ApprovalsPage() {
         </motion.div>
       )}
 
-      {/* Viewer-only notice */}
-      {!loading && role === 'VIEWER' && (
-        <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-yellow-700 text-sm">
+      {/* Read-only role notice */}
+      {!loading && role === 'GA_STAFF' && (
+        <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3 text-blue-700 dark:text-blue-300 text-sm">
           <FileText className="h-4 w-4 flex-shrink-0" />
-          Viewer role does not have access to approve or reject invoices.
+          GA Staff can monitor the approval queue but cannot approve or reject invoices.
         </div>
       )}
     </div>
