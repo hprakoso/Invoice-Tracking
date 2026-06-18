@@ -1,6 +1,6 @@
 import { PrismaClient, Role, InvoiceStatus, ApprovalStatus } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { createHash } from 'crypto'
+import bcrypt from 'bcryptjs'
 
 const connectionString =
   process.env.DATABASE_URL ??
@@ -9,8 +9,8 @@ const connectionString =
 const adapter = new PrismaPg({ connectionString })
 const prisma = new PrismaClient({ adapter })
 
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex')
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12)
 }
 
 async function main() {
@@ -25,6 +25,8 @@ async function main() {
   await prisma.vendor.deleteMany()
   await prisma.user.deleteMany()
 
+  const demoHash = await hashPassword('demo123')
+
   // Create demo users
   const users = await Promise.all([
     prisma.user.create({
@@ -32,7 +34,7 @@ async function main() {
         email: 'admin@demo.com',
         name: 'Budi Santoso',
         role: Role.ADMIN,
-        passwordHash: hashPassword('demo123'),
+        passwordHash: demoHash,
       },
     }),
     prisma.user.create({
@@ -40,7 +42,7 @@ async function main() {
         email: 'manager@demo.com',
         name: 'Siti Rahayu',
         role: Role.MANAGER,
-        passwordHash: hashPassword('demo123'),
+        passwordHash: demoHash,
       },
     }),
     prisma.user.create({
@@ -48,7 +50,7 @@ async function main() {
         email: 'finance@demo.com',
         name: 'Agus Wijaya',
         role: Role.FINANCE,
-        passwordHash: hashPassword('demo123'),
+        passwordHash: demoHash,
       },
     }),
     prisma.user.create({
@@ -56,14 +58,31 @@ async function main() {
         email: 'viewer@demo.com',
         name: 'Dewi Lestari',
         role: Role.VIEWER,
-        passwordHash: hashPassword('demo123'),
+        passwordHash: demoHash,
+      },
+    }),
+    prisma.user.create({
+      data: {
+        email: 'gastaff@demo.com',
+        name: 'Rina Kusuma',
+        role: Role.GA_STAFF,
+        passwordHash: demoHash,
+      },
+    }),
+    prisma.user.create({
+      data: {
+        email: 'gamanager@demo.com',
+        name: 'Hendra Wijaya',
+        role: Role.GA_MANAGER,
+        passwordHash: demoHash,
       },
     }),
   ])
 
-  const [admin, manager, finance, viewer] = users
+  const [admin, manager, finance, viewer, gaStaff, gaManager] = users
   void admin
   void viewer
+  void gaStaff
   console.log('Users created')
 
   // Create vendors
@@ -130,6 +149,29 @@ async function main() {
     }),
   ])
   console.log('Vendors created')
+
+  // Create vendor users linked to specific vendors
+  await Promise.all([
+    prisma.user.create({
+      data: {
+        email: 'vendor1@demo.com',
+        name: 'Hendra Kusuma (Maju Jaya)',
+        role: Role.VENDOR,
+        passwordHash: demoHash,
+        vendorId: vendors[0].id,
+      },
+    }),
+    prisma.user.create({
+      data: {
+        email: 'vendor2@demo.com',
+        name: 'Rina Susanti (Teknologi Nusantara)',
+        role: Role.VENDOR,
+        passwordHash: demoHash,
+        vendorId: vendors[1].id,
+      },
+    }),
+  ])
+  console.log('Vendor users created')
 
   const now = new Date()
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000)
@@ -210,12 +252,12 @@ async function main() {
         d.status,
       )
     ) {
-      // Step 1: Finance review
+      // Step 1: GA Manager review
       await prisma.approvalWorkflow.create({
         data: {
           invoiceId: inv.id,
           step: 1,
-          approverId: finance.id,
+          approverId: gaManager.id,
           status:
             d.status === InvoiceStatus.REJECTED ? ApprovalStatus.REJECTED : ApprovalStatus.APPROVED,
           comment:
@@ -229,13 +271,13 @@ async function main() {
         },
       })
 
-      // Step 2: Manager approval (only for approved/paid)
+      // Step 2: Finance final approval (only for approved/paid)
       if (([InvoiceStatus.PAID, InvoiceStatus.APPROVED] as InvoiceStatus[]).includes(d.status)) {
         await prisma.approvalWorkflow.create({
           data: {
             invoiceId: inv.id,
             step: 2,
-            approverId: manager.id,
+            approverId: finance.id,
             status: ApprovalStatus.APPROVED,
             comment: 'Disetujui untuk pembayaran.',
             actionedAt: daysAgo(Math.floor(Math.random() * 3) + 1),
@@ -249,7 +291,6 @@ async function main() {
           data: {
             invoiceId: inv.id,
             step: 2,
-            approverId: manager.id,
             status: ApprovalStatus.PENDING,
           },
         })
@@ -282,7 +323,7 @@ async function main() {
   )
 
   for (const inv of overdueInvoices) {
-    for (const userId of [finance.id, manager.id]) {
+    for (const userId of [finance.id, gaManager.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -296,7 +337,7 @@ async function main() {
   }
 
   for (const inv of dueSoonInvoices) {
-    for (const userId of [finance.id, manager.id]) {
+    for (const userId of [finance.id, gaManager.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -313,10 +354,14 @@ async function main() {
   console.log('Seed complete!')
   console.log(`
 Demo Accounts:
-  admin@demo.com    / demo123  (Admin)
-  manager@demo.com  / demo123  (Manager)
-  finance@demo.com  / demo123  (Finance)
-  viewer@demo.com   / demo123  (Viewer)
+  admin@demo.com      / demo123  (Admin)
+  manager@demo.com    / demo123  (Manager - deprecated)
+  finance@demo.com    / demo123  (Finance - final approval)
+  viewer@demo.com     / demo123  (Viewer)
+  gastaff@demo.com    / demo123  (GA Staff - review)
+  gamanager@demo.com  / demo123  (GA Manager - step 1 approval)
+  vendor1@demo.com    / demo123  (Vendor: PT Maju Jaya Abadi)
+  vendor2@demo.com    / demo123  (Vendor: CV Teknologi Nusantara)
   `)
 }
 

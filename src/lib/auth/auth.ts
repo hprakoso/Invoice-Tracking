@@ -1,13 +1,9 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
-import { createHash } from 'crypto'
+import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db/prisma'
 import { authConfig } from '@/lib/auth/auth.config'
 import type { Role } from '@prisma/client'
-
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex')
-}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -26,14 +22,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!user || !user.isActive) return null
 
-        const hashed = hashPassword(credentials.password as string)
-        if (hashed !== user.passwordHash) return null
+        const valid = await bcrypt.compare(credentials.password as string, user.passwordHash)
+        if (!valid) return null
 
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          vendorId: user.vendorId,
         }
       },
     }),
@@ -43,6 +40,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id
         token.role = (user as { role: Role }).role
+        token.vendorId = (user as { vendorId?: string | null }).vendorId ?? null
       }
       return token
     },
@@ -50,6 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (token) {
         session.user.id = token.id as string
         session.user.role = token.role as Role
+        session.user.vendorId = token.vendorId as string | null
       }
       return session
     },
