@@ -6,14 +6,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ invoiceId: string }> }
 ) {
-  const { error, session } = await requireRole(['FINANCE', 'MANAGER', 'ADMIN'])
+  const { error, session } = await requireRole(['GA_MANAGER', 'FINANCE', 'MANAGER', 'ADMIN'])
   if (error || !session) return error!
 
   const { invoiceId } = await params
   const body = await req.json().catch(() => ({}))
   const comment = body.comment ?? 'Ditolak.'
   const role = session.user.role
-  const step = role === 'MANAGER' ? 2 : 1
+  const step = role === 'FINANCE' || role === 'MANAGER' ? 2 : 1
 
   const workflow = await prisma.approvalWorkflow.findFirst({
     where: { invoiceId, step, status: 'PENDING' },

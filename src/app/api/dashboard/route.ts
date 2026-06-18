@@ -3,10 +3,15 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
 
 export async function GET() {
-  const { error } = await requireAuth()
-  if (error) return error
+  const { error, session } = await requireAuth()
+  if (error || !session) return error
 
   const now = new Date()
+
+  // VENDOR sees only their own invoice stats
+  const vendorFilter = session.user.role === 'VENDOR'
+    ? { vendorId: session.user.vendorId ?? undefined }
+    : {}
 
   const [
     totalInvoices,
@@ -16,20 +21,22 @@ export async function GET() {
     pendingApprovalCount,
     recentInvoices,
   ] = await Promise.all([
-    prisma.invoice.count(),
-    prisma.invoice.groupBy({ by: ['status'], _count: { id: true } }),
+    prisma.invoice.count({ where: vendorFilter }),
+    prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: vendorFilter }),
     prisma.invoice.aggregate({
-      where: { status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+      where: { ...vendorFilter, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
       _sum: { totalAmount: true },
     }),
     prisma.invoice.count({
       where: {
+        ...vendorFilter,
         dueDate: { lt: now },
         status: { in: ['PENDING_APPROVAL', 'APPROVED'] },
       },
     }),
-    prisma.invoice.count({ where: { status: 'PENDING_APPROVAL' } }),
+    prisma.invoice.count({ where: { ...vendorFilter, status: 'PENDING_APPROVAL' } }),
     prisma.invoice.findMany({
+      where: vendorFilter,
       take: 10,
       orderBy: { createdAt: 'desc' },
       include: { vendor: { select: { name: true } } },
@@ -43,19 +50,19 @@ export async function GET() {
 
   const agingBuckets = await Promise.all([
     prisma.invoice.aggregate({
-      where: { dueDate: { gte: d30 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+      where: { ...vendorFilter, dueDate: { gte: d30 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
       _sum: { totalAmount: true },
     }),
     prisma.invoice.aggregate({
-      where: { dueDate: { gte: d60, lt: d30 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+      where: { ...vendorFilter, dueDate: { gte: d60, lt: d30 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
       _sum: { totalAmount: true },
     }),
     prisma.invoice.aggregate({
-      where: { dueDate: { gte: d90, lt: d60 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+      where: { ...vendorFilter, dueDate: { gte: d90, lt: d60 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
       _sum: { totalAmount: true },
     }),
     prisma.invoice.aggregate({
-      where: { dueDate: { lt: d90 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+      where: { ...vendorFilter, dueDate: { lt: d90 }, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
       _sum: { totalAmount: true },
     }),
   ])

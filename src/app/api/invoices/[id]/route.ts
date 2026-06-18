@@ -3,8 +3,8 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error } = await requireAuth()
-  if (error) return error
+  const { error, session } = await requireAuth()
+  if (error || !session) return error
 
   const { id } = await params
 
@@ -22,6 +22,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   })
 
   if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // VENDOR can only access their own invoices
+  if (session.user.role === 'VENDOR' && invoice.vendorId !== session.user.vendorId) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   return NextResponse.json(invoice)
 }
 

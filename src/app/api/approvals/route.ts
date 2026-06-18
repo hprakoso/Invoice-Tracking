@@ -3,16 +3,17 @@ import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/helpers'
 
 export async function GET() {
-  const { error, session } = await requireRole(['FINANCE', 'MANAGER', 'ADMIN'])
+  const { error, session } = await requireRole(['GA_STAFF', 'GA_MANAGER', 'FINANCE', 'MANAGER', 'ADMIN'])
   if (error || !session) return error!
 
   const role = session.user.role
 
-  // Finance → step 1, Manager → step 2, Admin → all pending steps
+  // GA_MANAGER → step 1, FINANCE → step 2, GA_STAFF/ADMIN → all pending steps
   const stepFilter =
+    role === 'GA_MANAGER' ? { step: 1 } :
+    role === 'FINANCE' ? { step: 2 } :
     role === 'MANAGER' ? { step: 2 } :
-    role === 'FINANCE' ? { step: 1 } :
-    {}  // ADMIN sees every pending step
+    {}  // GA_STAFF and ADMIN see every pending step
 
   const pending = await prisma.approvalWorkflow.findMany({
     where: {

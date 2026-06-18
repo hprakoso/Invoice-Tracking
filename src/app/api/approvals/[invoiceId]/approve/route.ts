@@ -6,14 +6,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ invoiceId: string }> }
 ) {
-  const { error, session } = await requireRole(['FINANCE', 'MANAGER', 'ADMIN'])
+  const { error, session } = await requireRole(['GA_MANAGER', 'FINANCE', 'MANAGER', 'ADMIN'])
   if (error || !session) return error!
 
   const { invoiceId } = await params
   const body = await req.json().catch(() => ({}))
   const comment = body.comment ?? 'Disetujui.'
   const role = session.user.role
-  const step = role === 'MANAGER' ? 2 : 1
+  // GA_MANAGER = step 1 (first approval), FINANCE = step 2 (final approval)
+  const step = role === 'FINANCE' || role === 'MANAGER' ? 2 : 1
 
   const workflow = await prisma.approvalWorkflow.findFirst({
     where: { invoiceId, step, status: 'PENDING' },
@@ -45,15 +46,15 @@ export async function POST(
         status: 'PENDING',
       },
     })
-    // Notify managers
-    const managers = await prisma.user.findMany({ where: { role: 'MANAGER', isActive: true } })
+    // Notify Finance team for final approval
+    const financeUsers = await prisma.user.findMany({ where: { role: 'FINANCE', isActive: true } })
     await prisma.notification.createMany({
-      data: managers.map(m => ({
-        userId: m.id,
+      data: financeUsers.map(u => ({
+        userId: u.id,
         invoiceId,
         type: 'approval_required',
-        title: 'Invoice menunggu persetujuan Anda',
-        body: `Finance telah menyetujui. Harap tinjau dan setujui invoice ini.`,
+        title: 'Invoice menunggu persetujuan Finance',
+        body: 'GA Manager telah menyetujui. Harap tinjau dan setujui invoice ini.',
       })),
     })
   } else {

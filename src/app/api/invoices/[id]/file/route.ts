@@ -20,15 +20,20 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await requireAuth()
-  if (error) return error
+  const { error, session } = await requireAuth()
+  if (error || !session) return error
 
   const { id } = await params
 
   const invoice = await prisma.invoice.findUnique({
     where: { id },
-    select: { filePath: true, fileType: true },
+    select: { filePath: true, fileType: true, vendorId: true },
   })
+
+  // VENDOR can only access files from their own invoices
+  if (session.user.role === 'VENDOR' && invoice?.vendorId !== session.user.vendorId) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   if (!invoice?.filePath) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
