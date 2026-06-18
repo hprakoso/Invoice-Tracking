@@ -1,7 +1,7 @@
 # Invoice Tracking Project Memory
 
-**Last Updated:** 2026-06-10  
-**Project Root:** `/Users/hario/Desktop/Project/Invoice-Tracking`
+**Last Updated:** 2026-06-18  
+**Project Root:** `/Users/harioprakoso/Work/IT_Apps/Invoice-Tracking`
 
 ---
 
@@ -13,7 +13,7 @@
 - **Database:** PostgreSQL with Prisma ORM v7.8.0 + pgvector extension
 - **AI Service:** Python FastAPI (separate process) for OCR, embedding, chatbot
 - **File Storage:** Local disk (`/uploads/invoices/`)
-- **Authentication:** NextAuth v5 with 4 hardcoded demo roles (ADMIN, MANAGER, FINANCE, VIEWER)
+- **Authentication:** NextAuth v5, bcrypt password hashing, 7 demo users (ADMIN, MANAGER, FINANCE, VIEWER, GA_STAFF, GA_MANAGER, VENDOR)
 - **UI Framework:** Tailwind CSS v4 + shadcn/ui components
 - **Charts:** recharts
 - **Animations:** Framer Motion
@@ -239,6 +239,33 @@ AGENTS.md                         # Framework warnings (Next.js 16.2.7 breaking 
 - ✅ Role-based access control (middleware checks)
 - ✅ Session persistence
 
+### Phase 9: Multi-Persona + Security Hardening (2026-06-18)
+- ✅ New roles: GA_STAFF, GA_MANAGER, VENDOR added to DB enum
+- ✅ vendor_id FK on users table (VENDOR users link to a Vendor record)
+- ✅ Password hashing migrated SHA256 → bcrypt (cost 12)
+- ✅ vendorId propagated in JWT + session (vendor data isolation)
+- ✅ 8 demo accounts (including vendor1@demo.com, vendor2@demo.com, gastaff@demo.com, gamanager@demo.com)
+- ✅ Approval workflow: step 1 = GA_MANAGER, step 2 = FINANCE (was FINANCE → MANAGER)
+- ✅ VENDOR data isolation: GET /invoices, /invoices/[id], /invoices/[id]/file scoped server-side
+- ✅ IDOR protection on all [id] routes for VENDOR role
+- ✅ File upload: 10MB size limit enforced
+- ✅ GA_STAFF: read-only view of approvals queue (no approve/reject)
+- ✅ Dashboard stats scoped by vendorId for VENDOR users
+- ✅ Sidebar nav updated with all new roles
+- ✅ 31 tests passing (new RBAC test suite added)
+
+**Demo Accounts:**
+| Email | Password | Role |
+|-------|----------|------|
+| admin@demo.com | demo123 | Admin |
+| gastaff@demo.com | demo123 | GA Staff (read-only review) |
+| gamanager@demo.com | demo123 | GA Manager (step 1 approval) |
+| finance@demo.com | demo123 | Finance (step 2 final approval) |
+| vendor1@demo.com | demo123 | Vendor: PT Maju Jaya Abadi |
+| vendor2@demo.com | demo123 | Vendor: CV Teknologi Nusantara |
+| viewer@demo.com | demo123 | Viewer (read-only) |
+| manager@demo.com | demo123 | Manager (deprecated) |
+
 ### Phase 6: Python AI Service
 - ✅ FastAPI scaffold with CORS
 - ✅ OCR endpoint: PDF → Tesseract → LangChain → structured JSON
@@ -332,9 +359,9 @@ AGENTS.md                         # Framework warnings (Next.js 16.2.7 breaking 
 - **Task:** Add `react-window` or `TanStack Virtual` if needed post-launch
 
 ### Hardcoded Demo Data
-- **Issue:** 4 users are hardcoded in NextAuth config; no real user registration
-- **Status:** By design for MVP; not a bug
-- **Post-MVP:** Implement user registration, password reset
+- **Issue:** Users stored in DB with bcrypt passwords; no user registration UI
+- **Status:** By design for internal tool; 8 demo accounts available
+- **Post-MVP:** Implement user registration, password reset, admin user management UI
 
 ### pgvector Embedding Updates
 - **Issue:** When invoices are updated, embeddings may become stale (not re-generated)
