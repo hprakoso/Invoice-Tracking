@@ -8,6 +8,9 @@ export default defineConfig({
     seed: "npx tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"] ?? "postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo",
+      url:
+      process.env["DIRECT_URL"] ??
+      process.env["DATABASE_URL"] ??
+      "postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo",
   },
 });
