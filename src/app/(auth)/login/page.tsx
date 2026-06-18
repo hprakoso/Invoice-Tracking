@@ -5,10 +5,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 const DEMO_ACCOUNTS = [
-  { email: 'admin@demo.com', role: 'Admin', color: 'bg-red-100 text-red-700' },
-  { email: 'manager@demo.com', role: 'Manager', color: 'bg-blue-100 text-blue-700' },
+  { email: 'vendor1@demo.com', role: 'Vendor 1', color: 'bg-orange-100 text-orange-700' },
+  { email: 'vendor2@demo.com', role: 'Vendor 2', color: 'bg-amber-100 text-amber-700' },
+  { email: 'gastaff@demo.com', role: 'GA Staff', color: 'bg-purple-100 text-purple-700' },
+  { email: 'gamanager@demo.com', role: 'GA Manager', color: 'bg-blue-100 text-blue-700' },
   { email: 'finance@demo.com', role: 'Finance', color: 'bg-green-100 text-green-700' },
-  { email: 'viewer@demo.com', role: 'Viewer', color: 'bg-gray-100 text-gray-700' },
+  { email: 'admin@demo.com', role: 'Admin', color: 'bg-red-100 text-red-700' },
 ]
 
 export default function LoginPage() {
