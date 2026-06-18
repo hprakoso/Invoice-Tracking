@@ -39,6 +39,13 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
+  if (process.env.VERCEL === '1') {
+    return NextResponse.json(
+      { error: 'File storage not available in this deployment. Contact admin.' },
+      { status: 503 }
+    )
+  }
+
   // Confine the path to the upload directory — prevents directory traversal
   const resolvedPath = path.resolve(invoice.filePath)
   if (!resolvedPath.startsWith(UPLOAD_DIR + path.sep) && resolvedPath !== UPLOAD_DIR) {
