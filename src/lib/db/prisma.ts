@@ -6,7 +6,11 @@ function createPrismaClient() {
     process.env.DATABASE_URL ??
     'postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo'
 
-  const adapter = new PrismaPg({ connectionString })
+  const ssl = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false'
+    ? { rejectUnauthorized: false }
+    : undefined
+
+  const adapter = new PrismaPg({ connectionString, ssl })
 
   return new PrismaClient({
     adapter,
