@@ -51,7 +51,7 @@ export function StatusDonut({ data }: { data: StatusBreakdown[] }) {
         <Legend
           iconType="circle"
           iconSize={8}
-          formatter={(value) => <span className="text-xs text-gray-600">{value}</span>}
+          formatter={(value) => <span className="text-xs text-gray-600 dark:text-gray-300">{value}</span>}
         />
       </PieChart>
     </ResponsiveContainer>
