@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
 
 function createPrismaClient() {
   const connectionString =
@@ -10,7 +11,8 @@ function createPrismaClient() {
     ? { rejectUnauthorized: false }
     : undefined
 
-  const adapter = new PrismaPg({ connectionString, ssl })
+  const pool = new Pool({ connectionString, ssl })
+  const adapter = new PrismaPg(pool)
 
   return new PrismaClient({
     adapter,
