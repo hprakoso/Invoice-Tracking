@@ -2,7 +2,9 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import OCRExtractRequest, OCRExtractResponse, FieldConfidence
 from app.services.ocr_service import extract_text_from_file
 from app.services.extraction_chain import extract_invoice_fields
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/extract", response_model=OCRExtractResponse)
@@ -51,7 +53,8 @@ async def extract_invoice(request: OCRExtractRequest):
             overall_confidence=round(overall, 1),
         )
 
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Invoice file not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
+        logger.error("OCR extraction failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="OCR processing failed")
