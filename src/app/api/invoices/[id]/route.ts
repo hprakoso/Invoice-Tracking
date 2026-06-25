@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
+import { updateInvoiceSchema, isValidStatusTransition, validationErrorResponse } from '@/lib/validations'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await requireAuth()
@@ -38,18 +39,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params
   const body = await req.json()
 
+  const parsed = updateInvoiceSchema.safeParse(body)
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error)
+  }
+  const data = parsed.data
+
+  // Validate status transition if status is being changed
+  if (data.status) {
+    const current = await prisma.invoice.findUnique({
+      where: { id },
+      select: { status: true },
+    })
+    if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    const transition = isValidStatusTransition(current.status, data.status)
+    if (!transition.valid) {
+      return NextResponse.json({ error: transition.message }, { status: 400 })
+    }
+  }
+
   const invoice = await prisma.invoice.update({
     where: { id },
     data: {
-      invoiceNumber: body.invoiceNumber,
-      invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : undefined,
-      dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
-      subtotal: body.subtotal,
-      taxAmount: body.taxAmount,
-      totalAmount: body.totalAmount,
-      notes: body.notes,
-      status: body.status,
-      ocrConfidence: body.ocrConfidence,
+      invoiceNumber: data.invoiceNumber,
+      invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : undefined,
+      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      subtotal: data.subtotal,
+      taxAmount: data.taxAmount,
+      totalAmount: data.totalAmount,
+      notes: data.notes,
+      status: data.status,
+      ocrConfidence: data.ocrConfidence,
     },
   })
 
@@ -59,7 +80,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       action: 'invoice.updated',
       entityType: 'invoice',
       entityId: id,
-      metadata: { fields: Object.keys(body) },
+      metadata: { fields: Object.keys(data) },
     },
   })
 
@@ -72,7 +93,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
 
-  await prisma.invoice.update({ where: { id }, data: { status: 'CANCELLED' as any } })
+  await prisma.invoice.update({ where: { id }, data: { status: 'REJECTED' } })
   await prisma.auditLog.create({
     data: {
       userId: session.user.id,
