@@ -4,45 +4,91 @@ import re
 from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 
+# Default models per provider — overridable via LLM_MODEL env var
+DEFAULT_MODELS = {
+    "groq": "llama-3.1-8b-instant",
+    "gemini": "gemini-2.0-flash",
+    "anthropic": "claude-sonnet-4-6",
+    "openai": "gpt-4o-mini",
+    "deepseek": "deepseek-chat",
+    "ollama": "llama3.1",
+}
+
+def _get_timeout() -> int | None:
+    val = os.getenv("LLM_TIMEOUT_SECONDS")
+    if val:
+        try:
+            return int(val)
+        except ValueError:
+            pass
+    return None
+
 def get_llm() -> BaseChatModel:
-    """Return configured LLM based on LLM_PROVIDER env var."""
+    """Return configured LLM based on LLM_PROVIDER env var.
+
+    Environment variables:
+        LLM_PROVIDER          — groq | gemini | anthropic | openai | deepseek | ollama (default: groq)
+        LLM_MODEL             — override the default model for the selected provider
+        LLM_TIMEOUT_SECONDS   — request timeout in seconds (optional)
+        GROQ_API_KEY          — API key for Groq
+        GOOGLE_API_KEY        — API key for Google Gemini
+        ANTHROPIC_API_KEY     — API key for Anthropic Claude
+        OPENAI_API_KEY        — API key for OpenAI / DeepSeek
+        DEEPSEEK_BASE_URL     — base URL for DeepSeek (default: https://api.deepseek.com/v1)
+    """
     provider = os.getenv("LLM_PROVIDER", "groq").lower()
+    model = os.getenv("LLM_MODEL") or DEFAULT_MODELS.get(provider, DEFAULT_MODELS["groq"])
+    timeout = _get_timeout()
 
     if provider == "groq":
         from langchain_groq import ChatGroq
-        return ChatGroq(
-            model="llama-3.1-8b-instant",
-            temperature=0,
-            api_key=os.getenv("GROQ_API_KEY"),
-        )
+        kwargs = {"model": model, "temperature": 0, "api_key": os.getenv("GROQ_API_KEY")}
+        if timeout:
+            kwargs["timeout"] = timeout
+        return ChatGroq(**kwargs)
+
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            temperature=0,
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-        )
+        kwargs = {"model": model, "temperature": 0, "google_api_key": os.getenv("GOOGLE_API_KEY")}
+        if timeout:
+            kwargs["timeout"] = timeout
+        return ChatGoogleGenerativeAI(**kwargs)
+
     elif provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(
-            model="claude-sonnet-4-6",
-            temperature=0,
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-        )
+        kwargs = {"model": model, "temperature": 0, "api_key": os.getenv("ANTHROPIC_API_KEY")}
+        if timeout:
+            kwargs["timeout"] = timeout
+        return ChatAnthropic(**kwargs)
+
     elif provider == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
+        kwargs = {"model": model, "temperature": 0, "api_key": os.getenv("OPENAI_API_KEY")}
+        if timeout:
+            kwargs["timeout"] = timeout
+        return ChatOpenAI(**kwargs)
+
+    elif provider == "deepseek":
+        from langchain_openai import ChatOpenAI
+        kwargs = {
+            "model": model,
+            "temperature": 0,
+            "api_key": os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY"),
+            "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+        }
+        if timeout:
+            kwargs["timeout"] = timeout
+        return ChatOpenAI(**kwargs)
+
     elif provider == "ollama":
         from langchain_ollama import ChatOllama
-        return ChatOllama(
-            model="llama3.1",
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            temperature=0,
-        )
+        kwargs = {
+            "model": model,
+            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            "temperature": 0,
+        }
+        return ChatOllama(**kwargs)
+
     else:
         raise ValueError(f"Unknown LLM_PROVIDER: {provider}")
 
