@@ -22,19 +22,26 @@ The UI is fully responsive — it works on mobile, tablet, and desktop.
 
 | Role | What they can do |
 |------|-----------------|
-| **Finance** | Upload invoices, run OCR, review extracted data, forward to Manager |
-| **Manager** | Review Finance-approved invoices, give final approval or reject with a comment |
+| **Finance** | Upload invoices, run OCR, review extracted data, final approval |
+| **GA Manager** | First-level approval, review documents |
+| **GA Staff** | Read-only review of invoices in approval queue |
+| **Manager** | Deprecated role (retained for backward compatibility) |
 | **Admin** | Full access — all pages including audit log |
 | **Viewer** | Read-only access — browse invoices and dashboard |
+| **Vendor** | View and upload invoices for their own company only |
 
 **Demo accounts (all password: `demo123`):**
 
 | Email | Role |
 |-------|------|
 | `admin@demo.com` | Admin |
-| `manager@demo.com` | Manager |
+| `gastaff@demo.com` | GA Staff |
+| `gamanager@demo.com` | GA Manager |
 | `finance@demo.com` | Finance |
+| `vendor1@demo.com` | Vendor (PT Maju Jaya Abadi) |
+| `vendor2@demo.com` | Vendor (CV Teknologi Nusantara) |
 | `viewer@demo.com` | Viewer |
+| `manager@demo.com` | Manager (deprecated) |
 
 ---
 
@@ -128,7 +135,7 @@ npx prisma migrate deploy
 npx tsx prisma/seed.ts
 ```
 
-This creates all tables, populates 20 demo invoices across all statuses, and creates the 4 demo user accounts.
+  This creates all tables, populates 20 demo invoices across all statuses, and creates the 8 demo user accounts.
 
 ---
 
@@ -270,10 +277,11 @@ invoice-demo/
 
 1. **Log in as Finance** → see the pre-populated dashboard with animated KPI counters and charts
 2. **Upload a real invoice PDF** → watch OCR fields appear one by one with confidence bars
-3. **Confirm the extracted data** → invoice moves to "Pending Approval"
-4. **Switch to Manager account** → approve the invoice → card animates out, status updates live
-5. **Open the AI Chatbot** → ask *"Invoice mana yang sudah jatuh tempo?"*
-6. **Open the Audit Log** → show every action recorded with user, role, and timestamp
+3. **Confirm the extracted data** → invoice moves to "Pending Review"
+4. **Open the AI Chatbot** → ask *"Invoice mana yang sudah jatuh tempo?"*
+5. **Switch to GA Manager account** → approve Step 1, invoice moves to "Pending Approval"
+6. **Switch to Finance account** → give final approval → card animates out, status updates live
+7. **Open the Audit Log** → show every action recorded with user, role, and timestamp
 
 ---
 
