@@ -14,6 +14,11 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('Seed script blocked in production environment.')
+    process.exit(1)
+  }
+
   console.log('Seeding database...')
 
   // Clean existing data
