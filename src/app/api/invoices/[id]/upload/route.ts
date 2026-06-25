@@ -32,12 +32,34 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid file type. Use PDF, JPG, or PNG.' }, { status: 400 })
   }
 
+  // Verify file signature (magic bytes) to prevent MIME spoofing
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const signature = buffer.subarray(0, 8).toString('hex').toUpperCase()
+
+  const magicSignatures: Record<string, string[]> = {
+    pdf: ['25504446'],
+    jpg: ['FFD8FF'],
+    jpeg: ['FFD8FF'],
+    png: ['89504E470D0A1A0A'],
+  }
+
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const expectedSig = magicSignatures[ext]
+  const matched = expectedSig?.some((sig) => signature.startsWith(sig))
+
+  if (!expectedSig || !matched) {
+    return NextResponse.json(
+      { error: 'File content does not match its extension. Only valid PDF, JPG, or PNG files are accepted.' },
+      { status: 400 },
+    )
+  }
+
   const MAX_FILE_SIZE = 10 * 1024 * 1024
   if (file.size > MAX_FILE_SIZE) {
     return NextResponse.json({ error: 'File too large. Maximum 10MB.' }, { status: 400 })
   }
 
-  const { filePath, fileType } = await saveUploadedFile(file, id)
+  const { filePath, fileType } = await saveUploadedFile(file, id, buffer)
 
   const invoice = await prisma.invoice.update({
     where: { id },
