@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
+import { rateLimit } from '@/lib/rate-limit'
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:8000'
 
@@ -8,8 +9,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await requireAuth()
-  if (error) return error
+  const { error, session } = await requireAuth()
+  if (error || !session) return error
+
+  const limit = rateLimit(`ocr:${session.user.id}`, 5, 60_000)
+  if (limit) return limit
 
   const { id } = await params
 
