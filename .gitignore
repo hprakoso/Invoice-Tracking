@@ -47,13 +47,32 @@ uploads/invoices/*
 !uploads/invoices/.gitkeep
 .mailmap
 
+# IDE / editor
+.vscode/
+.cursor/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
 # Python
 __pycache__/
 *.py[cod]
 ai-service/venv/
 ai-service/.env
 
-# Claude
-AGENTS.md
-CLAUDE.md
-memory.md
+# Claude / AI assistant
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
