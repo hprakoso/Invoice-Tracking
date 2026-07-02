@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs'
 
 const connectionString =
   process.env.DATABASE_URL ??
-  'postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo'
+  'postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo'
 
 const adapter = new PrismaPg({ connectionString })
 const prisma = new PrismaClient({ adapter })

@@ -5,7 +5,7 @@ import { Pool } from 'pg'
 function createPrismaClient() {
   const connectionString =
     process.env.DATABASE_URL ??
-    'postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo'
+    'postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo'
 
   // Strip sslmode/sslaccept from URL — explicit ssl option below takes precedence
   const url = new URL(connectionString)

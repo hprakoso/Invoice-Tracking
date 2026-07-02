@@ -11,6 +11,6 @@ export default defineConfig({
       url:
       process.env["DIRECT_URL"] ??
       process.env["DATABASE_URL"] ??
-      "postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo",
+      "postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo",
   },
 });
