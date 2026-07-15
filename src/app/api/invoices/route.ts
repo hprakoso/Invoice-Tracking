@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
+import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
@@ -48,36 +49,48 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR'])
+  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR', 'GA_STAFF'])
   if (error || !session) return error
 
   const body = await req.json()
 
+  const parsed = createInvoiceSchema.safeParse(body)
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error)
+  }
+  const data = parsed.data
+
   // VENDOR can only submit invoices for their own vendor
   const effectiveVendorId =
-    session.user.role === 'VENDOR' ? session.user.vendorId : body.vendorId
+    session.user.role === 'VENDOR' ? session.user.vendorId : data.vendorId
   if (session.user.role === 'VENDOR' && !effectiveVendorId) {
     return NextResponse.json({ error: 'Vendor account not linked' }, { status: 403 })
   }
 
+  // GA_STAFF creating an invoice is the hardcopy's first handler by default
+  const effectivePicId =
+    session.user.role === 'GA_STAFF' ? session.user.id : (data.picId ?? null)
+
   const invoice = await prisma.invoice.create({
     data: {
-      vendorId: effectiveVendorId,
-      invoiceNumber: body.invoiceNumber,
-      invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : null,
-      dueDate: body.dueDate ? new Date(body.dueDate) : null,
-      currency: body.currency ?? 'IDR',
-      subtotal: body.subtotal,
-      taxAmount: body.taxAmount,
-      totalAmount: body.totalAmount,
-      notes: body.notes,
-      status: 'PENDING_REVIEW',
+      vendorId: effectiveVendorId as string,
+      invoiceNumber: data.invoiceNumber,
+      invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
+      dueDate: data.dueDate ? new Date(data.dueDate) : null,
+      currency: data.currency,
+      subtotal: data.subtotal ?? null,
+      taxAmount: data.taxAmount ?? null,
+      totalAmount: data.totalAmount,
+      notes: data.notes ?? null,
+      status: 'SUBMITTED',
+      sendDate: data.sendDate ? new Date(data.sendDate) : null,
+      picId: effectivePicId,
       createdById: session.user.id,
       items: {
-        create: (body.items ?? []).map((item: any, i: number) => ({
+        create: data.items.map((item, i) => ({
           description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
+          quantity: item.quantity ?? null,
+          unitPrice: item.unitPrice ?? null,
           total: item.total,
           sortOrder: i,
         })),

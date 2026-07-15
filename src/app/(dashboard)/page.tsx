@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { cookies } from 'next/headers'
-import { FileText, DollarSign, AlertTriangle, Clock } from 'lucide-react'
+import { FileText, DollarSign, AlertTriangle, Clock, Download } from 'lucide-react'
 import { KPICard } from '@/components/dashboard/KPICard'
 import { StatusDonut } from '@/components/dashboard/StatusDonut'
 import { AgingBar } from '@/components/dashboard/AgingBar'
@@ -35,7 +35,7 @@ async function DashboardContent() {
         <KPICard title="Total Invoices" value={data.totalInvoices} icon={<FileText className="h-5 w-5" />} color="blue" />
         <KPICard title="Total Payable" value={data.totalPayable} icon={<DollarSign className="h-5 w-5" />} color="green" format="currency" subtitle="Unpaid" />
         <KPICard title="Overdue" value={data.overdueCount} icon={<AlertTriangle className="h-5 w-5" />} color="red" subtitle="Past due date" />
-        <KPICard title="Pending Approval" value={data.pendingApprovalCount} icon={<Clock className="h-5 w-5" />} color="orange" />
+        <KPICard title="Open Invoices" value={data.openCount} icon={<Clock className="h-5 w-5" />} color="orange" />
       </div>
 
       {/* Charts */}
@@ -100,9 +100,18 @@ async function DashboardContent() {
 export default function DashboardPage() {
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">AP invoice system overview</p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">AP invoice system overview</p>
+        </div>
+        <a
+          href="/api/dashboard/export"
+          download
+          className="inline-flex items-center gap-2 h-9 px-3 rounded-md border text-sm font-medium text-gray-700 dark:text-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors whitespace-nowrap"
+        >
+          <Download className="h-4 w-4" /> Export to Excel
+        </a>
       </div>
       <Suspense fallback={<DashboardSkeleton />}>
         <DashboardContent />

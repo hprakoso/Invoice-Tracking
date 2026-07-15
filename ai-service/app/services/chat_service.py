@@ -65,5 +65,5 @@ def chat(message: str, history: list) -> str:
         print(f"Chat error: {e}")
         return (
             "Maaf, saya tidak dapat memproses pertanyaan Anda saat ini. "
-            "Pastikan konfigurasi LLM sudah benar di file .env."
+            "Silakan coba lagi nanti."
         )

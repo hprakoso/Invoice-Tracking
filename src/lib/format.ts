@@ -51,6 +51,6 @@ export function timeAgo(dateStr: string): string {
 /** Return true when an invoice's due date has passed and its status is still active. */
 export function isOverdue(dueDate: string | null | undefined, status?: string): boolean {
   if (!dueDate) return false
-  if (status && ['PAID', 'REJECTED'].includes(status)) return false
+  if (status && ['CANCELLED', 'REJECTED', 'VOID'].includes(status)) return false
   return new Date(dueDate) < new Date()
 }

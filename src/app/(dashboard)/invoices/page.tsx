@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
-import { InvoiceDetailDrawer } from '@/components/invoice/InvoiceDetailDrawer'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 
 interface Invoice {
@@ -18,36 +18,31 @@ interface Invoice {
   totalAmount: string
   dueDate: string | null
   invoiceDate: string | null
+  sendDate: string | null
+  deliveredDate: string | null
   currency: string
   ocrConfidence: number | null
   vendor: { id: string; name: string }
   createdBy: { id: string; name: string }
+  pic: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string }[]
-  approvals: {
-    id: string
-    step: number
-    status: string
-    comment: string | null
-    actionedAt: string | null
-    approver: { id: string; name: string; role: string } | null
-  }[]
 }
 
 interface Vendor { id: string; name: string }
 
 const STATUSES = [
   { value: '', label: 'All Statuses' },
-  { value: 'PENDING_OCR', label: 'OCR' },
-  { value: 'PENDING_REVIEW', label: 'Review' },
-  { value: 'PENDING_APPROVAL', label: 'Approval' },
-  { value: 'APPROVED', label: 'Approved' },
-  { value: 'REJECTED', label: 'Rejected' },
-  { value: 'PAID', label: 'Paid' },
+  { value: 'SUBMITTED', label: 'Diajukan' },
+  { value: 'REVISION', label: 'Revisi' },
+  { value: 'CANCELLED', label: 'Dibatalkan' },
+  { value: 'REJECTED', label: 'Ditolak' },
+  { value: 'VOID', label: 'Void' },
 ]
 
 import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
 export default function InvoicesPage() {
+  const router = useRouter()
   const { data: session } = useSession()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -55,7 +50,6 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [vendorId, setVendorId] = useState('')
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -78,7 +72,7 @@ export default function InvoicesPage() {
     return () => clearTimeout(timer)
   }, [fetchInvoices])
 
-  const canUpload = ['ADMIN', 'FINANCE'].includes(session?.user?.role ?? '')
+  const canUpload = ['ADMIN', 'FINANCE', 'VENDOR', 'GA_STAFF'].includes(session?.user?.role ?? '')
 
   return (
     <div className="space-y-4">
@@ -165,7 +159,7 @@ export default function InvoicesPage() {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.03 }}
-                    onClick={() => setSelectedInvoice(inv)}
+                    onClick={() => router.push(`/invoices/${inv.id}`)}
                     className={`border-b dark:border-gray-700 last:border-0 hover:bg-blue-50/50 dark:hover:bg-gray-700 cursor-pointer transition-colors ${
                       isOverdue(inv.dueDate, inv.status) ? 'bg-red-50/30 dark:bg-red-900/10' : ''
                     }`}
@@ -187,13 +181,6 @@ export default function InvoicesPage() {
           </table>
         </div>
       </div>
-
-      {/* Detail Drawer */}
-      <InvoiceDetailDrawer
-        invoice={selectedInvoice}
-        onClose={() => setSelectedInvoice(null)}
-        onRefresh={fetchInvoices}
-      />
     </div>
   )
 }

@@ -5,12 +5,12 @@ const IS_SERVERLESS = process.env.VERCEL === '1'
 
 export async function saveUploadedFile(
   file: File,
-  invoiceId: string
+  invoiceId: string,
+  buffer?: Buffer,
 ): Promise<{ filePath: string; fileType: string }> {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? 'pdf'
 
   if (IS_SERVERLESS) {
-    // File storage not available in serverless — tracked as pending (Option B: Vercel Blob)
     return { filePath: '', fileType: ext }
   }
 
@@ -23,8 +23,8 @@ export async function saveUploadedFile(
 
   const fileName = `${invoiceId}.${ext}`
   const filePath = join(UPLOAD_DIR, fileName)
-  const buffer = Buffer.from(await file.arrayBuffer())
-  await writeFile(filePath, buffer)
+  const data = buffer ?? Buffer.from(await file.arrayBuffer())
+  await writeFile(filePath, data)
 
   return { filePath, fileType: ext }
 }

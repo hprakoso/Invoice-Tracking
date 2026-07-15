@@ -2,21 +2,19 @@
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const STATUS_COLORS: Record<string, string> = {
-  PENDING_OCR: '#94a3b8',
-  PENDING_REVIEW: '#fbbf24',
-  PENDING_APPROVAL: '#60a5fa',
-  APPROVED: '#34d399',
+  SUBMITTED: '#60a5fa',
+  REVISION: '#fbbf24',
+  CANCELLED: '#94a3b8',
   REJECTED: '#f87171',
-  PAID: '#a78bfa',
+  VOID: '#64748b',
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  PENDING_OCR: 'OCR',
-  PENDING_REVIEW: 'Review',
-  PENDING_APPROVAL: 'Approval',
-  APPROVED: 'Disetujui',
+  SUBMITTED: 'Diajukan',
+  REVISION: 'Revisi',
+  CANCELLED: 'Dibatalkan',
   REJECTED: 'Ditolak',
-  PAID: 'Dibayar',
+  VOID: 'Void',
 }
 
 interface StatusBreakdown {
@@ -51,7 +49,7 @@ export function StatusDonut({ data }: { data: StatusBreakdown[] }) {
         <Legend
           iconType="circle"
           iconSize={8}
-          formatter={(value) => <span className="text-xs text-gray-600">{value}</span>}
+          formatter={(value) => <span className="text-xs text-gray-600 dark:text-gray-300">{value}</span>}
         />
       </PieChart>
     </ResponsiveContainer>

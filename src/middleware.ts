@@ -9,7 +9,7 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth
 
   // Public routes
-  if (pathname === '/login' || pathname.startsWith('/api/auth')) {
+  if (pathname === '/login' || pathname.startsWith('/api/auth') || pathname === '/api/health') {
     if (isLoggedIn && pathname === '/login') {
       return NextResponse.redirect(new URL('/', req.url))
     }

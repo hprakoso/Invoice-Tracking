@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
@@ -66,7 +66,9 @@ function ExtractedFieldCard({ field }: { field: ExtractedField }) {
 export default function UploadPage() {
   const router = useRouter()
   const { data: session } = useSession()
-  const isVendor = (session?.user as { role?: string })?.role === 'VENDOR'
+  const role = (session?.user as { role?: string })?.role
+  const isVendor = role === 'VENDOR'
+  const isGaStaff = role === 'GA_STAFF'
   const vendorId = (session?.user as { vendorId?: string | null })?.vendorId
   const [stage, setStage] = useState<UploadStage>('drop')
   const [file, setFile] = useState<File | null>(null)
@@ -76,6 +78,17 @@ export default function UploadPage() {
   const [overallConfidence, setOverallConfidence] = useState(0)
   const [invoiceId, setInvoiceId] = useState<string | null>(null)
   const [editableValues, setEditableValues] = useState<Record<string, string>>({})
+  const [sendDateValue, setSendDateValue] = useState('')
+  const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
+  const [picIdValue, setPicIdValue] = useState('')
+
+  useEffect(() => {
+    if (isGaStaff) setPicIdValue(session?.user?.id ?? '')
+    if (['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'FINANCE'].includes(role ?? '')) {
+      fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role])
 
   const onDrop = useCallback(async (accepted: File[]) => {
     const f = accepted[0]
@@ -216,12 +229,13 @@ export default function UploadPage() {
         subtotal:
           parseFloat(editableValues['subtotal']?.replace(/[^0-9.]/g, '') ?? '0') || null,
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
-        status: 'PENDING_APPROVAL',
+        sendDate: sendDateValue || null,
+        picId: isGaStaff ? (picIdValue || null) : undefined,
       }),
     })
 
     setStage('done')
-    toast.success('Invoice confirmed and submitted for approval!')
+    toast.success('Invoice submitted successfully!')
     setTimeout(() => router.push('/invoices'), 1500)
   }
 
@@ -349,6 +363,30 @@ export default function UploadPage() {
           {/* Editable Fields */}
           <div className="bg-white rounded-xl border p-4 sm:p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700">Verify &amp; Edit Data</h3>
+            {isVendor && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Send Date (hardcopy sent to office)</label>
+                <input
+                  type="date"
+                  value={sendDateValue}
+                  onChange={(e) => setSendDateValue(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                />
+              </div>
+            )}
+            {isGaStaff && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">PIC (GA Staff handling this invoice)</label>
+                <select
+                  value={picIdValue}
+                  onChange={(e) => setPicIdValue(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {gaStaff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {fields.map((field) => (
                 <div key={field.key}>
@@ -394,7 +432,7 @@ export default function UploadPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
-              Confirm &amp; Submit for Approval
+              Confirm &amp; Submit
             </Button>
             <Button
               variant="outline"

@@ -25,7 +25,7 @@ async function checkDueDates() {
   // Invoices due within 3 days (not yet notified today)
   const dueSoon = await prisma.invoice.findMany({
     where: {
-      status: { in: ['PENDING_APPROVAL', 'APPROVED'] as any[] },
+      status: { in: ['SUBMITTED', 'REVISION'] as any[] },
       dueDate: { gte: now, lte: threeDaysFromNow },
     },
     include: { vendor: { select: { name: true } } },
@@ -34,14 +34,14 @@ async function checkDueDates() {
   // Overdue invoices
   const overdue = await prisma.invoice.findMany({
     where: {
-      status: { in: ['PENDING_APPROVAL', 'APPROVED'] as any[] },
+      status: { in: ['SUBMITTED', 'REVISION'] as any[] },
       dueDate: { lt: now },
     },
     include: { vendor: { select: { name: true } } },
   })
 
   const recipients = await prisma.user.findMany({
-    where: { role: { in: ['FINANCE', 'GA_MANAGER'] as any[] }, isActive: true },
+    where: { role: { in: ['FINANCE', 'GA_STAFF'] as any[] }, isActive: true },
     select: { id: true },
   })
 

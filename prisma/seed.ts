@@ -1,10 +1,10 @@
-import { PrismaClient, Role, InvoiceStatus, ApprovalStatus } from '@prisma/client'
+import { PrismaClient, Role, InvoiceStatus } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import bcrypt from 'bcryptjs'
 
 const connectionString =
   process.env.DATABASE_URL ??
-  'postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo'
+  'postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo'
 
 const adapter = new PrismaPg({ connectionString })
 const prisma = new PrismaClient({ adapter })
@@ -14,12 +14,16 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('Seed script blocked in production environment.')
+    process.exit(1)
+  }
+
   console.log('Seeding database...')
 
   // Clean existing data
   await prisma.notification.deleteMany()
   await prisma.auditLog.deleteMany()
-  await prisma.approvalWorkflow.deleteMany()
   await prisma.invoiceItem.deleteMany()
   await prisma.invoice.deleteMany()
   await prisma.vendor.deleteMany()
@@ -77,12 +81,20 @@ async function main() {
         passwordHash: demoHash,
       },
     }),
+    prisma.user.create({
+      data: {
+        email: 'gastaff2@demo.com',
+        name: 'Putri Anggraini',
+        role: Role.GA_STAFF,
+        passwordHash: demoHash,
+      },
+    }),
   ])
 
-  const [admin, manager, finance, viewer, gaStaff, gaManager] = users
+  const [admin, manager, finance, viewer, gaStaff, gaManager, gaStaff2] = users
   void admin
   void viewer
-  void gaStaff
+  void gaManager
   console.log('Users created')
 
   // Create vendors
@@ -177,40 +189,40 @@ async function main() {
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000)
   const daysFromNow = (d: number) => new Date(now.getTime() + d * 24 * 60 * 60 * 1000)
 
-  // Create 20 invoices across all statuses
+  // Create 20 invoices across the 5 statuses. sendDate = vendor sent hardcopy,
+  // deliveredDate/pic = GA Staff who received it (null on a few SUBMITTED rows
+  // to demo "not yet received"). createdBy varies across VENDOR/GA_STAFF/FINANCE.
   const invoiceData = [
-    // PAID invoices (4)
-    { vendor: vendors[0], num: 'INV-2024-001', status: InvoiceStatus.PAID, total: 45000000, tax: 4500000, created: daysAgo(60), due: daysAgo(30), confidence: 94 },
-    { vendor: vendors[1], num: 'INV-2024-002', status: InvoiceStatus.PAID, total: 120000000, tax: 12000000, created: daysAgo(55), due: daysAgo(25), confidence: 88 },
-    { vendor: vendors[2], num: 'INV-2024-003', status: InvoiceStatus.PAID, total: 28500000, tax: 2850000, created: daysAgo(45), due: daysAgo(15), confidence: 91 },
-    { vendor: vendors[3], num: 'INV-2024-004', status: InvoiceStatus.PAID, total: 75000000, tax: 7500000, created: daysAgo(40), due: daysAgo(10), confidence: 96 },
-    // APPROVED invoices (3)
-    { vendor: vendors[4], num: 'INV-2024-005', status: InvoiceStatus.APPROVED, total: 55000000, tax: 5500000, created: daysAgo(30), due: daysFromNow(5), confidence: 89 },
-    { vendor: vendors[5], num: 'INV-2024-006', status: InvoiceStatus.APPROVED, total: 33000000, tax: 3300000, created: daysAgo(25), due: daysFromNow(10), confidence: 92 },
-    { vendor: vendors[0], num: 'INV-2024-007', status: InvoiceStatus.APPROVED, total: 88000000, tax: 8800000, created: daysAgo(20), due: daysFromNow(15), confidence: 87 },
-    // REJECTED invoice (1)
-    { vendor: vendors[1], num: 'INV-2024-008', status: InvoiceStatus.REJECTED, total: 15000000, tax: 1500000, created: daysAgo(15), due: daysFromNow(5), confidence: 62 },
-    // PENDING_APPROVAL invoices (2 -- for live demo)
-    { vendor: vendors[2], num: 'INV-2024-009', status: InvoiceStatus.PENDING_APPROVAL, total: 67500000, tax: 6750000, created: daysAgo(5), due: daysFromNow(10), confidence: 91 },
-    { vendor: vendors[3], num: 'INV-2024-010', status: InvoiceStatus.PENDING_APPROVAL, total: 145000000, tax: 14500000, created: daysAgo(3), due: daysFromNow(7), confidence: 85 },
-    // PENDING_REVIEW invoices (3)
-    { vendor: vendors[4], num: 'INV-2024-011', status: InvoiceStatus.PENDING_REVIEW, total: 22000000, tax: 2200000, created: daysAgo(2), due: daysFromNow(20), confidence: 78 },
-    { vendor: vendors[5], num: 'INV-2024-012', status: InvoiceStatus.PENDING_REVIEW, total: 98000000, tax: 9800000, created: daysAgo(1), due: daysFromNow(14), confidence: 83 },
-    { vendor: vendors[0], num: 'INV-2024-013', status: InvoiceStatus.PENDING_REVIEW, total: 310000000, tax: 31000000, created: daysAgo(1), due: daysFromNow(21), confidence: 90 },
-    // PENDING_OCR invoices (2)
-    { vendor: vendors[1], num: 'INV-2024-014', status: InvoiceStatus.PENDING_OCR, total: 42000000, tax: 4200000, created: daysAgo(0), due: daysFromNow(30), confidence: null },
-    { vendor: vendors[2], num: 'INV-2024-015', status: InvoiceStatus.PENDING_OCR, total: 18500000, tax: 1850000, created: daysAgo(0), due: daysFromNow(28), confidence: null },
-    // OVERDUE invoices (3 -- for reminder demo)
-    { vendor: vendors[3], num: 'INV-2024-016', status: InvoiceStatus.APPROVED, total: 57000000, tax: 5700000, created: daysAgo(45), due: daysAgo(15), confidence: 93 },
-    { vendor: vendors[4], num: 'INV-2024-017', status: InvoiceStatus.APPROVED, total: 25000000, tax: 2500000, created: daysAgo(40), due: daysAgo(10), confidence: 88 },
-    { vendor: vendors[5], num: 'INV-2024-018', status: InvoiceStatus.PENDING_APPROVAL, total: 500000000, tax: 50000000, created: daysAgo(35), due: daysAgo(5), confidence: 95 },
-    // Due soon (2 -- for reminder demo)
-    { vendor: vendors[0], num: 'INV-2024-019', status: InvoiceStatus.PENDING_APPROVAL, total: 78000000, tax: 7800000, created: daysAgo(25), due: daysFromNow(2), confidence: 91 },
-    { vendor: vendors[1], num: 'INV-2024-020', status: InvoiceStatus.APPROVED, total: 130000000, tax: 13000000, created: daysAgo(28), due: daysFromNow(1), confidence: 94 },
+    // SUBMITTED (10), mix of on-time / due-soon / overdue for the reminder scheduler
+    { vendor: vendors[0], num: 'INV-2024-001', status: InvoiceStatus.SUBMITTED, total: 45000000, tax: 4500000, created: daysAgo(10), due: daysFromNow(20), confidence: 94, creator: 'vendor', pic: gaStaff, sent: daysAgo(11), delivered: daysAgo(9) },
+    { vendor: vendors[1], num: 'INV-2024-002', status: InvoiceStatus.SUBMITTED, total: 120000000, tax: 12000000, created: daysAgo(8), due: daysFromNow(22), confidence: 88, creator: 'vendor', pic: gaStaff2, sent: daysAgo(9), delivered: daysAgo(7) },
+    { vendor: vendors[2], num: 'INV-2024-003', status: InvoiceStatus.SUBMITTED, total: 28500000, tax: 2850000, created: daysAgo(6), due: daysFromNow(24), confidence: 91, creator: 'gastaff', pic: gaStaff, sent: daysAgo(6), delivered: daysAgo(6) },
+    { vendor: vendors[3], num: 'INV-2024-004', status: InvoiceStatus.SUBMITTED, total: 75000000, tax: 7500000, created: daysAgo(4), due: daysFromNow(2), confidence: 96, creator: 'vendor', pic: null, sent: daysAgo(4), delivered: null },
+    { vendor: vendors[4], num: 'INV-2024-005', status: InvoiceStatus.SUBMITTED, total: 55000000, tax: 5500000, created: daysAgo(3), due: daysFromNow(1), confidence: 89, creator: 'finance', pic: gaStaff2, sent: daysAgo(3), delivered: daysAgo(2) },
+    { vendor: vendors[5], num: 'INV-2024-006', status: InvoiceStatus.SUBMITTED, total: 33000000, tax: 3300000, created: daysAgo(2), due: daysFromNow(10), confidence: 92, creator: 'vendor', pic: null, sent: daysAgo(2), delivered: null },
+    { vendor: vendors[0], num: 'INV-2024-007', status: InvoiceStatus.SUBMITTED, total: 88000000, tax: 8800000, created: daysAgo(45), due: daysAgo(15), confidence: 87, creator: 'vendor', pic: gaStaff, sent: daysAgo(45), delivered: daysAgo(44) },
+    { vendor: vendors[1], num: 'INV-2024-008', status: InvoiceStatus.SUBMITTED, total: 57000000, tax: 5700000, created: daysAgo(40), due: daysAgo(10), confidence: 93, creator: 'gastaff', pic: gaStaff, sent: daysAgo(40), delivered: daysAgo(40) },
+    { vendor: vendors[2], num: 'INV-2024-009', status: InvoiceStatus.SUBMITTED, total: 500000000, tax: 50000000, created: daysAgo(35), due: daysAgo(5), confidence: 95, creator: 'vendor', pic: gaStaff2, sent: daysAgo(36), delivered: daysAgo(34) },
+    { vendor: vendors[3], num: 'INV-2024-010', status: InvoiceStatus.SUBMITTED, total: 78000000, tax: 7800000, created: daysAgo(25), due: daysFromNow(2), confidence: 91, creator: 'vendor', pic: gaStaff, sent: daysAgo(25), delivered: daysAgo(23) },
+    // REVISION (3) -- sent back for correction
+    { vendor: vendors[4], num: 'INV-2024-011', status: InvoiceStatus.REVISION, total: 22000000, tax: 2200000, created: daysAgo(12), due: daysFromNow(18), confidence: 78, creator: 'vendor', pic: gaStaff, sent: daysAgo(12), delivered: daysAgo(11) },
+    { vendor: vendors[5], num: 'INV-2024-012', status: InvoiceStatus.REVISION, total: 98000000, tax: 9800000, created: daysAgo(9), due: daysFromNow(14), confidence: 83, creator: 'gastaff', pic: gaStaff2, sent: daysAgo(9), delivered: daysAgo(9) },
+    { vendor: vendors[0], num: 'INV-2024-013', status: InvoiceStatus.REVISION, total: 310000000, tax: 31000000, created: daysAgo(7), due: daysFromNow(21), confidence: 90, creator: 'vendor', pic: gaStaff, sent: daysAgo(7), delivered: daysAgo(6) },
+    // REJECTED (3)
+    { vendor: vendors[1], num: 'INV-2024-014', status: InvoiceStatus.REJECTED, total: 15000000, tax: 1500000, created: daysAgo(20), due: daysFromNow(5), confidence: 62, creator: 'vendor', pic: gaStaff, sent: daysAgo(20), delivered: daysAgo(19) },
+    { vendor: vendors[2], num: 'INV-2024-015', status: InvoiceStatus.REJECTED, total: 42000000, tax: 4200000, created: daysAgo(18), due: daysFromNow(30), confidence: 70, creator: 'vendor', pic: gaStaff2, sent: daysAgo(18), delivered: daysAgo(17) },
+    { vendor: vendors[3], num: 'INV-2024-016', status: InvoiceStatus.REJECTED, total: 18500000, tax: 1850000, created: daysAgo(16), due: daysFromNow(28), confidence: 65, creator: 'gastaff', pic: gaStaff, sent: daysAgo(16), delivered: daysAgo(16) },
+    // CANCELLED (2)
+    { vendor: vendors[4], num: 'INV-2024-017', status: InvoiceStatus.CANCELLED, total: 25000000, tax: 2500000, created: daysAgo(30), due: daysAgo(2), confidence: 88, creator: 'vendor', pic: gaStaff, sent: daysAgo(30), delivered: daysAgo(29) },
+    { vendor: vendors[5], num: 'INV-2024-018', status: InvoiceStatus.CANCELLED, total: 33500000, tax: 3350000, created: daysAgo(22), due: daysFromNow(8), confidence: 80, creator: 'vendor', pic: gaStaff2, sent: daysAgo(22), delivered: daysAgo(21) },
+    // VOID (2)
+    { vendor: vendors[0], num: 'INV-2024-019', status: InvoiceStatus.VOID, total: 145000000, tax: 14500000, created: daysAgo(50), due: daysAgo(20), confidence: 85, creator: 'finance', pic: gaStaff, sent: daysAgo(50), delivered: daysAgo(49) },
+    { vendor: vendors[1], num: 'INV-2024-020', status: InvoiceStatus.VOID, total: 130000000, tax: 13000000, created: daysAgo(38), due: daysAgo(8), confidence: 94, creator: 'vendor', pic: gaStaff2, sent: daysAgo(38), delivered: daysAgo(37) },
   ]
 
   const invoices = []
   for (const d of invoiceData) {
+    const creator = d.creator === 'gastaff' ? gaStaff : finance
     const inv = await prisma.invoice.create({
       data: {
         vendorId: d.vendor.id,
@@ -223,7 +235,10 @@ async function main() {
         totalAmount: d.total,
         status: d.status,
         ocrConfidence: d.confidence,
-        createdById: finance.id,
+        sendDate: d.sent,
+        deliveredDate: d.delivered,
+        picId: d.pic?.id ?? null,
+        createdById: creator.id,
         items: {
           create: [
             {
@@ -245,57 +260,6 @@ async function main() {
       },
     })
     invoices.push(inv)
-
-    // Create approval workflow records for relevant statuses
-    if (
-      ([InvoiceStatus.PAID, InvoiceStatus.APPROVED, InvoiceStatus.REJECTED, InvoiceStatus.PENDING_APPROVAL] as InvoiceStatus[]).includes(
-        d.status,
-      )
-    ) {
-      // Step 1: GA Manager review
-      await prisma.approvalWorkflow.create({
-        data: {
-          invoiceId: inv.id,
-          step: 1,
-          approverId: gaManager.id,
-          status:
-            d.status === InvoiceStatus.REJECTED ? ApprovalStatus.REJECTED : ApprovalStatus.APPROVED,
-          comment:
-            d.status === InvoiceStatus.REJECTED
-              ? 'Dokumen tidak lengkap, perlu revisi.'
-              : 'Data telah diverifikasi dan sesuai.',
-          actionedAt:
-            d.status === InvoiceStatus.REJECTED
-              ? daysAgo(14)
-              : daysAgo(Math.floor(Math.random() * 5) + 1),
-        },
-      })
-
-      // Step 2: Finance final approval (only for approved/paid)
-      if (([InvoiceStatus.PAID, InvoiceStatus.APPROVED] as InvoiceStatus[]).includes(d.status)) {
-        await prisma.approvalWorkflow.create({
-          data: {
-            invoiceId: inv.id,
-            step: 2,
-            approverId: finance.id,
-            status: ApprovalStatus.APPROVED,
-            comment: 'Disetujui untuk pembayaran.',
-            actionedAt: daysAgo(Math.floor(Math.random() * 3) + 1),
-          },
-        })
-      }
-
-      // Pending step 2 for PENDING_APPROVAL
-      if (d.status === InvoiceStatus.PENDING_APPROVAL) {
-        await prisma.approvalWorkflow.create({
-          data: {
-            invoiceId: inv.id,
-            step: 2,
-            status: ApprovalStatus.PENDING,
-          },
-        })
-      }
-    }
   }
   console.log('Invoices created')
 
@@ -314,16 +278,16 @@ async function main() {
   }
   console.log('Audit logs created')
 
-  // Create due-soon and overdue notifications for Finance + Manager
+  // Create due-soon and overdue notifications for Finance + GA Staff
   const overdueInvoices = invoices.filter((inv) =>
-    ['INV-2024-016', 'INV-2024-017', 'INV-2024-018'].includes(inv.invoiceNumber),
+    ['INV-2024-007', 'INV-2024-008', 'INV-2024-009'].includes(inv.invoiceNumber),
   )
   const dueSoonInvoices = invoices.filter((inv) =>
-    ['INV-2024-019', 'INV-2024-020'].includes(inv.invoiceNumber),
+    ['INV-2024-004', 'INV-2024-005', 'INV-2024-010'].includes(inv.invoiceNumber),
   )
 
   for (const inv of overdueInvoices) {
-    for (const userId of [finance.id, gaManager.id]) {
+    for (const userId of [finance.id, gaStaff.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -337,7 +301,7 @@ async function main() {
   }
 
   for (const inv of dueSoonInvoices) {
-    for (const userId of [finance.id, gaManager.id]) {
+    for (const userId of [finance.id, gaStaff.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -356,10 +320,11 @@ async function main() {
 Demo Accounts:
   admin@demo.com      / demo123  (Admin)
   manager@demo.com    / demo123  (Manager - deprecated)
-  finance@demo.com    / demo123  (Finance - final approval)
+  finance@demo.com    / demo123  (Finance - records final outcome)
   viewer@demo.com     / demo123  (Viewer)
-  gastaff@demo.com    / demo123  (GA Staff - review)
-  gamanager@demo.com  / demo123  (GA Manager - step 1 approval)
+  gastaff@demo.com    / demo123  (GA Staff - receives hardcopies, PIC)
+  gastaff2@demo.com   / demo123  (GA Staff - receives hardcopies, PIC)
+  gamanager@demo.com  / demo123  (GA Manager - deprecated)
   vendor1@demo.com    / demo123  (Vendor: PT Maju Jaya Abadi)
   vendor2@demo.com    / demo123  (Vendor: CV Teknologi Nusantara)
   `)

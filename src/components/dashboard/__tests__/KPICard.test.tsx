@@ -69,9 +69,9 @@ describe('KPICard', () => {
 
   it.each([
     ['blue', 'text-blue-600'],
-    ['green', 'text-green-600'],
+    ['green', 'text-emerald-600'],
     ['red', 'text-red-600'],
-    ['orange', 'text-orange-600'],
+    ['orange', 'text-amber-600'],
   ] as const)('applies %s colour class to icon wrapper', (color, cls) => {
     const { container } = render(<KPICard {...base} color={color} />)
     expect(container.querySelector('span')?.className).toContain(cls)

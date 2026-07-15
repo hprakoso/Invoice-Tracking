@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
+import { rateLimit } from '@/lib/rate-limit'
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:8000'
 
@@ -8,8 +9,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await requireAuth()
-  if (error) return error
+  const { error, session } = await requireAuth()
+  if (error || !session) return error
+
+  const limit = rateLimit(`ocr:${session.user.id}`, 5, 60_000)
+  if (limit) return limit
 
   const { id } = await params
 
@@ -95,7 +99,6 @@ export async function GET(
               ? parseFloat(extracted.total_amount.value)
               : invoice.totalAmount,
             ocrConfidence: extracted.overall_confidence ?? 0,
-            status: 'PENDING_REVIEW',
           },
         })
 
@@ -123,12 +126,6 @@ export async function GET(
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         controller.enqueue(emit('error', { message }))
-
-        // Set invoice to PENDING_REVIEW even on error so user can enter manually
-        await prisma.invoice.update({
-          where: { id },
-          data: { status: 'PENDING_REVIEW' },
-        }).catch(() => {})
       } finally {
         controller.close()
       }
