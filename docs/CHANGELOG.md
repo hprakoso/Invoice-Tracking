@@ -8,6 +8,10 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-15 — Added the missing Fix & Resubmit form for REVISION invoices
+**What:** `invoices/[id]/page.tsx`'s "Resubmit" button previously only sent `{status: 'SUBMITTED'}` with no way to actually correct anything — `PATCH /api/invoices/[id]` already allowed `VENDOR` (owner) to edit `invoiceNumber`/`invoiceDate`/`dueDate`/`subtotal`/`taxAmount`/`totalAmount`/`notes` while `status = REVISION`, but no frontend form existed for it. Added editable inputs for those fields, submitted together with `status: 'SUBMITTED'` in one `PATCH`. Line items are explicitly not editable here (noted in the UI) — that would need a separate line-item editor, out of scope for this fix.
+**Why:** User asked how a vendor is supposed to fix a `REVISION` invoice — answer was "there's no way yet," a real gap versus this plan's own locked decision ("Vendor may edit the same fields during REVISION as they can at creation time").
+
 ### 2026-07-15 — Invoice list navigation didn't reach the editable detail page
 **What:** `invoices/page.tsx` row click opened the read-only `InvoiceDetailDrawer` instead of navigating to `/invoices/[id]`, so the Update Status / Delivery & PIC editing cards added in the status-lifecycle work were unreachable. Rows now `router.push()` to the full detail page; `InvoiceDetailDrawer.tsx` (now fully unused) and its test were deleted.
 **Why:** User-reported via screenshot during manual QA — confirmed the underlying card code was correct, the bug was pure navigation.

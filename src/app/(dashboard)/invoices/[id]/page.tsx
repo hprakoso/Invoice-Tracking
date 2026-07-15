@@ -154,6 +154,13 @@ export default function InvoiceDetailPage() {
   const [sendDateInput, setSendDateInput] = useState('')
   const [deliveredDateInput, setDeliveredDateInput] = useState('')
   const [picId, setPicId] = useState('')
+  const [revNumber, setRevNumber] = useState('')
+  const [revInvoiceDate, setRevInvoiceDate] = useState('')
+  const [revDueDate, setRevDueDate] = useState('')
+  const [revSubtotal, setRevSubtotal] = useState('')
+  const [revTax, setRevTax] = useState('')
+  const [revTotal, setRevTotal] = useState('')
+  const [revNotes, setRevNotes] = useState('')
 
   const fetchInvoice = async () => {
     try {
@@ -168,6 +175,13 @@ export default function InvoiceDetailPage() {
         setSendDateInput(data.sendDate?.slice(0, 10) ?? '')
         setDeliveredDateInput(data.deliveredDate?.slice(0, 10) ?? '')
         setPicId(data.pic?.id ?? '')
+        setRevNumber(data.invoiceNumber ?? '')
+        setRevInvoiceDate(data.invoiceDate?.slice(0, 10) ?? '')
+        setRevDueDate(data.dueDate?.slice(0, 10) ?? '')
+        setRevSubtotal(data.subtotal ?? '')
+        setRevTax(data.taxAmount ?? '')
+        setRevTotal(data.totalAmount ?? '')
+        setRevNotes(data.notes ?? '')
         setFetchError(null)
       }
     } catch {
@@ -215,7 +229,16 @@ export default function InvoiceDetailPage() {
     setComment('')
   }
 
-  const handleResubmit = () => patchInvoice({ status: 'SUBMITTED' }, 'Invoice resubmitted')
+  const handleResubmit = () => patchInvoice({
+    status: 'SUBMITTED',
+    invoiceNumber: revNumber || undefined,
+    invoiceDate: revInvoiceDate || undefined,
+    dueDate: revDueDate || undefined,
+    subtotal: revSubtotal !== '' ? Number(revSubtotal) : undefined,
+    taxAmount: revTax !== '' ? Number(revTax) : undefined,
+    totalAmount: revTotal !== '' ? Number(revTotal) : undefined,
+    notes: revNotes || undefined,
+  }, 'Invoice diperbaiki & diajukan ulang')
 
   const handleDeliverySave = () => {
     if (deliveredDateInput && sendDateInput && deliveredDateInput < sendDateInput) {
@@ -414,10 +437,77 @@ export default function InvoiceDetailPage() {
             )}
           </div>
 
-          {/* Update Status */}
+          {/* Fix & Resubmit (REVISION) */}
           {canResubmit && (
-            <div className="bg-white rounded-xl border p-4">
-              <Button onClick={handleResubmit} disabled={acting} className="w-full">Resubmit</Button>
+            <div className="bg-white rounded-xl border p-4 space-y-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Perbaiki &amp; Ajukan Ulang</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400">Invoice Number</label>
+                  <input
+                    type="text"
+                    value={revNumber}
+                    onChange={e => setRevNumber(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Invoice Date</label>
+                  <input
+                    type="date"
+                    value={revInvoiceDate}
+                    onChange={e => setRevInvoiceDate(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Due Date</label>
+                  <input
+                    type="date"
+                    value={revDueDate}
+                    onChange={e => setRevDueDate(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Subtotal</label>
+                  <input
+                    type="number"
+                    value={revSubtotal}
+                    onChange={e => setRevSubtotal(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Tax Amount</label>
+                  <input
+                    type="number"
+                    value={revTax}
+                    onChange={e => setRevTax(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Total Amount</label>
+                  <input
+                    type="number"
+                    value={revTotal}
+                    onChange={e => setRevTotal(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Notes</label>
+                <textarea
+                  rows={2}
+                  value={revNotes}
+                  onChange={e => setRevNotes(e.target.value)}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none"
+                />
+              </div>
+              <p className="text-xs text-gray-400">Line item tidak bisa diubah di sini — hubungi Finance/GA Staff kalau perlu perbaikan rincian item.</p>
+              <Button onClick={handleResubmit} disabled={acting} className="w-full">Simpan &amp; Ajukan Ulang</Button>
             </div>
           )}
           {canUpdateStatus && transitionOptions.length > 0 && (
