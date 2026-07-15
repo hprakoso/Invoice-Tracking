@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, FileText, Upload, CheckSquare, MessageSquare,
+  LayoutDashboard, FileText, Upload, Users, MessageSquare,
   Bell, ClipboardList, Menu, X, FileStack, ChevronRight
 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
@@ -16,11 +16,11 @@ import { cn } from '@/lib/utils'
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER', 'VENDOR'], indent: false },
   { href: '/invoices', label: 'Invoices', icon: FileText, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER', 'VENDOR'], indent: false },
-  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'FINANCE', 'VENDOR'], indent: true },
-  { href: '/approvals', label: 'Approvals', icon: CheckSquare, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE'], indent: false },
+  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'FINANCE', 'VENDOR', 'GA_STAFF'], indent: true },
   { href: '/reminders', label: 'Reminders', icon: Bell, roles: ['ADMIN', 'MANAGER', 'GA_MANAGER', 'FINANCE'], indent: false },
-  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER', 'VENDOR'], indent: false },
+  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER'], indent: false },
   { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'GA_MANAGER', 'FINANCE'], indent: false },
+  { href: '/admin/users', label: 'User Management', icon: Users, roles: ['ADMIN'], indent: false },
 ]
 
 function NavItem({ href, label, icon: Icon, active, indent }: { href: string; label: string; icon: React.ElementType; active: boolean; indent: boolean }) {

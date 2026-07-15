@@ -15,10 +15,10 @@ const PAGE_TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/invoices': 'Invoices',
   '/invoices/upload': 'Upload Invoice',
-  '/approvals': 'Approvals',
   '/reminders': 'Reminders',
   '/chat': 'AI Assistant',
   '/audit': 'Audit Log',
+  '/admin/users': 'User Management',
 }
 
 interface Notification {

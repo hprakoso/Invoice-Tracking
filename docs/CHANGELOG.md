@@ -38,6 +38,10 @@ Two sections, per `CLAUDE.md` convention:
 **What:** `POST /api/chat`: `requireAuth()` → `requireRole([...])` excluding `VENDOR` (previously no role check at all — any authenticated user, VENDOR included, could use it).
 **Why:** Requested — take the AI chat feature out of the vendor role.
 
+### 2026-07-15 — Wired up Sidebar/TopBar for the new routes and permissions
+**What:** `Sidebar.tsx`: removed the `/approvals` nav entry (feature removed), added `GA_STAFF` to the Upload Invoice entry's roles, removed `VENDOR` from the AI Assistant entry, added a new ADMIN-only User Management entry (`/admin/users`). `TopBar.tsx`: removed the `/approvals` page-title mapping, added `/admin/users`.
+**Why:** Navigation plumbing for the four preceding feature commits (status lifecycle, Excel export, admin RBAC, chat lockdown) — grouped as its own commit since `Sidebar.tsx`/`TopBar.tsx` are directly related to each other (both navigation shell components) but not tightly coupled to any single one of those features individually.
+
 ## Commit Log
 
 Full history of the `feat/production-hardening` branch (current branch), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
