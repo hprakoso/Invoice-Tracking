@@ -1,0 +1,112 @@
+# Changelog
+
+Two sections, per `CLAUDE.md` convention:
+- **Code Changes Made** — running log of what changed and why, newest first. Add an entry here for every task before committing.
+- **Commit Log** — the project's git history, grouped by phase for readability. Reconstructed retrospectively on 2026-07-15 since `docs/` did not exist before this file.
+
+---
+
+## Code Changes Made
+
+### 2026-07-15 — Structured `docs/` reference created
+**What:** Added `docs/INDEX.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/API.md`, `docs/SETUP.md`, `docs/CHANGELOG.md` (this file). Fixed a stale port reference in the root `README.md` (said Postgres runs on 5432; `docker-compose.yml` maps it to 5434 as of commit `a56ffcd`).
+**Why:** `CLAUDE.md` requires every change to be documented in `docs/` with API response fields traced to their `table.column`/formula source, but no `docs/` directory existed yet — all project knowledge lived only in the root `README.md` (demo pitch) and `memory.md` (freeform dev notes), neither of which is organized for that traceability requirement. This reconstructs a structured reference from the current codebase and full commit history.
+**Not stored / no schema change:** documentation only, no code or migration touched.
+
+### 2026-07-15 — Renamed docs index file, untracked CLAUDE.md
+**What:** Renamed `docs/README.md` → `docs/INDEX.md` (updated the two references that pointed at it, in the root `README.md` and here). Committed the pre-existing uncommitted `.gitignore` change (adds `AGENTS.md`, `memory.md`, `CLAUDE.md` to ignore list) and removed `CLAUDE.md` from git tracking (`git rm --cached`, file kept on disk) to match `AGENTS.md`/`memory.md`, which were already untracked.
+**Why:** User preference — avoid a second `README.md` inside `docs/` (ambiguous alongside the root one), and finish untracking the AI-assistant instruction files consistently now that `.gitignore` covers all three.
+
+---
+
+## Commit Log
+
+Full history of the `feat/production-hardening` branch (current branch), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
+
+### Phase 0 — Scaffold
+| Commit | Date | Message |
+|---|---|---|
+| `f73db86` | 2026-06-09 | Initial commit from Create Next App |
+
+### Phase 1 — Core MVP build
+| Commit | Date | Message |
+|---|---|---|
+| `8c01a15` | 2026-06-09 | feat: initial AI-powered invoice tracking system (demo MVP) |
+| `1aefd2c` | 2026-06-09 | docs: add project conventions to CLAUDE.md |
+| `a152127` | 2026-06-09 | feat(task-13): invoice detail page with PDF viewer and approval timeline |
+| `4efa80c` | 2026-06-09 | feat(task-14): approval queue page with role-based cards and optimistic UI |
+| `133a55f` | 2026-06-09 | feat(task-15): reminders page with filter tabs and per-notification read actions |
+| `3d1f56c` | 2026-06-09 | feat(task-16): chatbot, audit log, page transitions, and AI chat service |
+| `78d41a4` | 2026-06-09 | docs: rewrite README with 5W 1H structure for clarity |
+| `3634b11` | 2026-06-09 | fix: address 7 code-review findings (security, correctness, cleanup) |
+| `7ac71bc` | 2026-06-09 | fix: pass icon as ReactNode to resolve RSC boundary crash on dashboard |
+| `90dae5d` | 2026-06-09 | fix: update gemini model to gemini-2.0-flash and add groq support note |
+| `3545fb5` | 2026-06-09 | fix: guard approvals array against undefined in InvoiceDetailDrawer |
+
+### Phase 2 — Dark mode, accessibility, UX polish
+| Commit | Date | Message |
+|---|---|---|
+| `b15ce14` | 2026-06-10 | fix: sidebar highlights only the exact active nav item |
+| `b6f854d` | 2026-06-10 | fix: sidebar active state — exact nav match blocks parent prefix highlight |
+| `f40e1da` | 2026-06-10 | fix(a11y): address critical accessibility issues from UI review |
+| `ed6bd5b` | 2026-06-10 | fix(ux): address high and medium priority UI/UX issues |
+| `b21e823` | 2026-06-10 | fix(polish): improve UI details and visual clarity |
+| `65c405d` | 2026-06-10 | feat(theme): add dark mode support with toggle |
+| `bf45259` | 2026-06-10 | feat(theme): wire dark mode classes to shell components |
+| `5d6b1e6` | 2026-06-10 | Add dark mode variants to InvoiceDetailDrawer component |
+| `e56f592` | 2026-06-10 | Add comprehensive project memory.md documentation |
+| `84abd91` | 2026-06-10 | Complete dark mode for dashboard and InvoiceDetailDrawer |
+| `9d6928e` | 2026-06-10 | Fix dark mode text colors across all dashboard pages |
+
+### Phase 3 — Language consistency
+| Commit | Date | Message |
+|---|---|---|
+| `0612241` | 2026-06-11 | Fixing inconsistent UI language |
+
+### Phase 4 — Multi-persona RBAC (VENDOR / GA_STAFF / GA_MANAGER) + deploy prep
+| Commit | Date | Message |
+|---|---|---|
+| `51bc652` | 2026-06-18 | feat: add VENDOR, GA_STAFF, GA_MANAGER roles and vendor-user link |
+| `dc87d56` | 2026-06-18 | feat: migrate to bcrypt, add vendorId to JWT, seed new personas |
+| `8b880fc` | 2026-06-18 | feat: RBAC updates for vendor/GA personas with IDOR protection |
+| `9f432b5` | 2026-06-18 | feat: update frontend for new personas |
+| `cd53dfc` | 2026-06-18 | test: add RBAC tests for new roles and vendor isolation |
+| `7460e07` | 2026-06-18 | docs: update memory.md with Phase 9 multi-persona changes |
+| `7336cd3` | 2026-06-18 | feat: update login page demo accounts to show all 6 personas |
+| `16120a8` | 2026-06-18 | chore: untrack files covered by .gitignore |
+| `15e593b` | 2026-06-18 | chore(deploy): option-a vercel prep |
+| `ab522b8` | 2026-06-18 | Prepare deployment |
+
+### Phase 5 — Supabase SSL fixes, dashboard dark-mode completion
+| Commit | Date | Message |
+|---|---|---|
+| `da12472` | 2026-06-19 | fix: disable SSL cert verification via env var for Supabase pooler |
+| `ee4298c` | 2026-06-19 | fix: use explicit pg Pool to pass SSL options to Prisma adapter |
+| `880802f` | 2026-06-19 | fix: use explicit pg Pool to bypass sslmode URL param for Supabase |
+| `6e82560` | 2026-06-19 | ui: fix dark mode across KPICard, StatusBadge, TopBar, login page; polish KPI card design |
+
+### Phase 6 — Production hardening: security, validation, docs discipline
+| Commit | Date | Message |
+|---|---|---|
+| `c6f78c4` | 2026-06-25 | docs: add working rules for commit discipline and safety |
+| `cc3e443` | 2026-06-25 | chore: un-track local AI tool config and expand gitignore |
+| `af7370c` | 2026-06-25 | fix: add Zod validation schemas to invoice API routes |
+| `9bae8ea` | 2026-06-25 | fix: sanitize error responses in Python AI service |
+| `e2d1151` | 2026-06-25 | fix: add file magic-byte validation to upload endpoint |
+| `3fb6592` | 2026-06-25 | feat: add per-user rate limiting to OCR and chat API routes |
+| `dd4f708` | 2026-06-25 | feat: add Next.js health check endpoint |
+| `7b55a52` | 2026-06-25 | fix: guard seed script against accidental production run |
+| `6816f14` | 2026-06-25 | feat: add LLM model override, request timeout, and DeepSeek provider support |
+| `6a93202` | 2026-06-25 | chore: move @types/pg to devDependencies |
+| `e6c7aed` | 2026-06-25 | docs: create ai-service/.env.example with all provider configs |
+| `6abc1a9` | 2026-06-25 | docs: update README with all 8 demo accounts and current approval flow |
+
+### Phase 7 — Dependency pinning, local port fix
+| Commit | Date | Message |
+|---|---|---|
+| `a56ffcd` | 2026-07-02 | fix: change local Postgres port from 5432 to 5434 to avoid conflicts |
+| `b7ffd9e` | 2026-07-02 | chore: pin ai-service deps to compatible-release ranges, bump pydantic |
+
+### Uncommitted / in-progress (not part of the log above)
+- Working tree has unstaged edits to `.gitignore` and `CLAUDE.md` (adding the `docs/`, commit-discipline, and data-traceability rules that this file follows).
+- A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.

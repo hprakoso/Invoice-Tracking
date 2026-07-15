@@ -2,6 +2,8 @@
 
 > An AI-powered Invoice Tracking & Accounts Payable Assistant — built as a demo MVP to showcase real-time OCR extraction, multi-step approval workflows, and an AI chatbot, all in a single responsive web app.
 
+> 📚 This file is the pitch/quick-start. For architecture, database schema, API reference (with field-level data-source tracing), and setup/troubleshooting details, see [`docs/`](./docs/INDEX.md).
+
 ---
 
 ## 📌 What is this project?
@@ -66,7 +68,7 @@ Everything runs locally on your machine — no cloud account required:
 |---------|---------|
 | Next.js web app | `http://localhost:3000` |
 | Python AI service | `http://localhost:8000` |
-| PostgreSQL database | `localhost:5432` (via Docker) |
+| PostgreSQL database | `localhost:5434` (via Docker) |
 | Uploaded files | `uploads/invoices/` (local disk) |
 
 ---
@@ -112,7 +114,7 @@ npm install
 Create a `.env.local` file in the project root:
 
 ```env
-DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5432/invoice_demo"
+DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
 AI_SERVICE_URL="http://localhost:8000"
