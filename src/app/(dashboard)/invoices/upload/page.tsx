@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
@@ -66,7 +66,9 @@ function ExtractedFieldCard({ field }: { field: ExtractedField }) {
 export default function UploadPage() {
   const router = useRouter()
   const { data: session } = useSession()
-  const isVendor = (session?.user as { role?: string })?.role === 'VENDOR'
+  const role = (session?.user as { role?: string })?.role
+  const isVendor = role === 'VENDOR'
+  const isGaStaff = role === 'GA_STAFF'
   const vendorId = (session?.user as { vendorId?: string | null })?.vendorId
   const [stage, setStage] = useState<UploadStage>('drop')
   const [file, setFile] = useState<File | null>(null)
@@ -77,6 +79,16 @@ export default function UploadPage() {
   const [invoiceId, setInvoiceId] = useState<string | null>(null)
   const [editableValues, setEditableValues] = useState<Record<string, string>>({})
   const [sendDateValue, setSendDateValue] = useState('')
+  const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
+  const [picIdValue, setPicIdValue] = useState('')
+
+  useEffect(() => {
+    if (isGaStaff) setPicIdValue(session?.user?.id ?? '')
+    if (['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'FINANCE'].includes(role ?? '')) {
+      fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role])
 
   const onDrop = useCallback(async (accepted: File[]) => {
     const f = accepted[0]
@@ -218,6 +230,7 @@ export default function UploadPage() {
           parseFloat(editableValues['subtotal']?.replace(/[^0-9.]/g, '') ?? '0') || null,
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
         sendDate: sendDateValue || null,
+        picId: isGaStaff ? (picIdValue || null) : undefined,
       }),
     })
 
@@ -359,6 +372,19 @@ export default function UploadPage() {
                   onChange={(e) => setSendDateValue(e.target.value)}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 />
+              </div>
+            )}
+            {isGaStaff && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">PIC (GA Staff handling this invoice)</label>
+                <select
+                  value={picIdValue}
+                  onChange={(e) => setPicIdValue(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {gaStaff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
