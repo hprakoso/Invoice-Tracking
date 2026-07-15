@@ -23,7 +23,11 @@ export const createInvoiceSchema = z.object({
   totalAmount: z.number().min(0, 'Total amount must be non-negative'),
   notes: z.string().max(2000).optional().nullable(),
   items: z.array(itemSchema).default([]),
+  sendDate: isoDateString.optional().nullable(),
+  picId: z.string().uuid().optional().nullable(),
 })
+
+export const INVOICE_STATUSES = ['SUBMITTED', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
 
 export const updateInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(100).optional(),
@@ -34,19 +38,45 @@ export const updateInvoiceSchema = z.object({
   taxAmount: z.number().nonnegative().optional().nullable(),
   totalAmount: z.number().min(0).optional(),
   notes: z.string().max(2000).optional().nullable(),
-  status: z
-    .enum(['PENDING_OCR', 'PENDING_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'PAID'])
-    .optional(),
+  status: z.enum(INVOICE_STATUSES).optional(),
   ocrConfidence: z.number().min(0).max(100).optional().nullable(),
+  sendDate: isoDateString.optional().nullable(),
+  deliveredDate: isoDateString.optional().nullable(),
+  picId: z.string().uuid().optional().nullable(),
+  comment: z.string().max(2000).optional(),
 })
 
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  PENDING_OCR: ['PENDING_REVIEW', 'PENDING_APPROVAL', 'REJECTED'],
-  PENDING_REVIEW: ['PENDING_OCR', 'PENDING_APPROVAL', 'REJECTED'],
-  PENDING_APPROVAL: ['PENDING_OCR', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'],
-  APPROVED: ['PAID', 'PENDING_APPROVAL'],
-  REJECTED: ['PENDING_OCR', 'PENDING_REVIEW'],
-  PAID: [],
+export const createUserSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    email: z.string().email(),
+    role: z.enum(['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
+    vendorId: z.string().uuid().optional().nullable(),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+  })
+  .refine((d) => d.role !== 'VENDOR' || !!d.vendorId, {
+    message: 'vendorId is required for VENDOR role',
+    path: ['vendorId'],
+  })
+
+export const VALID_TRANSITIONS: Record<string, string[]> = {
+  SUBMITTED: ['CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
+  REVISION: ['SUBMITTED'],
+  CANCELLED: [],
+  REJECTED: [],
+  VOID: [],
+}
+
+// deliveredDate (GA Staff received the hardcopy) can never predate sendDate (vendor sent it)
+export function validateDeliveryDates(
+  sendDate: string | Date | null | undefined,
+  deliveredDate: string | Date | null | undefined,
+): { valid: boolean; message?: string } {
+  if (!sendDate || !deliveredDate) return { valid: true }
+  if (new Date(deliveredDate) < new Date(sendDate)) {
+    return { valid: false, message: 'deliveredDate cannot be earlier than sendDate' }
+  }
+  return { valid: true }
 }
 
 export function isValidStatusTransition(
@@ -72,7 +102,7 @@ export function validationErrorResponse(
   return NextResponse.json(
     {
       error: 'Validation failed',
-      details: error.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
+      details: error.issues.map((e) => `${e.path.join('.')}: ${e.message}`),
     },
     { status: 400 },
   )

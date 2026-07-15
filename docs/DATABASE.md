@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL 16 + pgvector extension. Schema managed by Prisma (`prisma/schema.prisma`), migrations in `prisma/migrations/`. Local instance runs via `docker-compose.yml`, mapped to host port **5434** (container port 5432) to avoid clashing with a locally installed Postgres.
+PostgreSQL 16 + pgvector extension. Schema managed by Prisma (`prisma/schema.prisma`), migrations in `prisma/migrations/`. Local instance runs via `docker-compose.yml`, mapped to host port **5433** (container port 5432) to avoid clashing with a locally installed Postgres.
 
 ## Connection & SSL
 
@@ -11,7 +11,7 @@ PostgreSQL 16 + pgvector extension. Schema managed by Prisma (`prisma/schema.pri
 ```
 User ──(vendorId, optional)──> Vendor
 User ──1:N──> Invoice (createdBy)
-User ──1:N──> ApprovalWorkflow (approver, optional)
+User ──1:N──> Invoice (pic, optional — GA Staff who received the hardcopy)
 User ──1:N──> AuditLog (optional)
 User ──1:N──> Notification
 
@@ -19,7 +19,6 @@ Vendor ──1:N──> Invoice
 Vendor ──1:N──> User (vendor-portal users)
 
 Invoice ──1:N──> InvoiceItem (cascade delete)
-Invoice ──1:N──> ApprovalWorkflow
 Invoice ──1:N──> AuditLog (optional)
 Invoice ──1:N──> Notification (optional)
 ```
@@ -59,11 +58,14 @@ Invoice ──1:N──> Notification (optional)
 | currency | text, default `IDR` | |
 | subtotal / tax_amount | decimal(15,2), nullable | |
 | total_amount | decimal(15,2) | |
-| status | enum `InvoiceStatus` | `PENDING_OCR → PENDING_REVIEW → PENDING_APPROVAL → APPROVED → PAID`, or `REJECTED` at any point before `PAID` — see valid transitions in `src/lib/validations.ts::VALID_TRANSITIONS` |
+| status | enum `InvoiceStatus` | `SUBMITTED` (default, set on create) → one of `CANCELLED`, `REJECTED`, `VOID` (terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `PAID` was removed — this app never records actual payment, Finance pays outside the system. |
+| send_date | timestamp, nullable | date the vendor sent the physical hardcopy to the office; set by `VENDOR` (own invoice) or `GA_STAFF`/`ADMIN` |
+| delivered_date | timestamp, nullable | date GA Staff physically received the hardcopy; set by `GA_STAFF`/`ADMIN`; must not be earlier than `send_date` (`validateDeliveryDates()`) |
+| pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
 | ocr_confidence | float, nullable | overall confidence score written by the OCR route (0–100), sourced from the AI service's `overall_confidence` |
 | file_path / file_type | text, nullable | local disk path under `uploads/invoices/`; never returned raw to VENDOR-role users from other vendors (IDOR check in `/api/invoices/[id]/file`) |
 | notes | text, nullable | |
-| created_by | uuid FK → `users.id` | |
+| created_by | uuid FK → `users.id` | now settable by `FINANCE`, `ADMIN`, `VENDOR`, or `GA_STAFF` (previously FINANCE/ADMIN/VENDOR only) |
 | created_at / updated_at | timestamp | |
 
 ### `invoice_items`
@@ -77,33 +79,16 @@ Invoice ──1:N──> Notification (optional)
 | total | decimal(15,2) | |
 | sort_order | int, default 0 | display order; set from array index on write |
 
-### `approval_workflows`
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| invoice_id | uuid FK → `invoices.id` | |
-| step | int | `1` = GA_MANAGER, `2` = FINANCE (was FINANCE → MANAGER pre-Phase-9) |
-| approver_id | uuid FK → `users.id`, nullable | set on action |
-| status | enum `ApprovalStatus` | `PENDING` → `APPROVED` \| `REJECTED` |
-| comment | text, nullable | free text from approver, defaults to "Disetujui."/"Ditolak." |
-| actioned_at | timestamp, nullable | |
-| created_at | timestamp | |
-
-**State machine** (enforced in `src/app/api/approvals/[invoiceId]/{approve,reject}/route.ts`, not in the DB):
-- `approve` on step-1 PENDING row → row `APPROVED`, new step-2 `PENDING` row created, invoice → `PENDING_APPROVAL`.
-- `approve` on step-2 PENDING row → row `APPROVED`, invoice → `APPROVED`.
-- `reject` on any PENDING row → row `REJECTED`, invoice → `REJECTED` immediately.
-
 ### `audit_logs`
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK → `users.id`, nullable | actor; null for system-initiated actions |
-| action | text | dot-namespaced, e.g. `invoice.created`, `invoice.approved_step_1`, `invoice.file_uploaded` |
+| action | text | dot-namespaced, e.g. `invoice.created`, `invoice.status_changed`, `invoice.file_uploaded` |
 | entity_type | text | e.g. `invoice` |
 | entity_id | text | id of the affected entity |
 | invoice_id | uuid FK → `invoices.id`, nullable | convenience join for invoice-scoped queries |
-| metadata | jsonb, nullable | action-specific payload (e.g. `{ fileName, fileType }`, `{ step, comment }`) |
+| metadata | jsonb, nullable | action-specific payload (e.g. `{ fileName, fileType }`, `{ from, to, comment }`) |
 | created_at | timestamp | |
 
 Every mutating API route writes one `AuditLog` row per action — see [API.md](./API.md) for the exact `action` string per endpoint.
@@ -114,7 +99,7 @@ Every mutating API route writes one `AuditLog` row per action — see [API.md](.
 | id | uuid PK | |
 | user_id | uuid FK → `users.id` | recipient |
 | invoice_id | uuid FK → `invoices.id`, nullable | |
-| type | text | `due_soon`, `overdue`, `approval_required` |
+| type | text | `due_soon`, `overdue` (sent to `FINANCE`/`GA_STAFF` for `SUBMITTED`/`REVISION` invoices) |
 | title / body | text | Indonesian copy, generated server-side |
 | is_read | bool, default false | |
 | created_at / read_at | timestamp | |
@@ -127,7 +112,8 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 |---|---|
 | `20260608182209_init` | Initial schema — all 7 tables, base `Role` enum (`ADMIN`, `MANAGER`, `FINANCE`, `VIEWER`) |
 | `20260618082131_add_vendor_ga_roles` | `VENDOR`, `GA_STAFF`, `GA_MANAGER` roles; `vendor_id` FK on `users` |
+| `20260715171000_invoice_workflow_overhaul` | Drops `approval_workflows` table and `ApprovalStatus` enum; replaces `InvoiceStatus` enum values entirely (`SUBMITTED`/`CANCELLED`/`REJECTED`/`VOID`/`REVISION`, `PAID` removed); adds `invoices.send_date`, `delivered_date`, `pic_id` |
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 8 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords, demo vendors, and demo invoices across all statuses. Destructive — deletes all rows in dependency order before reseeding.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 9 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, and 20 demo invoices distributed across the 5 statuses with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.

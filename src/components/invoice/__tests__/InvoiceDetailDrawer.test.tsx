@@ -12,16 +12,18 @@ vi.mock('framer-motion', () => ({
 const baseInvoice = {
   id: 'inv-1',
   invoiceNumber: 'INV-001',
-  status: 'PENDING_APPROVAL',
+  status: 'SUBMITTED',
   totalAmount: '5000000',
   dueDate: '2026-07-01',
   invoiceDate: '2026-06-01',
+  sendDate: '2026-05-28',
+  deliveredDate: '2026-05-30',
   currency: 'IDR',
   ocrConfidence: null,
   vendor: { id: 'v1', name: 'PT Maju Jaya' },
   createdBy: { id: 'u1', name: 'Admin' },
+  pic: { id: 'u2', name: 'Rina Kusuma' },
   items: [],
-  approvals: [],
 }
 
 describe('InvoiceDetailDrawer', () => {
@@ -46,11 +48,11 @@ describe('InvoiceDetailDrawer', () => {
     expect(screen.getByText('PT Maju Jaya')).toBeInTheDocument()
   })
 
-  it('does not crash when approvals is an empty array', () => {
+  it('does not crash when pic is null', () => {
     expect(() =>
       render(
         <InvoiceDetailDrawer
-          invoice={{ ...baseInvoice, approvals: [] }}
+          invoice={{ ...baseInvoice, pic: null }}
           onClose={() => {}}
           onRefresh={() => {}}
         />
@@ -58,12 +60,12 @@ describe('InvoiceDetailDrawer', () => {
     ).not.toThrow()
   })
 
-  it('does not crash when approvals is undefined — regression for TypeError at line 206', () => {
-    const invoiceWithoutApprovals = { ...baseInvoice, approvals: undefined as unknown as [] }
+  it('does not crash when sendDate/deliveredDate are undefined', () => {
+    const invoiceWithoutDates = { ...baseInvoice, sendDate: undefined, deliveredDate: undefined }
     expect(() =>
       render(
         <InvoiceDetailDrawer
-          invoice={invoiceWithoutApprovals}
+          invoice={invoiceWithoutDates}
           onClose={() => {}}
           onRefresh={() => {}}
         />
@@ -71,24 +73,17 @@ describe('InvoiceDetailDrawer', () => {
     ).not.toThrow()
   })
 
-  it('shows approval step labels', () => {
+  it('shows PIC name when assigned', () => {
     render(
       <InvoiceDetailDrawer invoice={baseInvoice} onClose={() => {}} onRefresh={() => {}} />
     )
-    expect(screen.getByText('Finance Review')).toBeInTheDocument()
-    expect(screen.getByText('Manager Approval')).toBeInTheDocument()
+    expect(screen.getByText('Rina Kusuma')).toBeInTheDocument()
   })
 
-  it('shows approver name when step 1 is approved', () => {
-    const invoice = {
-      ...baseInvoice,
-      approvals: [
-        { id: 'a1', step: 1, status: 'APPROVED', comment: null, actionedAt: '2026-06-05T10:00:00Z', approver: { id: 'u2', name: 'Siti', role: 'FINANCE' } },
-      ],
-    }
+  it('shows placeholder when PIC is unassigned', () => {
     render(
-      <InvoiceDetailDrawer invoice={invoice} onClose={() => {}} onRefresh={() => {}} />
+      <InvoiceDetailDrawer invoice={{ ...baseInvoice, pic: null }} onClose={() => {}} onRefresh={() => {}} />
     )
-    expect(screen.getByText('Siti')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
   })
 })

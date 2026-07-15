@@ -8,8 +8,8 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import {
-  ArrowLeft, FileText, Calendar, Building2, CheckCircle,
-  XCircle, Clock, ChevronLeft, ChevronRight, AlertTriangle
+  ArrowLeft, FileText, Calendar, Building2,
+  ChevronLeft, ChevronRight, AlertTriangle, Send, Truck, User as UserIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -30,15 +30,6 @@ if (typeof window !== 'undefined') {
   })
 }
 
-interface Approval {
-  id: string
-  step: number
-  status: string
-  comment: string | null
-  actionedAt: string | null
-  approver: { id: string; name: string; role: string } | null
-}
-
 interface Invoice {
   id: string
   invoiceNumber: string
@@ -48,6 +39,8 @@ interface Invoice {
   subtotal: string | null
   dueDate: string | null
   invoiceDate: string | null
+  sendDate: string | null
+  deliveredDate: string | null
   currency: string
   ocrConfidence: number | null
   notes: string | null
@@ -55,11 +48,24 @@ interface Invoice {
   fileType: string | null
   vendor: { id: string; name: string; npwp?: string | null }
   createdBy: { id: string; name: string }
+  pic: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string; sortOrder: number }[]
-  approvals: Approval[]
 }
 
 import { formatIDR, formatDate, isOverdue } from '@/lib/format'
+
+// Duplicated (not imported) from src/lib/validations.ts — that module also
+// pulls in next/server, which can't be bundled into this client component.
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  SUBMITTED: ['CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
+  REVISION: ['SUBMITTED'],
+  CANCELLED: [],
+  REJECTED: [],
+  VOID: [],
+}
+const STATUS_LABELS: Record<string, string> = {
+  SUBMITTED: 'Diajukan', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
+}
 
 function ConfidenceBar({ value }: { value: number }) {
   const color = value >= 80 ? 'bg-green-500' : value >= 50 ? 'bg-yellow-500' : 'bg-red-500'
@@ -75,48 +81,6 @@ function ConfidenceBar({ value }: { value: number }) {
         />
       </div>
       <span className="text-xs text-gray-500 w-20">{label} ({value.toFixed(0)}%)</span>
-    </div>
-  )
-}
-
-function ApprovalTimeline({ approvals }: { approvals: Approval[] }) {
-  const steps = [
-    { step: 1, label: 'Finance Review' },
-    { step: 2, label: 'Manager Approval' },
-  ]
-  return (
-    <div className="space-y-0">
-      {steps.map(({ step, label }, idx) => {
-        const approval = approvals.find(a => a.step === step)
-        const status = approval?.status ?? 'PENDING'
-        const Icon = status === 'APPROVED' ? CheckCircle : status === 'REJECTED' ? XCircle : Clock
-        const iconColor = status === 'APPROVED' ? 'text-green-500' : status === 'REJECTED' ? 'text-red-500' : 'text-gray-400'
-
-        return (
-          <div key={step} className="flex gap-3">
-            <div className="flex flex-col items-center">
-              <Icon className={`h-5 w-5 flex-shrink-0 ${iconColor}`} />
-              {idx < steps.length - 1 && <div className="w-px flex-1 bg-gray-200 my-1 min-h-[24px]" />}
-            </div>
-            <div className="pb-4 flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-gray-700">{label}</p>
-                <StatusBadge status={status === 'PENDING' ? 'PENDING_REVIEW' : status === 'APPROVED' ? 'APPROVED' : 'REJECTED'} />
-              </div>
-              {approval && status !== 'PENDING' && (
-                <div className="mt-1 space-y-0.5">
-                  {approval.approver && <p className="text-xs text-gray-500">{approval.approver.name}</p>}
-                  {approval.comment && <p className="text-xs text-gray-400 italic">&ldquo;{approval.comment}&rdquo;</p>}
-                  {approval.actionedAt && <p className="text-xs text-gray-400">{formatDate(approval.actionedAt)}</p>}
-                </div>
-              )}
-              {(!approval || status === 'PENDING') && (
-                <p className="text-xs text-gray-400 mt-0.5">Awaiting action...</p>
-              )}
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -183,9 +147,13 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<'notfound' | 'auth' | 'network' | null>(null)
-  const [rejectComment, setRejectComment] = useState('')
-  const [showReject, setShowReject] = useState(false)
+  const [newStatus, setNewStatus] = useState('')
+  const [comment, setComment] = useState('')
   const [acting, setActing] = useState(false)
+  const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
+  const [sendDateInput, setSendDateInput] = useState('')
+  const [deliveredDateInput, setDeliveredDateInput] = useState('')
+  const [picId, setPicId] = useState('')
 
   const fetchInvoice = async () => {
     try {
@@ -195,7 +163,11 @@ export default function InvoiceDetailPage() {
       } else if (!res.ok) {
         setFetchError('notfound')
       } else {
-        setInvoice(await res.json())
+        const data = await res.json()
+        setInvoice(data)
+        setSendDateInput(data.sendDate?.slice(0, 10) ?? '')
+        setDeliveredDateInput(data.deliveredDate?.slice(0, 10) ?? '')
+        setPicId(data.pic?.id ?? '')
         setFetchError(null)
       }
     } catch {
@@ -207,49 +179,54 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => {
     fetchInvoice()
+    fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const handleApprove = async () => {
-    setActing(true)
-    const res = await fetch(`/api/approvals/${id}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: 'Approved.' }),
-    })
-    setActing(false)
-    if (res.ok) {
-      toast.success('Invoice approved')
-      fetchInvoice()
-    } else {
-      toast.error('Failed to approve invoice')
-    }
-  }
-
-  const handleReject = async () => {
-    if (!rejectComment.trim()) { toast.error('Please enter a rejection reason'); return }
-    setActing(true)
-    const res = await fetch(`/api/approvals/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: rejectComment }),
-    })
-    setActing(false)
-    if (res.ok) {
-      toast.success('Invoice rejected')
-      setShowReject(false)
-      setRejectComment('')
-      fetchInvoice()
-    } else {
-      toast.error('Failed to reject invoice')
-    }
-  }
-
   const role = (session?.user as { role?: string } | undefined)?.role
-  const canAct = invoice?.status === 'PENDING_APPROVAL' &&
-    ((role === 'FINANCE' && !invoice.approvals.find(a => a.step === 1 && a.status === 'APPROVED')) ||
-     (role === 'MANAGER' && !!invoice.approvals.find(a => a.step === 1 && a.status === 'APPROVED') && !invoice.approvals.find(a => a.step === 2 && a.status !== 'PENDING')) ||
-     role === 'ADMIN')
+  const isOwner = role === 'VENDOR' && invoice?.createdBy?.id === session?.user?.id
+  const canUpdateStatus = ['GA_STAFF', 'FINANCE', 'ADMIN'].includes(role ?? '')
+  const canResubmit = invoice?.status === 'REVISION' && (role === 'GA_STAFF' || role === 'ADMIN' || isOwner)
+  const canEditDelivery = ['GA_STAFF', 'ADMIN'].includes(role ?? '')
+  const canEditSendDate = canEditDelivery || (role === 'VENDOR' && isOwner)
+  const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []) : []
+
+  const patchInvoice = async (body: Record<string, unknown>, successMsg: string) => {
+    setActing(true)
+    const res = await fetch(`/api/invoices/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    setActing(false)
+    if (res.ok) {
+      toast.success(successMsg)
+      fetchInvoice()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? 'Update failed')
+    }
+  }
+
+  const handleStatusUpdate = () => {
+    if (!newStatus) { toast.error('Select a status'); return }
+    patchInvoice({ status: newStatus, comment: comment || undefined }, 'Status updated')
+    setNewStatus('')
+    setComment('')
+  }
+
+  const handleResubmit = () => patchInvoice({ status: 'SUBMITTED' }, 'Invoice resubmitted')
+
+  const handleDeliverySave = () => {
+    if (deliveredDateInput && sendDateInput && deliveredDateInput < sendDateInput) {
+      toast.error('Delivered date cannot be earlier than send date')
+      return
+    }
+    patchInvoice(
+      { sendDate: sendDateInput || undefined, deliveredDate: deliveredDateInput || undefined, picId: picId || undefined },
+      'Delivery info saved',
+    )
+  }
 
   if (loading) {
     return (
@@ -392,46 +369,76 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
-          {/* Approval Timeline */}
-          <div className="bg-white rounded-xl border p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-4">Approval Workflow</p>
-            <ApprovalTimeline approvals={invoice.approvals} />
+          {/* Delivery & PIC */}
+          <div className="bg-white rounded-xl border p-4 space-y-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wide">Delivery &amp; PIC</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><Send className="h-3 w-3" /> Send Date</label>
+                <input
+                  type="date"
+                  value={sendDateInput}
+                  onChange={e => setSendDateInput(e.target.value)}
+                  disabled={!canEditSendDate}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><Truck className="h-3 w-3" /> Delivered Date</label>
+                <input
+                  type="date"
+                  value={deliveredDateInput}
+                  onChange={e => setDeliveredDateInput(e.target.value)}
+                  disabled={!canEditDelivery}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
+                />
+              </div>
+            </div>
+            {canEditDelivery ? (
+              <div>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><UserIcon className="h-3 w-3" /> PIC (GA Staff)</label>
+                <select
+                  value={picId}
+                  onChange={e => setPicId(e.target.value)}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {gaStaff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600"><UserIcon className="h-3 w-3 inline mr-1" /> PIC: {invoice.pic?.name ?? '—'}</p>
+            )}
+            {(canEditSendDate || canEditDelivery) && (
+              <Button size="sm" onClick={handleDeliverySave} disabled={acting}>Save Delivery Info</Button>
+            )}
           </div>
 
-          {/* Action Buttons */}
-          {canAct && (
+          {/* Update Status */}
+          {canResubmit && (
+            <div className="bg-white rounded-xl border p-4">
+              <Button onClick={handleResubmit} disabled={acting} className="w-full">Resubmit</Button>
+            </div>
+          )}
+          {canUpdateStatus && transitionOptions.length > 0 && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Actions</p>
-              {!showReject ? (
-                <div className="flex gap-2">
-                  <Button onClick={handleApprove} disabled={acting} className="flex-1 bg-green-600 hover:bg-green-700">
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    {role === 'FINANCE' ? 'Forward to Manager' : 'Approve'}
-                  </Button>
-                  <Button variant="destructive" onClick={() => setShowReject(true)} disabled={acting} className="flex-1">
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Reject
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <textarea
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
-                    placeholder="Rejection reason (required)..."
-                    rows={3}
-                    value={rejectComment}
-                    onChange={e => setRejectComment(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <Button variant="destructive" onClick={handleReject} disabled={acting || !rejectComment.trim()} className="flex-1">
-                      Confirm Rejection
-                    </Button>
-                    <Button variant="outline" onClick={() => { setShowReject(false); setRejectComment('') }} className="flex-1">
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Update Status</p>
+              <select
+                value={newStatus}
+                onChange={e => setNewStatus(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">Select new status...</option>
+                {transitionOptions.map(s => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
+              </select>
+              <textarea
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                placeholder="Comment (optional)..."
+                rows={2}
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+              />
+              <Button onClick={handleStatusUpdate} disabled={acting || !newStatus} className="w-full">Update</Button>
             </div>
           )}
 

@@ -11,33 +11,48 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 
 | Response field | Source |
 |---|---|
-| `id`, `vendorId`, `invoiceNumber`, `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount`, `status`, `ocrConfidence`, `filePath`, `fileType`, `notes`, `createdById`, `createdAt`, `updatedAt` | `invoices.*` (1:1 column mapping, camelCase via Prisma `@map`) |
+| `id`, `vendorId`, `invoiceNumber`, `invoiceDate`, `dueDate`, `sendDate`, `deliveredDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount`, `status`, `ocrConfidence`, `filePath`, `fileType`, `notes`, `createdById`, `createdAt`, `updatedAt` | `invoices.*` (1:1 column mapping, camelCase via Prisma `@map`) |
 | `vendor.id`, `vendor.name` | `vendors.id`, `vendors.name` |
 | `createdBy.id`, `createdBy.name` | `users.id`, `users.name` |
+| `pic.id`, `pic.name` | `users.id`, `users.name` via `invoices.pic_id` |
 | `items[]` | `invoice_items.*` where `invoice_id = invoices.id`, ordered by `sort_order` |
 
 ### `POST /api/invoices`
-Auth: `FINANCE`, `ADMIN`, `VENDOR`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value.
+Auth: `FINANCE`, `ADMIN`, `VENDOR`, `GA_STAFF`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`.
 
-Writes: `invoices` row (`status` forced to `PENDING_REVIEW`, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
+Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `approvals[]` (`approval_workflows.*` where `invoice_id = id`, with `approver.{id,name,role}`, ordered by `step`).
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`.
 
 ### `PATCH /api/invoices/[id]`
-Auth: `FINANCE`, `ADMIN`. Body validated by `updateInvoiceSchema`. If `status` is present, the transition is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`) against the current `invoices.status` before writing.
+Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
 
-Writes: `invoices` row (partial update), `audit_logs` (`action: 'invoice.updated'`, `metadata: { fields: [...changed keys] }`).
+| Role | Writable fields | When |
+|---|---|---|
+| `VENDOR` (own invoice only) | `sendDate` | any status |
+| | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `status→SUBMITTED` | while `status = REVISION` (fixing and resubmitting) |
+| | + same core fields (no `status`) | while `status = SUBMITTED` **and** this VENDOR created the invoice — finishes the post-OCR review step from the upload wizard |
+| `GA_STAFF` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`) | always |
+| | + core fields above | while `status ∈ {SUBMITTED, REVISION}` **and** this GA_STAFF created the invoice |
+| `FINANCE` | `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `ocrConfidence` | any status |
+| | + `status` (`SUBMITTED→*` only, not the `REVISION` resubmit direction) | while `status = SUBMITTED` |
+| `GA_MANAGER`, `VIEWER` | none (403) | — |
+| `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
+
+Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+
+Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`.
 
 ### `DELETE /api/invoices/[id]`
-Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'REJECTED'` (no row is actually deleted). Writes `audit_logs` (`action: 'invoice.cancelled'`).
+Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'CANCELLED'` (no row is actually deleted). Writes `audit_logs` (`action: 'invoice.cancelled'`).
 
 ### `POST /api/invoices/[id]/upload`
-Auth: `FINANCE`, `ADMIN`, `VENDOR` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
+Auth: `FINANCE`, `ADMIN`, `VENDOR`, `GA_STAFF` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
 
-Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type`, `invoices.status = 'PENDING_OCR'`, `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
+Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched — stays `SUBMITTED`), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
 
 ### `GET /api/invoices/[id]/ocr` (SSE stream)
 Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Streams `status`, `field`, `line_items`, `done`/`error` events.
@@ -49,31 +64,10 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 | `ocrConfidence` | `invoices.ocr_confidence` ← AI service `overall_confidence` (average confidence of non-null extracted fields, computed in `ai-service/app/api/ocr.py`) |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the AI response |
 
-On error, `invoices.status` is force-set to `PENDING_REVIEW` so the user can enter data manually.
+OCR no longer changes `invoices.status` on success or error — the invoice stays `SUBMITTED` throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data.
 
 ### `GET /api/invoices/[id]/file`
 Auth: any authenticated user; `VENDOR` 403 if not their invoice. Returns 503 when `process.env.VERCEL === '1'` (no persistent disk on Vercel). Path is resolved and confined to `uploads/invoices/` before reading (`path.resolve` + prefix check) to block path traversal. **Not Stored as an API field** — streams the raw file bytes referenced by `invoices.file_path`.
-
-## Approvals
-
-### `GET /api/approvals`
-Auth: `GA_STAFF`, `GA_MANAGER`, `FINANCE`, `MANAGER`, `ADMIN`. Step filter by role: `GA_MANAGER` → `step=1`, `FINANCE`/`MANAGER` → `step=2`, `GA_STAFF`/`ADMIN` → all pending steps (read-only for `GA_STAFF` — enforced by the absence of `GA_STAFF` in the approve/reject route's allowed roles, not by this route).
-
-| Response field | Source |
-|---|---|
-| Workflow fields | `approval_workflows.*` where `status = 'PENDING'` (+ role-based `step` filter) |
-| `invoice.*` | `invoices.*` |
-| `invoice.vendor.name` | `vendors.name` |
-| `invoice.items[]` | `invoice_items.*` |
-| `approver.{id,name}` | `users.id`, `users.name` |
-
-### `POST /api/approvals/[invoiceId]/approve`
-Auth: `GA_MANAGER`, `FINANCE`, `MANAGER`, `ADMIN`. `step` derived from role: `FINANCE`/`MANAGER` → `2`, else → `1`. Fails 404 if no `PENDING` `approval_workflows` row exists for that `(invoiceId, step)`.
-
-Writes: `approval_workflows` row → `status='APPROVED'`, `approver_id`, `comment`, `actioned_at`. If step 1: creates a new step-2 `approval_workflows` row, sets `invoices.status='PENDING_APPROVAL'`, creates `notifications` rows for all active `FINANCE` users (`type: 'approval_required'`). If step 2: `invoices.status='APPROVED'`. Always writes `audit_logs` (`action: 'invoice.approved_step_{n}'`).
-
-### `POST /api/approvals/[invoiceId]/reject`
-Auth: same as approve. Writes: `approval_workflows.status='REJECTED'`, `invoices.status='REJECTED'`, `audit_logs` (`action: 'invoice.rejected_step_{n}'`).
 
 ## Vendors
 
@@ -83,14 +77,14 @@ Auth: any authenticated user. Returns `vendors.{id,name,npwp,contactEmail,bankNa
 ## Dashboard
 
 ### `GET /api/dashboard`
-Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below.
+Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below. Aggregation logic shared with the export route via `getDashboardStats()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
 
 | Response field | Source |
 |---|---|
 | `totalInvoices` | `formula`: `COUNT(invoices)` (vendor-scoped for VENDOR role) |
-| `totalPayable` | `formula`: `SUM(invoices.total_amount)` where `status IN ('PENDING_APPROVAL','APPROVED')` |
-| `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()` and `status IN ('PENDING_APPROVAL','APPROVED')` |
-| `pendingApprovalCount` | `formula`: `COUNT(invoices)` where `status='PENDING_APPROVAL'` |
+| `totalPayable` | `formula`: `SUM(invoices.total_amount)` where `status IN ('SUBMITTED','REVISION')` (the two "open" statuses — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle)) |
+| `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()` and `status IN ('SUBMITTED','REVISION')` |
+| `openCount` | `formula`: `COUNT(invoices)` where `status IN ('SUBMITTED','REVISION')` (replaces the old `pendingApprovalCount`, no more approval concept) |
 | `statusBreakdown[]` | `formula`: `GROUP BY invoices.status`, count per group |
 | `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), status filtered same as `totalPayable` |
 | `recentInvoices[]` | `invoices.*` (10 most recent by `created_at`) + `vendor.name` |

@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR'])
+  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR', 'GA_STAFF'])
   if (error || !session) return error
 
   const body = await req.json()
@@ -67,9 +67,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Vendor account not linked' }, { status: 403 })
   }
 
+  // GA_STAFF creating an invoice is the hardcopy's first handler by default
+  const effectivePicId =
+    session.user.role === 'GA_STAFF' ? session.user.id : (data.picId ?? null)
+
   const invoice = await prisma.invoice.create({
     data: {
-      vendorId: effectiveVendorId,
+      vendorId: effectiveVendorId as string,
       invoiceNumber: data.invoiceNumber,
       invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -78,7 +82,9 @@ export async function POST(req: NextRequest) {
       taxAmount: data.taxAmount ?? null,
       totalAmount: data.totalAmount,
       notes: data.notes ?? null,
-      status: 'PENDING_REVIEW',
+      status: 'SUBMITTED',
+      sendDate: data.sendDate ? new Date(data.sendDate) : null,
+      picId: effectivePicId,
       createdById: session.user.id,
       items: {
         create: data.items.map((item, i) => ({

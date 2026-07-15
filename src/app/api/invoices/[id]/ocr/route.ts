@@ -99,7 +99,6 @@ export async function GET(
               ? parseFloat(extracted.total_amount.value)
               : invoice.totalAmount,
             ocrConfidence: extracted.overall_confidence ?? 0,
-            status: 'PENDING_REVIEW',
           },
         })
 
@@ -127,12 +126,6 @@ export async function GET(
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         controller.enqueue(emit('error', { message }))
-
-        // Set invoice to PENDING_REVIEW even on error so user can enter manually
-        await prisma.invoice.update({
-          where: { id },
-          data: { status: 'PENDING_REVIEW' },
-        }).catch(() => {})
       } finally {
         controller.close()
       }

@@ -17,18 +17,11 @@ enum Role {
 }
 
 enum InvoiceStatus {
-  PENDING_OCR
-  PENDING_REVIEW
-  PENDING_APPROVAL
-  APPROVED
+  SUBMITTED
+  CANCELLED
   REJECTED
-  PAID
-}
-
-enum ApprovalStatus {
-  PENDING
-  APPROVED
-  REJECTED
+  VOID
+  REVISION
 }
 
 model User {
@@ -45,7 +38,7 @@ model User {
   vendor            Vendor?            @relation(fields: [vendorId], references: [id])
 
   createdInvoices   Invoice[]          @relation("CreatedBy")
-  approvals         ApprovalWorkflow[]
+  picInvoices       Invoice[]          @relation("Pic")
   auditLogs         AuditLog[]
   notifications     Notification[]
 
@@ -79,7 +72,10 @@ model Invoice {
   subtotal       Decimal?      @db.Decimal(15, 2)
   taxAmount      Decimal?      @map("tax_amount") @db.Decimal(15, 2)
   totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
-  status         InvoiceStatus @default(PENDING_OCR)
+  status         InvoiceStatus @default(SUBMITTED)
+  sendDate       DateTime?     @map("send_date")
+  deliveredDate  DateTime?     @map("delivered_date")
+  picId          String?       @map("pic_id")
   ocrConfidence  Float?        @map("ocr_confidence")
   filePath       String?       @map("file_path")
   fileType       String?       @map("file_type")
@@ -88,10 +84,10 @@ model Invoice {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  vendor         Vendor             @relation(fields: [vendorId], references: [id])
-  createdBy      User               @relation("CreatedBy", fields: [createdById], references: [id])
+  vendor         Vendor         @relation(fields: [vendorId], references: [id])
+  createdBy      User           @relation("CreatedBy", fields: [createdById], references: [id])
+  pic            User?          @relation("Pic", fields: [picId], references: [id])
   items          InvoiceItem[]
-  approvals      ApprovalWorkflow[]
   auditLogs      AuditLog[]
   notifications  Notification[]
 
@@ -110,22 +106,6 @@ model InvoiceItem {
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@map("invoice_items")
-}
-
-model ApprovalWorkflow {
-  id          String         @id @default(uuid())
-  invoiceId   String         @map("invoice_id")
-  step        Int
-  approverId  String?        @map("approver_id")
-  status      ApprovalStatus @default(PENDING)
-  comment     String?
-  actionedAt  DateTime?      @map("actioned_at")
-  createdAt   DateTime       @default(now()) @map("created_at")
-
-  invoice     Invoice        @relation(fields: [invoiceId], references: [id])
-  approver    User?          @relation(fields: [approverId], references: [id])
-
-  @@map("approval_workflows")
 }
 
 model AuditLog {

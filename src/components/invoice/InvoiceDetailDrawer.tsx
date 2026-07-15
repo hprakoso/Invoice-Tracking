@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, FileText, Calendar, Building2, DollarSign, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { X, FileText, Calendar, Building2, DollarSign, Send, Truck, User } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import { Separator } from '@/components/ui/separator'
 
@@ -14,20 +14,15 @@ interface Invoice {
   subtotal?: string | null
   dueDate: string | null
   invoiceDate: string | null
+  sendDate?: string | null
+  deliveredDate?: string | null
   currency: string
   ocrConfidence: number | null
   notes?: string | null
   vendor: { id: string; name: string; npwp?: string | null }
   createdBy: { id: string; name: string }
+  pic?: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string }[]
-  approvals: {
-    id: string
-    step: number
-    status: string
-    comment: string | null
-    actionedAt: string | null
-    approver: { id: string; name: string; role: string } | null
-  }[]
 }
 
 function formatIDR(v: string | number | null | undefined) {
@@ -38,43 +33,6 @@ function formatIDR(v: string | number | null | undefined) {
 function formatDate(d: string | null | undefined) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
-function ApprovalStep({ step, approval }: { step: number; approval?: Invoice['approvals'][0] }) {
-  const label = step === 1 ? 'Finance Review' : 'Manager Approval'
-  const icon = !approval || approval.status === 'PENDING'
-    ? <Clock className="h-4 w-4 text-gray-400" />
-    : approval.status === 'APPROVED'
-      ? <CheckCircle className="h-4 w-4 text-green-500" />
-      : <XCircle className="h-4 w-4 text-red-500" />
-
-  const badgeStatus = !approval || approval.status === 'PENDING'
-    ? 'PENDING_REVIEW'
-    : approval.status === 'APPROVED'
-      ? 'APPROVED'
-      : 'REJECTED'
-
-  return (
-    <div className="flex items-start gap-3">
-      <div className="mt-0.5">{icon}</div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</p>
-        {approval && approval.status !== 'PENDING' && (
-          <>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{approval.approver?.name ?? 'Unknown'}</p>
-            {approval.comment && <p className="text-xs text-gray-500 dark:text-gray-400 italic mt-0.5">&ldquo;{approval.comment}&rdquo;</p>}
-            {approval.actionedAt && (
-              <p className="text-xs text-gray-400 dark:text-gray-500">{formatDate(approval.actionedAt)}</p>
-            )}
-          </>
-        )}
-        {(!approval || approval.status === 'PENDING') && (
-          <p className="text-xs text-gray-400 dark:text-gray-500">Pending...</p>
-        )}
-      </div>
-      <StatusBadge status={badgeStatus} />
-    </div>
-  )
 }
 
 interface Props {
@@ -199,12 +157,19 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
 
               <Separator />
 
-              {/* Approval Timeline */}
+              {/* Delivery */}
               <div>
-                <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">Approval Workflow</p>
-                <div className="space-y-3">
-                  <ApprovalStep step={1} approval={(invoice.approvals ?? []).find(a => a.step === 1)} />
-                  <ApprovalStep step={2} approval={(invoice.approvals ?? []).find(a => a.step === 2)} />
+                <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">Delivery</p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <Send className="h-3.5 w-3.5" /> Send Date: <span className="text-gray-800 dark:text-gray-200">{formatDate(invoice.sendDate)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <Truck className="h-3.5 w-3.5" /> Delivered Date: <span className="text-gray-800 dark:text-gray-200">{formatDate(invoice.deliveredDate)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                    <User className="h-3.5 w-3.5" /> PIC: <span className="text-gray-800 dark:text-gray-200">{invoice.pic?.name ?? '—'}</span>
+                  </div>
                 </div>
               </div>
 

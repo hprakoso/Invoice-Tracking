@@ -76,6 +76,7 @@ export default function UploadPage() {
   const [overallConfidence, setOverallConfidence] = useState(0)
   const [invoiceId, setInvoiceId] = useState<string | null>(null)
   const [editableValues, setEditableValues] = useState<Record<string, string>>({})
+  const [sendDateValue, setSendDateValue] = useState('')
 
   const onDrop = useCallback(async (accepted: File[]) => {
     const f = accepted[0]
@@ -216,12 +217,12 @@ export default function UploadPage() {
         subtotal:
           parseFloat(editableValues['subtotal']?.replace(/[^0-9.]/g, '') ?? '0') || null,
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
-        status: 'PENDING_APPROVAL',
+        sendDate: sendDateValue || null,
       }),
     })
 
     setStage('done')
-    toast.success('Invoice confirmed and submitted for approval!')
+    toast.success('Invoice submitted successfully!')
     setTimeout(() => router.push('/invoices'), 1500)
   }
 
@@ -349,6 +350,17 @@ export default function UploadPage() {
           {/* Editable Fields */}
           <div className="bg-white rounded-xl border p-4 sm:p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700">Verify &amp; Edit Data</h3>
+            {isVendor && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Send Date (hardcopy sent to office)</label>
+                <input
+                  type="date"
+                  value={sendDateValue}
+                  onChange={(e) => setSendDateValue(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {fields.map((field) => (
                 <div key={field.key}>
@@ -394,7 +406,7 @@ export default function UploadPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
-              Confirm &amp; Submit for Approval
+              Confirm &amp; Submit
             </Button>
             <Button
               variant="outline"

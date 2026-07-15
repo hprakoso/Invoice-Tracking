@@ -11,7 +11,7 @@
 | Charts | recharts | Status donut, aging bar |
 | Auth | NextAuth v5 (Credentials provider, JWT sessions) | bcrypt (cost 12) password hashing |
 | ORM | Prisma 7.8.0 + `@prisma/adapter-pg` | Explicit `pg.Pool` (see [DATABASE.md](./DATABASE.md#connection--ssl)) |
-| Database | PostgreSQL 16 + pgvector | Local via Docker Compose, port **5434** on host |
+| Database | PostgreSQL 16 + pgvector | Local via Docker Compose, port **5433** on host |
 | AI service | Python FastAPI (separate process) | OCR extraction + RAG chatbot |
 | OCR | Tesseract + PyMuPDF/pdf2image | Indonesian + English |
 | LLM orchestration | LangChain (LCEL) | Provider-agnostic via `LLM_PROVIDER` |
@@ -27,7 +27,7 @@ Browser
   ▼
 Next.js app (localhost:3000)
   ├─ React UI (App Router, RSC by default, 'use client' where needed)
-  ├─ API routes  src/app/api/**  ──────► PostgreSQL (Prisma, port 5434)
+  ├─ API routes  src/app/api/**  ──────► PostgreSQL (Prisma, port 5433)
   ├─ NextAuth (JWT session, role + vendorId in token)
   └─ node-cron reminder scheduler (in-process, started via src/instrumentation.ts)
         │
@@ -44,25 +44,29 @@ The Next.js app is the only thing PostgreSQL and the browser talk to directly; t
 ## Request flows
 
 ### OCR extraction (upload → structured data)
-1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file to `uploads/invoices/`, sets `Invoice.status = PENDING_OCR`.
+1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file to `uploads/invoices/`. Status is untouched (already `SUBMITTED` from creation).
 2. Client opens `GET /api/invoices/[id]/ocr` (SSE stream, rate-limited 5 req/min/user).
 3. Route reads `Invoice.filePath`, calls AI service `POST /ocr/extract` with the file path.
 4. AI service: `ocr_service.py` (Tesseract text extraction) → `extraction_chain.py` (LangChain LLM call, structured JSON with per-field confidence) → response.
-5. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows, sets `status = PENDING_REVIEW`.
+5. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `SUBMITTED` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data.
 
-### Approval workflow
-Two-step. The first `ApprovalWorkflow` row (step 1, GA_MANAGER) is expected to already exist (created by the seed script / invoice creation flow) before `/api/approvals/[invoiceId]/approve` is first called; step 2 (FINANCE) is created by the API when step 1 is approved. See [DATABASE.md](./DATABASE.md#approval_workflows) for the state machine.
+### Invoice status lifecycle
+No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because the actual approval/payment decision happens outside the app (Finance does not pay through this system). The current lifecycle:
 
-- Step 1 (`GA_MANAGER`) approves → invoice `PENDING_APPROVAL`, step-2 `ApprovalWorkflow` row created, all `FINANCE` users notified.
-- Step 2 (`FINANCE`, or legacy `MANAGER`) approves → invoice `APPROVED`.
-- Reject at either step → invoice `REJECTED` immediately (no further steps).
-- Every transition writes an `AuditLog` row.
+1. `VENDOR` or `GA_STAFF` creates/uploads an invoice → `status = SUBMITTED` (set at creation, never touched by OCR).
+2. `GA_STAFF` physically receives the hardcopy and forwards it to the Finance team — **outside the app**. In-app, GA_STAFF records `deliveredDate` + becomes/reassigns the `pic` (person in charge) via `PATCH /api/invoices/[id]`, with a hard rule: `deliveredDate` can never predate `sendDate` (`validateDeliveryDates()` in `src/lib/validations.ts`, enforced client- and server-side).
+3. Once the external outcome is known, `GA_STAFF`, `FINANCE`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction).
+4. `REVISION` loops back: the `VENDOR` (owner) or `GA_STAFF` fixes the core fields and resubmits, `status → SUBMITTED`.
+
+`VALID_TRANSITIONS` (`src/lib/validations.ts`): `SUBMITTED → {CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
+
+`GA_MANAGER` is now a deprecated role (same treatment as `MANAGER`) — its only prior function (step-1 approval) no longer exists; it retains only baseline read access.
 
 ### Chatbot (RAG)
 `POST /api/chat` (rate-limited 10 req/min/user) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM.
 
 ### Due-date reminders
-`src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `PENDING_APPROVAL`/`APPROVED` due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `FINANCE`/`GA_MANAGER` users, deduplicated per 24h window.
+`src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `FINANCE`/`GA_STAFF` users, deduplicated per 24h window.
 
 ## Folder structure
 
@@ -72,15 +76,14 @@ src/
 │   ├── (auth)/login/page.tsx        # Public login page
 │   ├── (dashboard)/                 # Protected layout (sidebar + topbar)
 │   │   ├── page.tsx                 # Dashboard (KPIs, charts)
-│   │   ├── invoices/                # List, upload, [id] detail
-│   │   ├── approvals/               # Approval queue
+│   │   ├── invoices/                # List, upload, [id] detail (status update, delivery/PIC)
 │   │   ├── chat/                    # AI chatbot
-│   │   ├── reminders/               # Notification feed
+│   │   ├── reminders/                # Notification feed
 │   │   └── audit/                   # Audit log
 │   └── api/                         # Next.js API routes — see docs/API.md
 ├── components/
 │   ├── ui/                          # shadcn/ui primitives
-│   ├── invoice/, dashboard/, approval/, chat/, layout/
+│   ├── invoice/, dashboard/, chat/, layout/
 ├── hooks/                           # useTheme, useCountUp, useNotificationStream
 ├── lib/
 │   ├── db/prisma.ts                 # Prisma client singleton (explicit pg.Pool + SSL)

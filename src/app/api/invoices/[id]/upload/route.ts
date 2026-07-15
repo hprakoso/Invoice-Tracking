@@ -7,7 +7,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR'])
+  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR', 'GA_STAFF'])
   if (error || !session) return error ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
@@ -63,11 +63,7 @@ export async function POST(
 
   const invoice = await prisma.invoice.update({
     where: { id },
-    data: {
-      filePath,
-      fileType,
-      status: 'PENDING_OCR',
-    },
+    data: { filePath, fileType },
   })
 
   await prisma.auditLog.create({
