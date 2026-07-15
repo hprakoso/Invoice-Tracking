@@ -173,6 +173,8 @@ Full history of the `feat/production-hardening` branch (current branch), grouped
 | `6319844` | 2026-07-15 | fix: load ai-service .env via python-dotenv so LLM API keys are read |
 | `3d00050` | 2026-07-15 | fix: add missing PIC dropdown to the upload flow for GA_STAFF |
 | `490c219` | 2026-07-15 | fix: invoice list rows now navigate to the full editable detail page |
+| `b3c79be` | 2026-07-15 | feat: add Fix & Resubmit form for REVISION invoices |
+| `e82d76a` | 2026-07-16 | fix: restrict revision-resubmit to vendor, hide PIC from vendor view |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
