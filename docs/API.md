@@ -125,6 +125,17 @@ Auth: any authenticated user. Polls `COUNT(notifications) WHERE user_id = sessio
 ### `POST /api/chat`
 Auth: any authenticated user, rate-limited **10 requests/min/user**. Proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. On AI-service failure or timeout, returns a canned Indonesian fallback message with HTTP 200 (not an error status — see [Known Limitations](./ARCHITECTURE.md#known-architectural-limitations-demo-mvp)). `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
 
+## Users
+
+### `GET /api/users`
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `FINANCE` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
+
+### `POST /api/users`
+Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+
+### `PATCH /api/users/[id]`
+Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Writes: `users` row (partial update), `audit_logs` (`action: 'user.role_updated'`, `metadata: { from, to }`).
+
 ## System
 
 ### `GET /api/health`

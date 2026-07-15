@@ -84,7 +84,7 @@ Invoice ──1:N──> Notification (optional)
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK → `users.id`, nullable | actor; null for system-initiated actions |
-| action | text | dot-namespaced, e.g. `invoice.created`, `invoice.status_changed`, `invoice.file_uploaded` |
+| action | text | dot-namespaced, e.g. `invoice.created`, `invoice.status_changed`, `invoice.file_uploaded`, `user.created`, `user.role_updated` |
 | entity_type | text | e.g. `invoice` |
 | entity_id | text | id of the affected entity |
 | invoice_id | uuid FK → `invoices.id`, nullable | convenience join for invoice-scoped queries |

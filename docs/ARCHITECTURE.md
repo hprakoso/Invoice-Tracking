@@ -81,6 +81,7 @@ src/
 │   ├── (dashboard)/                 # Protected layout (sidebar + topbar)
 │   │   ├── page.tsx                 # Dashboard (KPIs, charts, Excel export link)
 │   │   ├── invoices/                # List, upload, [id] detail (status update, delivery/PIC)
+│   │   ├── admin/users/              # Admin-only user management (create, edit role)
 │   │   ├── chat/                    # AI chatbot
 │   │   ├── reminders/                # Notification feed
 │   │   └── audit/                   # Audit log
