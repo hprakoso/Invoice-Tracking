@@ -8,6 +8,10 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-15 — Invoice list navigation didn't reach the editable detail page
+**What:** `invoices/page.tsx` row click opened the read-only `InvoiceDetailDrawer` instead of navigating to `/invoices/[id]`, so the Update Status / Delivery & PIC editing cards added in the status-lifecycle work were unreachable. Rows now `router.push()` to the full detail page; `InvoiceDetailDrawer.tsx` (now fully unused) and its test were deleted.
+**Why:** User-reported via screenshot during manual QA — confirmed the underlying card code was correct, the bug was pure navigation.
+
 ### 2026-07-15 — Two bugs found during manual QA of the invoice workflow overhaul
 **What:** (1) `ai-service/main.py` now calls `load_dotenv()` before the FastAPI app/router imports — `python-dotenv` was already a listed dependency but nothing invoked it, so `ai-service/.env` never reached `os.environ`, causing every OCR/chat call to fail with a `GROQ_API_KEY` error even though `uvicorn` itself started fine. (2) `invoices/upload/page.tsx` review step gets a PIC dropdown for `GA_STAFF` uploaders (sourced from `GET /api/users?role=GA_STAFF`, defaults to self, submitted via the existing `PATCH /api/invoices/[id]` `picId` field) — previously only `VENDOR` got a Send Date input at this step, `GA_STAFF` had no way to assign/reassign PIC during upload at all.
 **Why:** User-reported during manual verification of the previous commits (see Phase 9 in the Commit Log below).
@@ -160,6 +164,7 @@ Full history of the `feat/production-hardening` branch (current branch), grouped
 |---|---|---|
 | `6319844` | 2026-07-15 | fix: load ai-service .env via python-dotenv so LLM API keys are read |
 | `3d00050` | 2026-07-15 | fix: add missing PIC dropdown to the upload flow for GA_STAFF |
+| `490c219` | 2026-07-15 | fix: invoice list rows now navigate to the full editable detail page |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
