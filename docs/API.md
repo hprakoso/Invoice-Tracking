@@ -89,6 +89,12 @@ Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.v
 | `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), status filtered same as `totalPayable` |
 | `recentInvoices[]` | `invoices.*` (10 most recent by `created_at`) + `vendor.name` |
 
+### `GET /api/dashboard/export`
+Auth: any authenticated user, same `VENDOR` scoping as `GET /api/dashboard`. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
+
+- Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
+- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `createdBy.name` + `pic.name`.
+
 ## Audit
 
 ### `GET /api/audit`

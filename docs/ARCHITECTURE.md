@@ -17,6 +17,7 @@
 | LLM orchestration | LangChain (LCEL) | Provider-agnostic via `LLM_PROVIDER` |
 | Background jobs | node-cron | Hourly due-date reminder scan, in-process |
 | Testing | Vitest + @testing-library/react | `npm test` |
+| Excel export | exceljs | Dashboard KPI + invoice list, generated on demand, not persisted |
 | File storage | Local disk (`uploads/invoices/`) | Not available on Vercel (see limitation below) |
 
 ## Service topology
@@ -68,6 +69,9 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 ### Due-date reminders
 `src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `FINANCE`/`GA_STAFF` users, deduplicated per 24h window.
 
+### Dashboard Excel export
+`GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.
+
 ## Folder structure
 
 ```
@@ -75,7 +79,7 @@ src/
 ├── app/
 │   ├── (auth)/login/page.tsx        # Public login page
 │   ├── (dashboard)/                 # Protected layout (sidebar + topbar)
-│   │   ├── page.tsx                 # Dashboard (KPIs, charts)
+│   │   ├── page.tsx                 # Dashboard (KPIs, charts, Excel export link)
 │   │   ├── invoices/                # List, upload, [id] detail (status update, delivery/PIC)
 │   │   ├── chat/                    # AI chatbot
 │   │   ├── reminders/                # Notification feed
@@ -88,7 +92,7 @@ src/
 ├── lib/
 │   ├── db/prisma.ts                 # Prisma client singleton (explicit pg.Pool + SSL)
 │   ├── auth/                        # NextAuth config, authorize logic, RBAC helpers
-│   ├── services/                    # fileService, reminderScheduler
+│   ├── services/                    # fileService, reminderScheduler, dashboardStats
 │   ├── validations.ts               # Zod schemas + status-transition state machine
 │   └── rate-limit.ts                # In-memory sliding-window limiter
 ├── types/                           # Shared TS types, NextAuth session augmentation
