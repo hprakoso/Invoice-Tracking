@@ -198,9 +198,12 @@ export default function InvoiceDetailPage() {
   }, [id])
 
   const role = (session?.user as { role?: string } | undefined)?.role
-  const isOwner = role === 'VENDOR' && invoice?.createdBy?.id === session?.user?.id
+  const sessionVendorId = (session?.user as { vendorId?: string | null } | undefined)?.vendorId
+  const isOwner = role === 'VENDOR' && invoice?.vendor?.id === sessionVendorId
   const canUpdateStatus = ['GA_STAFF', 'FINANCE', 'ADMIN'].includes(role ?? '')
-  const canResubmit = invoice?.status === 'REVISION' && (role === 'GA_STAFF' || role === 'ADMIN' || isOwner)
+  // Fixing & resubmitting a revision is the vendor's job — GA_STAFF only
+  // creates/handles intake, they don't correct the vendor's own data.
+  const canResubmit = invoice?.status === 'REVISION' && (role === 'ADMIN' || isOwner)
   const canEditDelivery = ['GA_STAFF', 'ADMIN'].includes(role ?? '')
   const canEditSendDate = canEditDelivery || (role === 'VENDOR' && isOwner)
   const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []) : []
@@ -429,9 +432,9 @@ export default function InvoiceDetailPage() {
                   {gaStaff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
-            ) : (
+            ) : role !== 'VENDOR' ? (
               <p className="text-sm text-gray-600"><UserIcon className="h-3 w-3 inline mr-1" /> PIC: {invoice.pic?.name ?? '—'}</p>
-            )}
+            ) : null}
             {(canEditSendDate || canEditDelivery) && (
               <Button size="sm" onClick={handleDeliverySave} disabled={acting}>Save Delivery Info</Button>
             )}
@@ -506,7 +509,6 @@ export default function InvoiceDetailPage() {
                   className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none"
                 />
               </div>
-              <p className="text-xs text-gray-400">Line item tidak bisa diubah di sini — hubungi Finance/GA Staff kalau perlu perbaikan rincian item.</p>
               <Button onClick={handleResubmit} disabled={acting} className="w-full">Simpan &amp; Ajukan Ulang</Button>
             </div>
           )}

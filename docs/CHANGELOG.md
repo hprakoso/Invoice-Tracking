@@ -8,6 +8,10 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-16 — Three manual-QA fixes: resubmit ownership, PIC privacy, UI copy
+**What:** (1) `PATCH /api/invoices/[id]` now rejects `REVISION → SUBMITTED` from `GA_STAFF` (403 "Only the vendor can resubmit a revision") — fixing/resubmitting is the vendor's job even though `GA_STAFF` can create invoices; frontend `canResubmit` matches (`VENDOR` owner or `ADMIN` only), and `isOwner` was also fixed to compare `vendor.id` (company-level) instead of `createdBy.id` (single-user), matching the backend's own ownership check. (2) `GET /api/invoices/[id]` now forces `pic: null` for `VENDOR` callers — PIC (the GA Staff handling the hardcopy) is internal-only; the frontend read-only PIC line is hidden for `VENDOR` too. (3) Removed the "Line item tidak bisa diubah di sini..." note from the Fix & Resubmit card.
+**Why:** User-reported during manual QA (screenshot showed `GA_STAFF` seeing the resubmit form after setting a status themselves) — the resubmit-ownership and PIC-visibility issues were real gaps versus the app's role model; the copy removal was a UX preference.
+
 ### 2026-07-15 — Added the missing Fix & Resubmit form for REVISION invoices
 **What:** `invoices/[id]/page.tsx`'s "Resubmit" button previously only sent `{status: 'SUBMITTED'}` with no way to actually correct anything — `PATCH /api/invoices/[id]` already allowed `VENDOR` (owner) to edit `invoiceNumber`/`invoiceDate`/`dueDate`/`subtotal`/`taxAmount`/`totalAmount`/`notes` while `status = REVISION`, but no frontend form existed for it. Added editable inputs for those fields, submitted together with `status: 'SUBMITTED'` in one `PATCH`. Line items are explicitly not editable here (noted in the UI) — that would need a separate line-item editor, out of scope for this fix.
 **Why:** User asked how a vendor is supposed to fix a `REVISION` invoice — answer was "there's no way yet," a real gap versus this plan's own locked decision ("Vendor may edit the same fields during REVISION as they can at creation time").

@@ -31,6 +31,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  // PIC (GA Staff handling the hardcopy) is internal-only, not for vendors
+  if (session.user.role === 'VENDOR') {
+    return NextResponse.json({ ...invoice, pic: null })
+  }
+
   return NextResponse.json(invoice)
 }
 
@@ -105,6 +110,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const transition = isValidStatusTransition(current.status, filtered.status)
     if (!transition.valid) {
       return NextResponse.json({ error: transition.message }, { status: 400 })
+    }
+    // Fixing & resubmitting a revision is the vendor's job, not GA_STAFF's
+    if (current.status === 'REVISION' && filtered.status === 'SUBMITTED' && role !== 'VENDOR') {
+      return NextResponse.json({ error: 'Only the vendor can resubmit a revision' }, { status: 403 })
     }
   }
 

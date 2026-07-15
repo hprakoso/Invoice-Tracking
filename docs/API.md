@@ -25,7 +25,7 @@ Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`. `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -42,7 +42,7 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 | `GA_MANAGER`, `VIEWER` | none (403) | — |
 | `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
 
-Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). The one exception `VALID_TRANSITIONS` itself doesn't encode: `REVISION → SUBMITTED` (resubmit) is further restricted to `VENDOR`/`ADMIN` only — `GA_STAFF` can request every other transition but not this one, since fixing a revision is the vendor's responsibility. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
 
 Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`.
 
