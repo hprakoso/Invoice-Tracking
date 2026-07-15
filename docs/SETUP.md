@@ -18,13 +18,13 @@ npm install
 Create `.env.local` in the project root:
 
 ```env
-DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo"
+DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
 AI_SERVICE_URL="http://localhost:8000"
 ```
 
-> Host port is **5434**, not the Postgres default 5432 — see `docker-compose.yml` and commit `a56ffcd` (changed to avoid clashing with a locally installed Postgres).
+> Host port is **5433**, not the Postgres default 5432 — see `docker-compose.yml` and commit `a56ffcd` (changed to avoid clashing with a locally installed Postgres).
 
 ## 3. Start the database
 
@@ -67,7 +67,7 @@ Supported `LLM_PROVIDER` values: `groq` (free, recommended default), `gemini`, `
 
 | Terminal | Command | Serves |
 |---|---|---|
-| 1 | `docker-compose up -d` | PostgreSQL on `localhost:5434` |
+| 1 | `docker-compose up -d` | PostgreSQL on `localhost:5433` |
 | 2 | `npm run dev` | Web app on `localhost:3000` |
 | 3 | `cd ai-service && uvicorn main:app --reload --port 8000` | AI service on `localhost:8000` |
 
@@ -108,7 +108,7 @@ npm run db:seed        # Re-run prisma/seed.ts
 
 **Database connection issues**
 - `docker-compose ps` — confirm the `db` container is healthy
-- Confirm `DATABASE_URL` in `.env.local` points at port **5434**
+- Confirm `DATABASE_URL` in `.env.local` points at port **5433**
 - `psql "$DATABASE_URL" -c "SELECT 1"`
 
 **Supabase / hosted Postgres SSL errors**

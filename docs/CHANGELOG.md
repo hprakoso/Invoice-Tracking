@@ -17,7 +17,10 @@ Two sections, per `CLAUDE.md` convention:
 **What:** Renamed `docs/README.md` → `docs/INDEX.md` (updated the two references that pointed at it, in the root `README.md` and here). Committed the pre-existing uncommitted `.gitignore` change (adds `AGENTS.md`, `memory.md`, `CLAUDE.md` to ignore list) and removed `CLAUDE.md` from git tracking (`git rm --cached`, file kept on disk) to match `AGENTS.md`/`memory.md`, which were already untracked.
 **Why:** User preference — avoid a second `README.md` inside `docs/` (ambiguous alongside the root one), and finish untracking the AI-assistant instruction files consistently now that `.gitignore` covers all three.
 
----
+### 2026-07-15 — Fixed stale Postgres port reference (5434 → 5433)
+**What:** `docker-compose.yml` already mapped Postgres to host port 5433 (uncommitted local change predating this session); `README.md` and `docs/SETUP.md` still said 5434. Corrected both to match the actual running port (verified via `docker ps`/`.env`).
+**Why:** Pure documentation-accuracy fix, unrelated to any feature work — grouped as its own commit per `CLAUDE.md`'s "split unrelated changes into separate commits".
+**Not Stored:** config/docs only, no schema or code logic touched.
 
 ## Commit Log
 
@@ -107,6 +110,11 @@ Full history of the `feat/production-hardening` branch (current branch), grouped
 | `a56ffcd` | 2026-07-02 | fix: change local Postgres port from 5432 to 5434 to avoid conflicts |
 | `b7ffd9e` | 2026-07-02 | chore: pin ai-service deps to compatible-release ranges, bump pydantic |
 
+### Phase 8 — Structured docs/ reference, CLAUDE.md discipline rules committed
+| Commit | Date | Message |
+|---|---|---|
+| `e2abc8e` | 2026-07-15 | docs: add structured docs/ reference and fix stale README port |
+| `5123c3c` | 2026-07-15 | chore: gitignore and untrack CLAUDE.md alongside AGENTS.md, memory.md |
+
 ### Uncommitted / in-progress (not part of the log above)
-- Working tree has unstaged edits to `.gitignore` and `CLAUDE.md` (adding the `docs/`, commit-discipline, and data-traceability rules that this file follows).
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.

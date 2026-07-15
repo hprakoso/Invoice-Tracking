@@ -68,7 +68,7 @@ Everything runs locally on your machine — no cloud account required:
 |---------|---------|
 | Next.js web app | `http://localhost:3000` |
 | Python AI service | `http://localhost:8000` |
-| PostgreSQL database | `localhost:5434` (via Docker) |
+| PostgreSQL database | `localhost:5433` (via Docker) |
 | Uploaded files | `uploads/invoices/` (local disk) |
 
 ---
@@ -114,7 +114,7 @@ npm install
 Create a `.env.local` file in the project root:
 
 ```env
-DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo"
+DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
 AI_SERVICE_URL="http://localhost:8000"
