@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth/helpers'
+import { requireRole } from '@/lib/auth/helpers'
 import { rateLimit } from '@/lib/rate-limit'
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:8000'
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await requireAuth()
+  const { error, session } = await requireRole(['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER', 'GA_STAFF', 'GA_MANAGER'])
   if (error || !session) return error
 
   const limit = rateLimit(`chat:${session.user.id}`, 10, 60_000)

@@ -64,7 +64,7 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 `GA_MANAGER` is now a deprecated role (same treatment as `MANAGER`) — its only prior function (step-1 approval) no longer exists; it retains only baseline read access.
 
 ### Chatbot (RAG)
-`POST /api/chat` (rate-limited 10 req/min/user) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM.
+`POST /api/chat` (rate-limited 10 req/min/user, **blocked for `VENDOR`**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM.
 
 ### Due-date reminders
 `src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `FINANCE`/`GA_STAFF` users, deduplicated per 24h window.

@@ -34,6 +34,10 @@ Two sections, per `CLAUDE.md` convention:
 **What:** New `GET/POST /api/users`, `PATCH /api/users/[id]` (create named accounts, edit role, `ADMIN`-only for writes; broader read for the PIC dropdown), using `createUserSchema` (bcrypt hash, `vendorId` required when `role=VENDOR`, added to `validations.ts` in the previous commit). New `/admin/users` page: user table with inline role edit + a create-user form.
 **Why:** Requested feature — admin needs a way to create real named per-person accounts (previously only 8 hardcoded demo/role accounts existed) and change any user's role.
 
+### 2026-07-15 — Removed VENDOR access to the AI chat
+**What:** `POST /api/chat`: `requireAuth()` → `requireRole([...])` excluding `VENDOR` (previously no role check at all — any authenticated user, VENDOR included, could use it).
+**Why:** Requested — take the AI chat feature out of the vendor role.
+
 ## Commit Log
 
 Full history of the `feat/production-hardening` branch (current branch), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.

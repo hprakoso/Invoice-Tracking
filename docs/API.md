@@ -123,7 +123,7 @@ Auth: any authenticated user. Polls `COUNT(notifications) WHERE user_id = sessio
 ## Chat
 
 ### `POST /api/chat`
-Auth: any authenticated user, rate-limited **10 requests/min/user**. Proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. On AI-service failure or timeout, returns a canned Indonesian fallback message with HTTP 200 (not an error status — see [Known Limitations](./ARCHITECTURE.md#known-architectural-limitations-demo-mvp)). `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
+Auth: any authenticated user **except `VENDOR`**, rate-limited **10 requests/min/user**. Proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. On AI-service failure or timeout, returns a canned Indonesian fallback message with HTTP 200 (not an error status — see [Known Limitations](./ARCHITECTURE.md#known-architectural-limitations-demo-mvp)). `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
 
 ## Users
 
