@@ -140,5 +140,16 @@ Full history of the `feat/production-hardening` branch (current branch), grouped
 | `e2abc8e` | 2026-07-15 | docs: add structured docs/ reference and fix stale README port |
 | `5123c3c` | 2026-07-15 | chore: gitignore and untrack CLAUDE.md alongside AGENTS.md, memory.md |
 
+### Phase 9 — Invoice workflow overhaul, PIC tracking, admin RBAC, Excel export, chat lockdown
+| Commit | Date | Message |
+|---|---|---|
+| `510f452` | 2026-07-15 | fix: correct stale Postgres port reference in docs (5434 -> 5433) |
+| `df8a1d3` | 2026-07-15 | feat: replace invoice approval pipeline with 5-status lifecycle |
+| `7c683cc` | 2026-07-15 | feat: add dashboard Excel export via exceljs |
+| `c2c5f30` | 2026-07-15 | feat: add admin user management (create user, edit role) |
+| `8a3fe53` | 2026-07-15 | feat: remove VENDOR access to the AI chat |
+| `d64ed16` | 2026-07-15 | feat: wire up sidebar/topbar for the new routes and permissions |
+| `4c533df` | 2026-07-15 | feat: add Export to Excel link and Open Invoices card to dashboard page |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
