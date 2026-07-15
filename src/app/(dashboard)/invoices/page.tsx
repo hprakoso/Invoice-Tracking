@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
-import { InvoiceDetailDrawer } from '@/components/invoice/InvoiceDetailDrawer'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 
 interface Invoice {
@@ -42,6 +42,7 @@ const STATUSES = [
 import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
 export default function InvoicesPage() {
+  const router = useRouter()
   const { data: session } = useSession()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -49,7 +50,6 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [vendorId, setVendorId] = useState('')
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -159,7 +159,7 @@ export default function InvoicesPage() {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.03 }}
-                    onClick={() => setSelectedInvoice(inv)}
+                    onClick={() => router.push(`/invoices/${inv.id}`)}
                     className={`border-b dark:border-gray-700 last:border-0 hover:bg-blue-50/50 dark:hover:bg-gray-700 cursor-pointer transition-colors ${
                       isOverdue(inv.dueDate, inv.status) ? 'bg-red-50/30 dark:bg-red-900/10' : ''
                     }`}
@@ -181,13 +181,6 @@ export default function InvoicesPage() {
           </table>
         </div>
       </div>
-
-      {/* Detail Drawer */}
-      <InvoiceDetailDrawer
-        invoice={selectedInvoice}
-        onClose={() => setSelectedInvoice(null)}
-        onRefresh={fetchInvoices}
-      />
     </div>
   )
 }
