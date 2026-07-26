@@ -66,8 +66,10 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 ### Chatbot (RAG)
 `POST /api/chat` (rate-limited 10 req/min/user, **`ADMIN`/`GA_MANAGER` only**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM. Being replaced with a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2 — this section will be rewritten once that lands.
 
-### Due-date reminders
-`checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `GA_STAFF`/`GA_MANAGER` users, deduplicated per 24h window.
+### Reminders
+`checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within N days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows, deduplicated per 24h window.
+
+Thresholds and recipients for all four notification types (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`) are **admin-editable**, not hardcoded — `ReminderSetting` rows, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). `invoice_submitted` (vendor creates an invoice) and `revision_requested` (status → `REVISION`, always to the invoice's own vendor) fire inline from the invoice routes rather than the cron scan — see `docs/API.md#invoice-event-notifications`.
 
 ### Dashboard Excel export
 `GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.
@@ -101,7 +103,7 @@ src/
 └── middleware.ts                    # NextAuth route protection (Edge runtime); excludes /api/cron/**; redirects to /change-password while mustChangePassword
 
 prisma/
-├── schema.prisma                    # 8 models — see docs/DATABASE.md
+├── schema.prisma                    # 9 models — see docs/DATABASE.md
 ├── migrations/
 └── seed.ts                          # Demo data (guarded against NODE_ENV=production)
 

@@ -110,5 +110,33 @@ export async function POST(req: NextRequest) {
     },
   })
 
+  if (session.user.role === 'VENDOR') {
+    await notifyInvoiceSubmitted(invoice.id, invoice.invoiceNumber, invoice.vendor.name)
+  }
+
   return NextResponse.json(invoice, { status: 201 })
+}
+
+async function notifyInvoiceSubmitted(invoiceId: string, invoiceNumber: string, vendorName: string) {
+  const setting = await prisma.reminderSetting.findUnique({ where: { type: 'invoice_submitted' } })
+  if (!setting?.isActive || !setting.inAppEnabled) return
+
+  const roles = Array.isArray(setting.recipientRoles) ? (setting.recipientRoles as string[]) : []
+  if (roles.length === 0) return
+
+  const recipients = await prisma.user.findMany({
+    where: { role: { in: roles as never[] }, isActive: true },
+    select: { id: true },
+  })
+  if (recipients.length === 0) return
+
+  await prisma.notification.createMany({
+    data: recipients.map((u) => ({
+      userId: u.id,
+      invoiceId,
+      type: 'invoice_submitted',
+      title: `Invoice baru dari ${vendorName}`,
+      body: `Invoice ${invoiceNumber} perlu diperiksa.`,
+    })),
+  })
 }

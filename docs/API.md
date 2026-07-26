@@ -20,7 +20,7 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 ### `POST /api/invoices`
 Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is optional here — the upload wizard creates a placeholder-data draft first and collects `companyId` in its review step via `PATCH`, same pattern as `sendDate`/`picId`.
 
-Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
+Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`). When the creator is `VENDOR`, also fires the `invoice_submitted` reminder trigger — see § Invoice-event notifications.
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
@@ -43,7 +43,7 @@ Any `status` change is checked against `isValidStatusTransition()` (`src/lib/val
 
 **Marking an invoice `PAID`** (`SUBMITTED → PAID`, `GA_STAFF`/`GA_MANAGER`/`ADMIN` only — never reachable by `VENDOR`, structurally: `status` isn't in `VENDOR`'s allowed-field list while `status = SUBMITTED`): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID` is terminal (`VALID_TRANSITIONS.PAID = []`) — marking an already-paid invoice paid again returns 400.
 
-Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`.
+Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`. A transition to `REVISION` also fires the `revision_requested` reminder trigger — see § Invoice-event notifications.
 
 ### `DELETE /api/invoices/[id]`
 Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'CANCELLED'` (no row is actually deleted). Writes `audit_logs` (`action: 'invoice.cancelled'`).
@@ -179,12 +179,33 @@ Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if th
 ### `PATCH /api/users/me/password`
 Auth: any authenticated user, changing their own password only (no `id` param — always `session.user.id`). Body validated by `changePasswordSchema` (`{ currentPassword, newPassword }`). Verifies `currentPassword` against `users.password_hash` first (400 if wrong) — this isn't gated behind `mustChangePassword`, so it doubles as the general "change my password" endpoint, not just the first-login flow. Writes: `users.password_hash` (rehashed), `users.must_change_password = false`, `audit_logs` (`action: 'user.password_changed'`). The `/change-password` page calls NextAuth's client-side `update()` after a successful response to refresh the JWT (`trigger: 'update'` branch in `auth.ts`'s `jwt` callback re-reads `must_change_password` from the DB) — otherwise the stateless JWT would keep gating the user until natural token expiry.
 
+## Reminder settings
+
+Admin-editable config that replaced the hardcoded thresholds/recipients previously baked into `reminderScheduler.ts` — see `docs/PRODUCTION_PLAN.md` §6.6. Four rows, one per `type`: `due_soon`, `overdue`, `invoice_submitted`, `revision_requested`.
+
+### `GET /api/admin/reminders`
+Auth: `ADMIN` only. Returns all `reminder_settings` rows, ordered by `type`.
+
+### `PATCH /api/admin/reminders/[type]`
+Auth: `ADMIN` only. 404 if `type` isn't one of the four known values. Body validated by `updateReminderSettingSchema` (partial — `isActive`, `daysBefore`, `recipientRoles`, `extraEmails`, `emailEnabled`, `inAppEnabled`). `updated_by` is server-assigned to `session.user.id`. Writes: `reminder_settings` row, `audit_logs` (`action: 'reminder_setting.updated'`, `metadata: { type, fields }` — who's notified about money is worth an audit trail).
+
+`recipientRoles`/`daysBefore` are only meaningful for `due_soon`/`overdue`/`invoice_submitted` — `revision_requested` always notifies the specific invoice's own vendor, not a role group (its `recipientRoles` field is stored but ignored by the trigger). No settings for send time/frequency exist by design — Vercel Hobby's cron cap (§4.2) means only "once daily" is actually deliverable, and a UI control that can't be honored is worse than no control.
+
 ## Cron
 
 ### `GET /api/cron/reminders`
 Auth: `Authorization: Bearer <CRON_SECRET>` header — checked inside the route (not `requireAuth`/`requireRole`, since there's no NextAuth session). `src/middleware.ts` explicitly excludes `/api/cron/**` from its session-required gate so the request reaches the route at all. Registered in `vercel.json` → `crons` (`0 1 * * *`, daily — Vercel Hobby plan caps cron at once/day; see `docs/PRODUCTION_PLAN.md` §4.2). Runs `checkDueDates()` (`src/lib/services/reminderScheduler.ts`), same logic previously invoked hourly by `node-cron` from `src/instrumentation.ts` (removed — doesn't survive serverless scale-to-zero).
 
-Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within 3 days or overdue, recipients = active `GA_STAFF`/`GA_MANAGER` users, deduplicated per `(userId, invoiceId, type)` within a 24h window. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window. Skipped entirely per type when that row's `is_active` or `in_app_enabled` is false. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+
+## Invoice-event notifications
+
+Two more `reminder_settings`-gated triggers, fired inline from the invoice routes (not the cron job):
+
+- **`invoice_submitted`** — `POST /api/invoices`, when the creating user's role is `VENDOR`. Notifies active users in `recipientRoles` (default `GA_STAFF`). Fires on invoice *creation*, which per the app's own model is the same moment as submission (`status = SUBMITTED` is set at creation, never touched by OCR) — including the wizard's initial placeholder-data draft, not just the fully-reviewed confirm step.
+- **`revision_requested`** — `PATCH /api/invoices/[id]`, when `status` transitions to `REVISION`. Always notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type.
+
+Both check `isActive`/`inAppEnabled` on their `reminder_settings` row before writing any `notifications` rows; `emailEnabled` is stored but not yet acted on (email delivery needs Resend, not yet wired — see `docs/PRODUCTION_PLAN.md` §6.2).
 
 ## System
 

@@ -41,6 +41,7 @@ model User {
   paidInvoices      Invoice[]          @relation("PaidBy")
   auditLogs         AuditLog[]
   notifications     Notification[]
+  updatedReminderSettings ReminderSetting[] @relation("ReminderUpdatedBy")
 
   @@map("users")
 }
@@ -168,6 +169,28 @@ model AuditLog {
   invoice    Invoice? @relation(fields: [invoiceId], references: [id])
 
   @@map("audit_logs")
+}
+
+// Admin-editable config for the notification triggers below — replaces the
+// hardcoded thresholds/recipients previously baked into reminderScheduler.ts.
+// recipientRoles is meaningful for due_soon/overdue/invoice_submitted (a role
+// group); revision_requested always targets the specific invoice's vendor
+// regardless of this field — see docs/PRODUCTION_PLAN.md §6.6.
+model ReminderSetting {
+  id             String   @id @default(uuid())
+  type           String   @unique
+  isActive       Boolean  @default(true) @map("is_active")
+  daysBefore     Int?     @map("days_before")
+  recipientRoles Json     @map("recipient_roles")
+  extraEmails    Json     @map("extra_emails")
+  emailEnabled   Boolean  @default(true) @map("email_enabled")
+  inAppEnabled   Boolean  @default(true) @map("in_app_enabled")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  updatedById    String?  @map("updated_by")
+
+  updatedBy      User?    @relation("ReminderUpdatedBy", fields: [updatedById], references: [id])
+
+  @@map("reminder_settings")
 }
 
 model Notification {

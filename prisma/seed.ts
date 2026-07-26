@@ -28,6 +28,7 @@ async function main() {
   await prisma.invoice.deleteMany()
   await prisma.vendor.deleteMany()
   await prisma.company.deleteMany()
+  await prisma.reminderSetting.deleteMany()
   await prisma.user.deleteMany()
 
   const demoHash = await hashPassword('demo123')
@@ -188,6 +189,41 @@ async function main() {
     }),
   ])
   console.log('Companies created')
+
+  // Reminder settings — default config the cron job and invoice routes read
+  // at runtime; editable afterward via /admin/reminders without a deploy.
+  await Promise.all([
+    prisma.reminderSetting.create({
+      data: {
+        type: 'due_soon',
+        daysBefore: 3,
+        recipientRoles: ['GA_STAFF', 'GA_MANAGER'],
+        extraEmails: [],
+      },
+    }),
+    prisma.reminderSetting.create({
+      data: {
+        type: 'overdue',
+        recipientRoles: ['GA_STAFF', 'GA_MANAGER'],
+        extraEmails: [],
+      },
+    }),
+    prisma.reminderSetting.create({
+      data: {
+        type: 'invoice_submitted',
+        recipientRoles: ['GA_STAFF'],
+        extraEmails: [],
+      },
+    }),
+    prisma.reminderSetting.create({
+      data: {
+        type: 'revision_requested',
+        recipientRoles: [], // not used — always targets the invoice's own vendor
+        extraEmails: [],
+      },
+    }),
+  ])
+  console.log('Reminder settings created')
 
   const now = new Date()
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000)

@@ -166,7 +166,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     },
   })
 
+  if (filtered.status === 'REVISION') {
+    await notifyRevisionRequested(id, invoice.invoiceNumber, current.vendorId)
+  }
+
   return NextResponse.json(invoice)
+}
+
+// Recipient is always the invoice's own vendor — not configurable via
+// ReminderSetting.recipientRoles, unlike due_soon/overdue/invoice_submitted.
+async function notifyRevisionRequested(invoiceId: string, invoiceNumber: string, vendorId: string) {
+  const setting = await prisma.reminderSetting.findUnique({ where: { type: 'revision_requested' } })
+  if (!setting?.isActive || !setting.inAppEnabled) return
+
+  const vendorUsers = await prisma.user.findMany({
+    where: { vendorId, role: 'VENDOR', isActive: true },
+    select: { id: true },
+  })
+  if (vendorUsers.length === 0) return
+
+  await prisma.notification.createMany({
+    data: vendorUsers.map((u) => ({
+      userId: u.id,
+      invoiceId,
+      type: 'revision_requested',
+      title: `Invoice ${invoiceNumber} perlu direvisi`,
+      body: `Silakan perbaiki dan ajukan ulang invoice ini.`,
+    })),
+  })
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -263,7 +263,7 @@ invoice-demo/
 │   ├── app/api/                   # /ocr and /chat endpoints
 │   └── app/services/              # OCR extraction, LangChain chain, chat
 ├── prisma/
-│   ├── schema.prisma              # 8 database models
+│   ├── schema.prisma              # 9 database models
 │   └── seed.ts                    # 20 demo invoices, 6 vendors, 4 users
 └── docker-compose.yml             # PostgreSQL with pgvector
 ```

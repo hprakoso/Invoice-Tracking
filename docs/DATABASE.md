@@ -15,6 +15,7 @@ User ──1:N──> Invoice (pic, optional — GA Staff who received the hardc
 User ──1:N──> Invoice (paidBy, optional — who marked it PAID)
 User ──1:N──> AuditLog (optional)
 User ──1:N──> Notification
+User ──1:N──> ReminderSetting (updatedBy, optional)
 
 Vendor ──1:N──> Invoice
 Vendor ──1:N──> User (vendor-portal users)
@@ -128,18 +129,34 @@ The invoice-receiving entity ("bill-to") a vendor submits against — distinct f
 
 Every mutating API route writes one `AuditLog` row per action — see [API.md](./API.md) for the exact `action` string per endpoint.
 
+### `reminder_settings`
+Admin-editable config, one row per notification type — replaces what used to be hardcoded constants in `reminderScheduler.ts`. See [API.md](./API.md#reminder-settings).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| type | text, unique | `due_soon`, `overdue`, `invoice_submitted`, `revision_requested` — the 4 rows `prisma/seed.ts` creates by default |
+| is_active | bool, default true | turns the whole trigger off, no deploy needed |
+| days_before | int, nullable | only meaningful for `due_soon`; default 3 |
+| recipient_roles | jsonb | array of `Role` strings, e.g. `["GA_STAFF","GA_MANAGER"]`. Ignored by `revision_requested`, which always targets the invoice's own vendor |
+| extra_emails | jsonb | array of email strings outside the user system (not yet acted on — see `email_enabled`) |
+| email_enabled | bool, default true | stored but not yet acted on — email delivery needs Resend, not wired up |
+| in_app_enabled | bool, default true | gates whether `notifications` rows get written at all |
+| updated_at | timestamp | |
+| updated_by | uuid FK → `users.id`, nullable | server-assigned from the session on every `PATCH` |
+
 ### `notifications`
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK → `users.id` | recipient |
 | invoice_id | uuid FK → `invoices.id`, nullable | |
-| type | text | `due_soon`, `overdue` (sent to `GA_STAFF`/`GA_MANAGER` for `SUBMITTED`/`REVISION` invoices) |
+| type | text | `due_soon`/`overdue` (cron, `SUBMITTED`/`REVISION` invoices, recipients from `reminder_settings.recipient_roles`), `invoice_submitted` (on `VENDOR`-created invoices, recipients from settings), `revision_requested` (on `status → REVISION`, always the invoice's own `VENDOR` users) |
 | title / body | text | Indonesian copy, generated server-side |
 | is_read | bool, default false | |
 | created_at / read_at | timestamp | |
 
-Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` notification for a given `(userId, invoiceId, type)` if one was already created in the last 24h (checked via `createdAt >= now - 24h`).
+Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` notification for a given `(userId, invoiceId, type)` if one was already created in the last 24h (checked via `createdAt >= now - 24h`). `invoice_submitted`/`revision_requested` have no such window — each is a one-shot event tied to a specific action, not a recurring scan.
 
 ## Migrations
 
@@ -153,7 +170,8 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726175202_add_companies` | New `companies` table (8th table); adds `invoices.company_id` (nullable FK → `companies.id`) |
 | `20260726180556_extend_vendor_profile` | Adds `vendors.address`/`city`/`phone`/`bank_account_holder`/`bank_branch`; new `vendor_contacts` table (9th table) |
 | `20260726181558_add_must_change_password` | Adds `users.must_change_password` (`NOT NULL DEFAULT true`) |
+| `20260726182449_add_reminder_settings` | New `reminder_settings` table (unique `type`, FK `updated_by` → `users.id`) |
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, 2 demo companies (cycled across all 20 invoices by index — see the `company` field on `docs/API.md`'s invoice responses), and 20 demo invoices distributed across the 6 statuses (2 pre-seeded as `PAID`) with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts), all with `mustChangePassword: false` so the shared `demo123` quick-login isn't gated) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, 2 demo companies (cycled across all 20 invoices by index — see the `company` field on `docs/API.md`'s invoice responses), the 4 default `reminder_settings` rows, and 20 demo invoices distributed across the 6 statuses (2 pre-seeded as `PAID`) with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.

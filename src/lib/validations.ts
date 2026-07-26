@@ -111,6 +111,18 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 })
 
+export const REMINDER_TYPES = ['due_soon', 'overdue', 'invoice_submitted', 'revision_requested'] as const
+const REMINDER_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR'] as const
+
+export const updateReminderSettingSchema = z.object({
+  isActive: z.boolean().optional(),
+  daysBefore: z.number().int().positive().max(30).optional().nullable(),
+  recipientRoles: z.array(z.enum(REMINDER_ROLES)).optional(),
+  extraEmails: z.array(z.string().email()).optional(),
+  emailEnabled: z.boolean().optional(),
+  inAppEnabled: z.boolean().optional(),
+})
+
 export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),
