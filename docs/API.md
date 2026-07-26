@@ -122,23 +122,25 @@ Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` 
 ## Dashboard
 
 ### `GET /api/dashboard`
-Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below. Aggregation logic shared with the export route via `getDashboardStats()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
+Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below, server-forced (query-param `vendorId` is ignored for vendors, same IDOR protection as `GET /api/invoices`). Aggregation logic and the filter-building are shared with the export route via `getDashboardStats()`/`buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
+
+Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`). Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
 
 | Response field | Source |
 |---|---|
-| `totalInvoices` | `formula`: `COUNT(invoices)` where `status != 'DRAFT'` (vendor-scoped for VENDOR role) |
-| `totalPayable` | `formula`: `SUM(invoices.total_amount)` where `status IN ('SUBMITTED','REVISION')` (the two "open" statuses — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle)) |
-| `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()` and `status IN ('SUBMITTED','REVISION')` |
-| `openCount` | `formula`: `COUNT(invoices)` where `status IN ('SUBMITTED','REVISION')` (replaces the old `pendingApprovalCount`, no more approval concept) |
-| `statusBreakdown[]` | `formula`: `GROUP BY invoices.status`, count per group |
-| `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), status filtered same as `totalPayable` |
-| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at`) + `vendor.name` |
+| `totalInvoices` | `formula`: `COUNT(invoices)` matching the request's filters, `status != 'DRAFT'` unless `?status=` was explicitly given (an explicit status inherently excludes DRAFT already) |
+| `totalPayable` | `formula`: `SUM(invoices.total_amount)` over the filtered set, additionally narrowed to `status IN ('SUBMITTED','REVISION')` **only when `?status=` wasn't given** — an explicit status filter reflects that status's total instead of always meaning "open" |
+| `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()`, same open/explicit-status logic as `totalPayable` |
+| `openCount` | `formula`: `COUNT(invoices)` matching the filtered set, same open/explicit-status logic as `totalPayable` (replaces the old `pendingApprovalCount`, no more approval concept) |
+| `statusBreakdown[]` | `formula`: `GROUP BY invoices.status` over the filtered set, count per group |
+| `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), same status scoping as `totalPayable` |
+| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
 
 ### `GET /api/dashboard/export`
-Auth: any authenticated user, same `VENDOR` scoping as `GET /api/dashboard`. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
+Auth: any authenticated user, same `VENDOR` scoping and query params as `GET /api/dashboard` (same `buildDashboardFilter()`). **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
-- Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
+- Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above, computed over the same filtered set (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
+- Sheet "Invoices": one row per invoice matching the active filters (unfiltered = every non-`DRAFT` invoice, same as the dashboard's default view), columns Invoice Number/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 

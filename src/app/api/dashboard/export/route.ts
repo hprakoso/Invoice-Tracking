@@ -1,21 +1,19 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
-import { getDashboardStats } from '@/lib/services/dashboardStats'
+import { getDashboardStats, buildDashboardFilter } from '@/lib/services/dashboardStats'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
   if (error || !session) return error
 
-  const vendorFilter = session.user.role === 'VENDOR'
-    ? { vendorId: session.user.vendorId ?? undefined }
-    : {}
+  const filter = buildDashboardFilter(req.nextUrl.searchParams, session)
 
   const [stats, invoices] = await Promise.all([
-    getDashboardStats(vendorFilter),
+    getDashboardStats(filter),
     prisma.invoice.findMany({
-      where: { ...vendorFilter, status: { not: 'DRAFT' } },
+      where: filter.status ? filter : { ...filter, status: { not: 'DRAFT' } },
       orderBy: { createdAt: 'desc' },
       include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
     }),
