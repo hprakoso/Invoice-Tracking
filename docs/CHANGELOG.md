@@ -193,9 +193,15 @@ UI: invoice detail page gets a "Tandai Lunas" card (paid date + amount inputs, d
 | `a067057` | 2026-07-26 | feat: force password change for admin-created accounts (3a) |
 | `3f32262` | 2026-07-26 | feat: admin-editable reminder settings (3f) |
 
+### Phase 12 — Supabase Storage, Gemini OCR/chat, Resend email; CI
+| Commit | Date | Message |
+|---|---|---|
+| `ec0eee2` | 2026-07-26 | chore: add GitHub Actions CI running tsc/lint/test |
+| `a37d4fb` | 2026-07-26 | feat: Supabase Storage, Gemini OCR/chat, Resend email; retire ai-service |
+
 ## Commit Log
 
-Full history of the `feat/production-hardening` branch (current branch), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
+Full history of the `feat/deploy-ready` branch (current branch, forked from `feat/production-hardening`), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
 
 ### Phase 0 — Scaffold
 | Commit | Date | Message |
