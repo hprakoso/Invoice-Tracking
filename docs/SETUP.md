@@ -21,7 +21,12 @@ Create `.env.local` in the project root:
 DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
-CRON_SECRET="any-random-string"  # required to call GET /api/cron/reminders locally; Vercel sets this automatically in production
+CRON_SECRET="any-random-string"  # required to call GET /api/cron/reminders. Set the same name in Vercel's env vars for production — Vercel automatically sends it as the Authorization header on its own cron-triggered requests once set, no extra wiring needed.
+
+# Only needed when running `prisma migrate deploy`/`migrate dev` against a hosted
+# Postgres (e.g. Supabase) — direct connection, not the pooler. Falls back to
+# DATABASE_URL if unset (fine for local dev).
+DIRECT_URL=
 
 # Optional — see docs/API.md for what each powers. Omit any of these and the
 # corresponding feature degrades gracefully (local disk / no-op / friendly error)
