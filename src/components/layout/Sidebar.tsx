@@ -12,22 +12,24 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 
 const ALL_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
 
-const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ALL_ROLES, indent: false },
-  { href: '/invoices', label: 'Invoices', icon: FileText, roles: ALL_ROLES, indent: false },
-  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'], indent: true },
+const NAV_ITEMS: { href: string; labelKey: keyof Dictionary['nav']; icon: React.ElementType; roles: string[]; indent: boolean }[] = [
+  { href: '/', labelKey: 'dashboard', icon: LayoutDashboard, roles: ALL_ROLES, indent: false },
+  { href: '/invoices', labelKey: 'invoices', icon: FileText, roles: ALL_ROLES, indent: false },
+  { href: '/invoices/upload', labelKey: 'uploadInvoice', icon: Upload, roles: ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'], indent: true },
   // Notification feed is filtered server-side by userId — every role sees only their own.
-  { href: '/reminders', label: 'Reminders', icon: Bell, roles: ALL_ROLES, indent: false },
-  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
-  { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
-  { href: '/admin/users', label: 'User Management', icon: Users, roles: ['ADMIN'], indent: false },
-  { href: '/admin/vendors', label: 'Vendors', icon: Briefcase, roles: ['ADMIN', 'GA_STAFF', 'GA_MANAGER'], indent: false },
-  { href: '/admin/companies', label: 'Companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF'], indent: false },
-  { href: '/admin/reminders', label: 'Reminder Settings', icon: Settings, roles: ['ADMIN'], indent: false },
-  { href: '/vendor/profile', label: 'Company Profile', icon: Briefcase, roles: ['VENDOR'], indent: false },
+  { href: '/reminders', labelKey: 'reminders', icon: Bell, roles: ALL_ROLES, indent: false },
+  { href: '/chat', labelKey: 'aiAssistant', icon: MessageSquare, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
+  { href: '/audit', labelKey: 'auditLog', icon: ClipboardList, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
+  { href: '/admin/users', labelKey: 'userManagement', icon: Users, roles: ['ADMIN'], indent: false },
+  { href: '/admin/vendors', labelKey: 'vendors', icon: Briefcase, roles: ['ADMIN', 'GA_STAFF', 'GA_MANAGER'], indent: false },
+  { href: '/admin/companies', labelKey: 'companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF'], indent: false },
+  { href: '/admin/reminders', labelKey: 'reminderSettings', icon: Settings, roles: ['ADMIN'], indent: false },
+  { href: '/vendor/profile', labelKey: 'companyProfile', icon: Briefcase, roles: ['VENDOR'], indent: false },
 ]
 
 function NavItem({ href, label, icon: Icon, active, indent }: { href: string; label: string; icon: React.ElementType; active: boolean; indent: boolean }) {
@@ -55,6 +57,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session, status } = useSession()
   const role = (session?.user as { role?: string })?.role
+  const { t } = useI18n()
 
   // Don't fall back to a role while the session is still loading — that
   // would render nav items the user may not actually be permitted to see.
@@ -70,8 +73,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           <FileStack className="h-4 w-4 text-white" />
         </div>
         <div>
-          <p className="text-sm font-bold text-gray-900 dark:text-white">Invoice Intelligence</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">AI-Powered AP System</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white">{t.nav.brand}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t.nav.brandTagline}</p>
         </div>
         {onClose && (
           <Button variant="ghost" size="icon" className="ml-auto" onClick={onClose}>
@@ -86,7 +89,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           <NavItem
             key={item.href}
             href={item.href}
-            label={item.label}
+            label={t.nav[item.labelKey]}
             icon={item.icon}
             indent={item.indent}
             active={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/') && !NAV_ITEMS.some(n => n.href !== item.href && pathname === n.href))}

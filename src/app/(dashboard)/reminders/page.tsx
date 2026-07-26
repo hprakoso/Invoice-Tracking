@@ -15,6 +15,8 @@ import {
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 
 type NotifType = 'due_soon' | 'overdue' | 'approval_required' | string
 
@@ -31,32 +33,13 @@ interface Notification {
 
 type FilterTab = 'all' | 'unread' | 'due_soon' | 'overdue'
 
-const TYPE_META: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
-  due_soon: {
-    icon: <Clock className="h-4 w-4" />,
-    color: 'bg-yellow-100 text-yellow-600',
-    label: 'Due Soon',
-  },
-  overdue: {
-    icon: <AlertTriangle className="h-4 w-4" />,
-    color: 'bg-red-100 text-red-600',
-    label: 'Overdue',
-  },
-  approval_required: {
-    icon: <FileText className="h-4 w-4" />,
-    color: 'bg-blue-100 text-blue-600',
-    label: 'Approval Required',
-  },
-}
-
-function getTypeMeta(type: string) {
-  return (
-    TYPE_META[type] ?? {
-      icon: <Bell className="h-4 w-4" />,
-      color: 'bg-gray-100 text-gray-600',
-      label: 'Notification',
-    }
-  )
+function getTypeMeta(type: string, t: Dictionary): { icon: React.ReactNode; color: string; label: string } {
+  const meta: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+    due_soon: { icon: <Clock className="h-4 w-4" />, color: 'bg-yellow-100 text-yellow-600', label: t.reminders.typeDueSoon },
+    overdue: { icon: <AlertTriangle className="h-4 w-4" />, color: 'bg-red-100 text-red-600', label: t.reminders.typeOverdue },
+    approval_required: { icon: <FileText className="h-4 w-4" />, color: 'bg-blue-100 text-blue-600', label: t.reminders.typeApproval },
+  }
+  return meta[type] ?? { icon: <Bell className="h-4 w-4" />, color: 'bg-gray-100 text-gray-600', label: t.reminders.typeGeneric }
 }
 
 import { timeAgo } from '@/lib/format'
@@ -68,7 +51,8 @@ function ReminderCard({
   notif: Notification
   onRead: (id: string) => void
 }) {
-  const meta = getTypeMeta(notif.type)
+  const { t } = useI18n()
+  const meta = getTypeMeta(notif.type, t)
 
   const markRead = async () => {
     const res = await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' })
@@ -130,7 +114,7 @@ function ReminderCard({
               className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1 transition-colors"
             >
               <CheckCircle className="h-3.5 w-3.5" />
-              Mark as read
+              {t.reminders.markAsRead}
             </button>
           )}
         </div>
@@ -139,17 +123,18 @@ function ReminderCard({
   )
 }
 
-const TABS: { id: FilterTab; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'unread', label: 'Unread' },
-  { id: 'due_soon', label: 'Due Soon' },
-  { id: 'overdue', label: 'Overdue' },
-]
-
 export default function RemindersPage() {
+  const { t } = useI18n()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
+
+  const TABS: { id: FilterTab; label: string }[] = [
+    { id: 'all', label: t.reminders.tabAll },
+    { id: 'unread', label: t.reminders.tabUnread },
+    { id: 'due_soon', label: t.reminders.tabDueSoon },
+    { id: 'overdue', label: t.reminders.tabOverdue },
+  ]
 
   const load = useCallback(() => {
     setLoading(true)
@@ -177,7 +162,7 @@ export default function RemindersPage() {
     const res = await fetch('/api/notifications', { method: 'PATCH' })
     if (res.ok) {
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
-      toast.success('All notifications marked as read')
+      toast.success(t.reminders.allMarkedRead)
     }
   }
 
@@ -195,20 +180,20 @@ export default function RemindersPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Notifications &amp; Reminders</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.reminders.title}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Track invoice due dates and approval status
+            {t.reminders.subtitle}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
+            {t.reminders.refresh}
           </Button>
           {unreadCount > 0 && (
             <Button size="sm" onClick={markAllRead} className="gap-1.5">
               <CheckCheck className="h-3.5 w-3.5" />
-              Mark All as Read
+              {t.reminders.markAllRead}
             </Button>
           )}
         </div>
@@ -262,14 +247,10 @@ export default function RemindersPage() {
         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
           <Bell className="h-12 w-12 mb-3 text-gray-200" />
           <p className="text-base font-medium text-gray-500">
-            {activeTab === 'unread'
-              ? 'No unread notifications'
-              : 'No notifications'}
+            {activeTab === 'unread' ? t.reminders.noUnread : t.reminders.noNotifications}
           </p>
           <p className="text-sm mt-1">
-            {activeTab === 'unread'
-              ? 'All caught up. Great work!'
-              : 'Notifications will appear here'}
+            {activeTab === 'unread' ? t.reminders.allCaughtUp : t.reminders.willAppearHere}
           </p>
         </div>
       ) : (
@@ -294,7 +275,7 @@ export default function RemindersPage() {
       {/* Summary footer */}
       {!loading && notifications.length > 0 && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center pb-4">
-          {notifications.length} total notifications · {unreadCount} unread
+          {notifications.length} {t.reminders.totalUnreadSummary.replace('{unread}', String(unreadCount))}
         </p>
       )}
     </div>

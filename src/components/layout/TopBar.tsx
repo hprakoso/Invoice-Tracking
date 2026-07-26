@@ -1,28 +1,30 @@
 'use client'
 
 import { signOut, useSession } from 'next-auth/react'
-import { Bell, LogOut, User, Moon, Sun } from 'lucide-react'
+import { Bell, LogOut, User, Moon, Sun, Languages } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MobileSidebar } from './Sidebar'
 import { useNotificationStream } from '@/hooks/useNotificationStream'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 
-const PAGE_TITLES: Record<string, string> = {
-  '/': 'Dashboard',
-  '/invoices': 'Invoices',
-  '/invoices/upload': 'Upload Invoice',
-  '/reminders': 'Reminders',
-  '/chat': 'AI Assistant',
-  '/audit': 'Audit Log',
-  '/admin/users': 'User Management',
-  '/admin/vendors': 'Vendors',
-  '/admin/companies': 'Companies',
-  '/admin/reminders': 'Reminder Settings',
-  '/vendor/profile': 'Company Profile',
+const PAGE_TITLE_KEYS: Record<string, keyof Dictionary['nav']> = {
+  '/': 'dashboard',
+  '/invoices': 'invoices',
+  '/invoices/upload': 'uploadInvoice',
+  '/reminders': 'reminders',
+  '/chat': 'aiAssistant',
+  '/audit': 'auditLog',
+  '/admin/users': 'userManagement',
+  '/admin/vendors': 'vendors',
+  '/admin/companies': 'companies',
+  '/admin/reminders': 'reminderSettings',
+  '/vendor/profile': 'companyProfile',
 }
 
 interface Notification {
@@ -39,6 +41,7 @@ export function TopBar() {
   const unreadCount = useNotificationStream()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
+  const { t, locale, toggle: toggleLocale } = useI18n()
 
   useEffect(() => {
     if (open) {
@@ -64,9 +67,10 @@ export function TopBar() {
   const role = (session?.user as { role?: string })?.role
   const pathname = usePathname()
   const { theme, toggle, mounted } = useTheme()
-  const pageTitle = Object.entries(PAGE_TITLES)
+  const titleKey = Object.entries(PAGE_TITLE_KEYS)
     .sort((a, b) => b[0].length - a[0].length)
-    .find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1] ?? 'Invoice Intelligence'
+    .find(([path]) => pathname === path || pathname.startsWith(path + '/'))?.[1]
+  const pageTitle = titleKey ? t.nav[titleKey] : t.nav.brand
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-white dark:bg-gray-900 dark:border-gray-800 px-4">
@@ -75,12 +79,24 @@ export function TopBar() {
       <p className="lg:hidden text-sm font-semibold text-gray-800 dark:text-gray-100 truncate flex-1">{pageTitle}</p>
       <div className="hidden lg:block flex-1" />
 
+      {/* Language Toggle */}
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t.topbar.switchLanguage}
+        onClick={toggleLocale}
+        className="gap-1"
+      >
+        <Languages className="h-5 w-5" />
+        <span className="text-[10px] font-bold uppercase">{locale}</span>
+      </Button>
+
       {/* Theme Toggle */}
       {mounted && (
         <Button
           variant="ghost"
           size="icon"
-          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          aria-label={theme === 'light' ? t.topbar.switchToDark : t.topbar.switchToLight}
           onClick={toggle}
         >
           {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
@@ -89,7 +105,7 @@ export function TopBar() {
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : t.topbar.notifications} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold">
@@ -99,16 +115,16 @@ export function TopBar() {
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 p-0">
           <div className="flex items-center justify-between px-4 py-3 border-b">
-            <p className="text-sm font-semibold">Notifications</p>
+            <p className="text-sm font-semibold">{t.topbar.notifications}</p>
             {notifications.length > 0 && (
               <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">
-                Mark all as read
+                {t.topbar.markAllRead}
               </button>
             )}
           </div>
           <div className="max-h-64 overflow-y-auto">
             {notifications.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">No new notifications</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">{t.topbar.noNewNotifications}</p>
             ) : (
               notifications.map(n => (
                 <div key={n.id} className="px-4 py-3 border-b last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800 dark:border-gray-800">
@@ -120,7 +136,7 @@ export function TopBar() {
           </div>
           <div className="px-4 py-2 border-t">
             <Link href="/reminders" className="text-xs text-blue-600 hover:underline" onClick={() => setOpen(false)}>
-              View all notifications →
+              {t.topbar.viewAll}
             </Link>
           </div>
         </PopoverContent>
@@ -133,7 +149,7 @@ export function TopBar() {
           <span className="hidden sm:inline">{session?.user?.name?.split(' ')[0]}</span>
           <span className="sm:hidden">{role}</span>
         </div>
-        <Button variant="ghost" size="icon" aria-label="Logout" onClick={() => signOut({ callbackUrl: '/login' })}>
+        <Button variant="ghost" size="icon" aria-label={t.topbar.logout} onClick={() => signOut({ callbackUrl: '/login' })}>
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

@@ -71,8 +71,15 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 
 Thresholds, recipients, and per-channel toggles for all four notification types (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`) are **admin-editable**, not hardcoded — `ReminderSetting` rows, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). `invoice_submitted` (vendor creates an invoice) and `revision_requested` (status → `REVISION`, always to the invoice's own vendor) fire inline from the invoice routes rather than the cron scan — see `docs/API.md#invoice-event-notifications`. Email delivery no-ops silently everywhere if `RESEND_API_KEY` isn't set.
 
-### Dashboard Excel export
-`GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.
+### Dashboard filters and Excel export
+`GET /api/dashboard` and `GET /api/dashboard/export` share `buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`) — both read the same query params (`search`, `status`, `vendorId`, `companyId`, `from`/`to`) into one `Prisma.InvoiceWhereInput`, so the dashboard's KPI cards/charts/table and the Excel export always reflect the identical filtered view, never two different numbers for "the same" filter. The Dashboard page (`src/app/(dashboard)/page.tsx`) is a client component with its own filter bar, matching `/invoices`'s pattern — this also removed the page's previous server-side self-fetch to its own `/api/dashboard` (built from `process.env.NEXTAUTH_URL`), which was the root cause of a real `ECONNREFUSED` bug on first Vercel deploy when that env var was misconfigured.
+
+`GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards) and an "Invoices" sheet (matching the active filters). Streamed directly in the response, nothing persisted to disk.
+
+### Language toggle (i18n)
+`src/lib/i18n/id.ts`/`en.ts` — two flat dictionaries with an identical key shape (`Dictionary` type derived from `id.ts`, widened to `string` leaves so `en.ts`'s different literal values still type-check; a test in `src/lib/i18n/__tests__/dictionaries.test.ts` asserts the two have exactly the same key set and no empty values). `I18nProvider`/`useI18n()` (`src/hooks/useI18n.tsx`) is a React Context — unlike `useTheme` (which has no Context and relies on each component independently reading `localStorage` + mutating `document.documentElement`'s class), the toggle needs every consumer across the tree to re-render with the new language the instant it's clicked, which only a shared Context can do. Mounted once at the root layout (`src/app/layout.tsx`), so it covers both the `(auth)` and `(dashboard)` route groups. Defaults to `id`, persists the choice to `localStorage` (`locale` key), toggled via a button in `TopBar` next to the dark-mode toggle.
+
+Translated: login, TopBar, Sidebar, Dashboard, Invoices list, Invoice detail, the upload wizard, vendor Company Profile, Change Password, the Reminders/notification feed, the Audit Log, and the shared `StatusBadge`/`StatusDonut` components. **Not yet translated** (still English-only, no crash — just doesn't respond to the toggle): the four `/admin/*` management pages (users, vendors, companies, reminder settings) and the AI chat page. Notification `title`/`body` text stored in `notifications` rows (e.g. "Invoice X perlu diperiksa") is **not** retroactively translated by the toggle either — it's historical data written in whatever language it was created in, same as audit log metadata, not live UI chrome.
 
 ## Folder structure
 
@@ -92,8 +99,9 @@ src/
 ├── components/
 │   ├── ui/                          # shadcn/ui primitives
 │   ├── invoice/, dashboard/, chat/, layout/
-├── hooks/                           # useTheme, useCountUp, useNotificationStream
+├── hooks/                           # useTheme, useI18n (I18nProvider), useCountUp, useNotificationStream
 ├── lib/
+│   ├── i18n/                         # id.ts/en.ts dictionaries, Dictionary type, dictionaries map
 │   ├── db/prisma.ts                 # Prisma client singleton (explicit pg.Pool + SSL)
 │   ├── auth/                        # NextAuth config, authorize logic, RBAC helpers
 │   ├── services/                    # fileService (Supabase Storage/local disk), geminiExtraction, geminiChat, email (Resend), reminderScheduler, dashboardStats

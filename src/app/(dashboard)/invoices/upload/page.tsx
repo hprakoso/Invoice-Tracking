@@ -11,6 +11,8 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 
 interface ExtractedField {
   key: string
@@ -29,16 +31,16 @@ interface LineItem {
 // Matches the server's field order in GET /api/invoices/[id]/ocr — used to
 // populate 8 empty, manually-fillable fields when OCR fails entirely (no
 // 'field' events ever arrive), so review never shows a blank form.
-const FIELD_DEFS = [
-  { key: 'vendor_name', label: 'Nama Vendor' },
-  { key: 'invoice_number', label: 'Nomor Invoice' },
-  { key: 'invoice_date', label: 'Tanggal Invoice' },
-  { key: 'due_date', label: 'Jatuh Tempo' },
-  { key: 'currency', label: 'Mata Uang' },
-  { key: 'subtotal', label: 'Subtotal' },
-  { key: 'tax_amount', label: 'PPN' },
-  { key: 'total_amount', label: 'Total' },
-] as const
+const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
+  { key: 'vendor_name', labelKey: 'fieldVendorName' },
+  { key: 'invoice_number', labelKey: 'fieldInvoiceNumber' },
+  { key: 'invoice_date', labelKey: 'fieldInvoiceDate' },
+  { key: 'due_date', labelKey: 'fieldDueDate' },
+  { key: 'currency', labelKey: 'fieldCurrency' },
+  { key: 'subtotal', labelKey: 'fieldSubtotal' },
+  { key: 'tax_amount', labelKey: 'fieldTaxAmount' },
+  { key: 'total_amount', labelKey: 'fieldTotalAmount' },
+]
 
 type UploadStage = 'select' | 'drop' | 'uploading' | 'ocr' | 'review' | 'done'
 
@@ -80,6 +82,7 @@ function ExtractedFieldCard({ field }: { field: ExtractedField }) {
 export default function UploadPage() {
   const router = useRouter()
   const { data: session } = useSession()
+  const { t } = useI18n()
   const role = (session?.user as { role?: string })?.role
   const isVendor = role === 'VENDOR'
   const isGaStaff = role === 'GA_STAFF'
@@ -125,11 +128,11 @@ export default function UploadPage() {
 
   function continueFromSelect() {
     if (!companyIdValue) {
-      toast.error('Pilih PT/company tujuan terlebih dahulu')
+      toast.error(t.upload.companyRequired)
       return
     }
     if (!isVendor && !selectedVendorId) {
-      toast.error('Pilih vendor terlebih dahulu')
+      toast.error(t.upload.vendorRequired)
       return
     }
     setStage('drop')
@@ -157,18 +160,20 @@ export default function UploadPage() {
 
   function fallbackToManualFields() {
     setOcrFailed(true)
-    setFields((prev) => (prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ ...f, value: null, confidence: 0 }))))
+    setFields((prev) =>
+      prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ key: f.key, label: t.upload[f.labelKey], value: null, confidence: 0 })),
+    )
   }
 
   async function runOCR(uploadFile: File) {
     setStage('uploading')
-    setStatusMsg('Membuat data invoice...')
+    setStatusMsg(t.upload.creatingRecord)
     setFields([])
     setLineItems([])
     setOcrFailed(false)
 
     try {
-      if (!effectiveVendorId) throw new Error('Vendor belum dipilih')
+      if (!effectiveVendorId) throw new Error(t.upload.vendorNotSelected)
 
       // 1. Create invoice record (DRAFT — invisible everywhere until Submit)
       const createRes = await fetch('/api/invoices', {
@@ -181,26 +186,26 @@ export default function UploadPage() {
           totalAmount: 0,
         }),
       })
-      if (!createRes.ok) throw new Error('Gagal membuat data invoice')
+      if (!createRes.ok) throw new Error(t.upload.createFailed)
       const invoice = await createRes.json()
       const id: string = invoice.id
       setInvoiceId(id)
 
       // 2. Upload file
-      setStatusMsg('Mengunggah file...')
+      setStatusMsg(t.upload.uploadingFile)
       const formData = new FormData()
       formData.append('file', uploadFile)
       const uploadRes = await fetch(`/api/invoices/${id}/upload`, {
         method: 'POST',
         body: formData,
       })
-      if (!uploadRes.ok) throw new Error('Gagal mengunggah file')
+      if (!uploadRes.ok) throw new Error(t.upload.uploadFailed)
 
       // 3. SSE OCR stream — the upload itself already succeeded at this point,
       // so any failure from here on falls back to manual entry (review stage
       // with empty fields), never back to 'drop'. The file stays uploaded.
       setStage('ocr')
-      setStatusMsg('Memulai OCR...')
+      setStatusMsg(t.upload.startingOcr)
 
       const es = new EventSource(`/api/invoices/${id}/ocr`)
 
@@ -226,30 +231,30 @@ export default function UploadPage() {
         setStatusMsg(d.message)
         setStage('review')
         es.close()
-        toast.success('OCR selesai! Silakan periksa dan konfirmasi data.')
+        toast.success(t.upload.ocrComplete)
       })
 
       es.addEventListener('error', (e) => {
         try {
           const d = JSON.parse((e as MessageEvent).data ?? '{}')
-          setStatusMsg(d.message ?? 'OCR gagal')
+          setStatusMsg(d.message ?? 'OCR failed')
         } catch {
-          setStatusMsg('OCR gagal')
+          setStatusMsg('OCR failed')
         }
         setStage('review')
         fallbackToManualFields()
         es.close()
-        toast.error('OCR gagal membaca dokumen. Silakan isi data secara manual di bawah.')
+        toast.error(t.upload.ocrFailedToast)
       })
 
       es.onerror = () => {
         setStage('review')
         fallbackToManualFields()
         es.close()
-        toast.error('Koneksi ke layanan AI terputus. Silakan isi data secara manual.')
+        toast.error(t.upload.connectionLost)
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      const msg = err instanceof Error ? err.message : 'Unknown error'
       toast.error(msg)
       setStage('drop')
     }
@@ -282,12 +287,12 @@ export default function UploadPage() {
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      toast.error(data.error ?? 'Gagal mengirim invoice')
+      toast.error(data.error ?? t.upload.submitFailed)
       return
     }
 
     setStage('done')
-    toast.success('Invoice berhasil diajukan!')
+    toast.success(t.upload.submitted)
     setTimeout(() => router.push('/invoices'), 1500)
   }
 
@@ -319,8 +324,8 @@ export default function UploadPage() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Upload Invoice</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">AI akan mengekstrak data secara otomatis</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.upload.title}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t.upload.subtitle}</p>
         </div>
       </div>
 
@@ -332,35 +337,35 @@ export default function UploadPage() {
           className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 p-5 sm:p-6 space-y-4"
         >
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Invoice ini ditujukan ke mana?</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Pilih PT/company dan vendor sebelum mengunggah dokumen.</p>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.selectHeading}</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.selectSubheading}</p>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Company / PT tujuan (bill-to) *</label>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.companyLabel}</label>
             <select
               value={companyIdValue}
               onChange={(e) => setCompanyIdValue(e.target.value)}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
-              <option value="">Pilih company...</option>
+              <option value="">{t.upload.selectCompany}</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           {!isVendor && (
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Vendor (pengirim invoice) *</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.vendorLabel}</label>
               <select
                 value={selectedVendorId}
                 onChange={(e) => setSelectedVendorId(e.target.value)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="">Pilih vendor...</option>
+                <option value="">{t.upload.selectVendor}</option>
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </div>
           )}
           <Button onClick={continueFromSelect} className="w-full gap-2">
-            Lanjutkan <ArrowRight className="h-4 w-4" />
+            {t.upload.continue} <ArrowRight className="h-4 w-4" />
           </Button>
         </motion.div>
       )}
@@ -369,9 +374,9 @@ export default function UploadPage() {
       {stage === 'drop' && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3 py-2">
-            <span>Tujuan: <strong className="text-gray-700 dark:text-gray-200">{selectedCompanyName}</strong></span>
-            {selectedVendorName && <span>· Vendor: <strong className="text-gray-700 dark:text-gray-200">{selectedVendorName}</strong></span>}
-            <button onClick={() => setStage('select')} className="ml-auto text-blue-600 hover:underline">Ubah</button>
+            <span>{t.upload.billTo}: <strong className="text-gray-700 dark:text-gray-200">{selectedCompanyName}</strong></span>
+            {selectedVendorName && <span>· {t.upload.vendorTag}: <strong className="text-gray-700 dark:text-gray-200">{selectedVendorName}</strong></span>}
+            <button onClick={() => setStage('select')} className="ml-auto text-blue-600 hover:underline">{t.upload.change}</button>
           </div>
           <div
             {...getRootProps()}
@@ -389,9 +394,9 @@ export default function UploadPage() {
               <Upload className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
             </motion.div>
             <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
-              {isDragActive ? 'Lepaskan file di sini...' : 'Drag & drop file invoice'}
+              {isDragActive ? t.upload.dropActive : t.upload.dropIdle}
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">atau klik untuk memilih file</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t.upload.orBrowse}</p>
             <div className="flex items-center justify-center gap-4 mt-4">
               {(['PDF', 'JPG', 'PNG'] as const).map((ext) => (
                 <span
@@ -434,7 +439,7 @@ export default function UploadPage() {
           {fields.length > 0 && (
             <div className="space-y-3">
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                Data Terekstrak
+                {t.upload.extractedData}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {fields.map((field) => (
@@ -459,10 +464,10 @@ export default function UploadPage() {
               <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
               <div>
                 <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                  OCR gagal membaca dokumen
+                  {t.upload.ocrFailedTitle}
                 </p>
                 <p className="text-xs text-red-600 dark:text-red-400">
-                  Dokumen tetap tersimpan — silakan isi data invoice secara manual di bawah ini.
+                  {t.upload.ocrFailedBody}
                 </p>
               </div>
             </div>
@@ -481,10 +486,10 @@ export default function UploadPage() {
               )}
               <div>
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  {overallConfidence >= 80 ? 'Ekstraksi berhasil!' : 'Mohon periksa kembali data berikut'}
+                  {overallConfidence >= 80 ? t.upload.extractionSuccess : t.upload.verifyData}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Akurasi keseluruhan: {overallConfidence.toFixed(0)}%
+                  {t.upload.overallAccuracy}: {overallConfidence.toFixed(0)}%
                 </p>
               </div>
             </div>
@@ -493,8 +498,8 @@ export default function UploadPage() {
           {/* Editable Fields */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Periksa &amp; Edit Data</h3>
-              <span className="text-xs text-gray-400 dark:text-gray-500">Bill to: {selectedCompanyName}</span>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.reviewAndEdit}</h3>
+              <span className="text-xs text-gray-400 dark:text-gray-500">{t.upload.billTo}: {selectedCompanyName}</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -519,7 +524,7 @@ export default function UploadPage() {
                 <Separator />
                 <div>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                    Item Invoice
+                    {t.upload.invoiceItems}
                   </p>
                   <div className="space-y-1">
                     {lineItems.map((item, i) => (
@@ -540,7 +545,7 @@ export default function UploadPage() {
             <Separator />
 
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Tanggal hardcopy dikirim ke kantor</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.sendDateLabel}</label>
               <input
                 type="date"
                 value={sendDateValue}
@@ -550,13 +555,13 @@ export default function UploadPage() {
             </div>
             {canAssignPic && (
               <div>
-                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">PIC (GA Staff yang menangani invoice ini)</label>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.picLabel}</label>
                 <select
                   value={picIdValue}
                   onChange={(e) => setPicIdValue(e.target.value)}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  <option value="">Belum ditentukan</option>
+                  <option value="">{t.upload.picUnassigned}</option>
                   {gaStaff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
@@ -567,10 +572,10 @@ export default function UploadPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
-              Konfirmasi &amp; Ajukan
+              {t.upload.confirmAndSubmit}
             </Button>
             <Button variant="outline" onClick={resetWizard}>
-              Unggah Ulang
+              {t.upload.uploadAgain}
             </Button>
           </div>
         </motion.div>
@@ -584,8 +589,8 @@ export default function UploadPage() {
           className="text-center py-12"
         >
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Invoice Berhasil Diajukan!</h2>
-          <p className="text-gray-500 dark:text-gray-400 mt-2">Mengarahkan ke daftar invoice...</p>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t.upload.doneTitle}</h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">{t.upload.doneSubtitle}</p>
         </motion.div>
       )}
     </div>

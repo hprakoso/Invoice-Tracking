@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
+import { useI18n } from '@/hooks/useI18n'
 
 // Dynamic import to avoid SSR issues with react-pdf
 const PDFDocument = dynamic(() => import('react-pdf').then(m => m.Document), { ssr: false })
@@ -68,9 +69,6 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   CANCELLED: [],
   REJECTED: [],
   VOID: [],
-}
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: 'Draf', SUBMITTED: 'Diajukan', PAID: 'Lunas', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
 }
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -150,6 +148,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: session } = useSession()
+  const { t } = useI18n()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<'notfound' | 'auth' | 'network' | null>(null)
@@ -235,13 +234,13 @@ export default function InvoiceDetailPage() {
       fetchInvoice()
     } else {
       const data = await res.json().catch(() => ({}))
-      toast.error(data.error ?? 'Update failed')
+      toast.error(data.error ?? t.common.required)
     }
   }
 
   const handleStatusUpdate = () => {
-    if (!newStatus) { toast.error('Select a status'); return }
-    patchInvoice({ status: newStatus, comment: comment || undefined }, 'Status updated')
+    if (!newStatus) { toast.error(t.invoiceDetail.selectNewStatus); return }
+    patchInvoice({ status: newStatus, comment: comment || undefined }, t.invoiceDetail.statusUpdated)
     setNewStatus('')
     setComment('')
   }
@@ -255,27 +254,27 @@ export default function InvoiceDetailPage() {
     taxAmount: revTax !== '' ? Number(revTax) : undefined,
     totalAmount: revTotal !== '' ? Number(revTotal) : undefined,
     notes: revNotes || undefined,
-  }, 'Invoice diperbaiki & diajukan ulang')
+  }, t.invoiceDetail.resubmitted)
 
   const handleMarkPaid = () => {
     if (!paidAmountInput || Number(paidAmountInput) <= 0) {
-      toast.error('Enter a valid paid amount')
+      toast.error(t.invoiceDetail.validPaidAmount)
       return
     }
     patchInvoice(
       { status: 'PAID', paidDate: paidDateInput || undefined, paidAmount: Number(paidAmountInput) },
-      'Invoice ditandai lunas',
+      t.invoiceDetail.paidAmount,
     )
   }
 
   const handleDeliverySave = () => {
     if (deliveredDateInput && sendDateInput && deliveredDateInput < sendDateInput) {
-      toast.error('Delivered date cannot be earlier than send date')
+      toast.error(t.invoiceDetail.deliveredBeforeSendError)
       return
     }
     patchInvoice(
       { sendDate: sendDateInput || undefined, deliveredDate: deliveredDateInput || undefined, picId: picId || undefined },
-      'Delivery info saved',
+      t.invoiceDetail.deliveryInfoSaved,
     )
   }
 
@@ -294,15 +293,15 @@ export default function InvoiceDetailPage() {
   if (!invoice) {
     const errorMsg =
       fetchError === 'auth'
-        ? 'Your session has expired. Please log in again.'
+        ? t.invoiceDetail.sessionExpired
         : fetchError === 'network'
-        ? 'Failed to connect to server. Check your connection.'
-        : 'Invoice not found.'
+        ? t.invoiceDetail.networkError
+        : t.invoiceDetail.notFound
     return (
       <div className="flex flex-col items-center justify-center h-64 text-gray-500">
         <AlertTriangle className="h-8 w-8 mb-2 text-yellow-500" />
         <p>{errorMsg}</p>
-        <Link href="/invoices"><Button variant="outline" className="mt-4">Back</Button></Link>
+        <Link href="/invoices"><Button variant="outline" className="mt-4">{t.common.back}</Button></Link>
       </div>
     )
   }
@@ -335,7 +334,7 @@ export default function InvoiceDetailPage() {
           {/* OCR Confidence */}
           {invoice.ocrConfidence != null && (
             <div className="bg-white rounded-xl border p-4 space-y-2">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">OCR Accuracy</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.ocrAccuracy}</p>
               <ConfidenceBar value={invoice.ocrConfidence} />
             </div>
           )}
@@ -346,21 +345,21 @@ export default function InvoiceDetailPage() {
               <Building2 className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
               <div>
                 <p className="text-sm font-semibold text-gray-900">{invoice.vendor?.name}</p>
-                {invoice.vendor?.npwp && <p className="text-xs text-gray-500">NPWP: {invoice.vendor.npwp}</p>}
-                <p className="text-xs text-gray-500 mt-0.5">Bill to: {invoice.company?.name ?? '—'}</p>
+                {invoice.vendor?.npwp && <p className="text-xs text-gray-500">{t.invoiceDetail.npwp}: {invoice.vendor.npwp}</p>}
+                <p className="text-xs text-gray-500 mt-0.5">{t.invoiceDetail.billTo}: {invoice.company?.name ?? '—'}</p>
               </div>
             </div>
             <Separator />
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Invoice Date</p>
+                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> {t.invoiceDetail.invoiceDate}</p>
                 <p className="text-sm font-medium text-gray-700 mt-0.5">{formatDate(invoice.invoiceDate)}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> Due Date</p>
+                <p className="text-xs text-gray-400 flex items-center gap-1"><Calendar className="h-3 w-3" /> {t.invoiceDetail.dueDate}</p>
                 <p className={`text-sm font-medium mt-0.5 ${overdue ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
                   {formatDate(invoice.dueDate)}
-                  {overdue && <span className="block text-xs text-red-500">Overdue</span>}
+                  {overdue && <span className="block text-xs text-red-500">{t.invoiceDetail.overdue}</span>}
                 </p>
               </div>
             </div>
@@ -368,23 +367,23 @@ export default function InvoiceDetailPage() {
 
           {/* Financial Summary */}
           <div className="bg-white rounded-xl border p-4">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Financial Summary</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">{t.invoiceDetail.financialSummary}</p>
             <div className="space-y-2">
               {invoice.subtotal && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Subtotal</span>
+                  <span className="text-gray-500">{t.invoiceDetail.subtotal}</span>
                   <span className="text-gray-700">{formatIDR(invoice.subtotal)}</span>
                 </div>
               )}
               {invoice.taxAmount && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">VAT</span>
+                  <span className="text-gray-500">{t.invoiceDetail.vat}</span>
                   <span className="text-gray-700">{formatIDR(invoice.taxAmount)}</span>
                 </div>
               )}
               <Separator />
               <div className="flex justify-between text-base font-bold">
-                <span className="text-gray-800">Total</span>
+                <span className="text-gray-800">{t.invoiceDetail.total}</span>
                 <span className="text-blue-700">{formatIDR(invoice.totalAmount)}</span>
               </div>
             </div>
@@ -394,19 +393,19 @@ export default function InvoiceDetailPage() {
           {invoice.status === 'PAID' ? (
             <div className="bg-white rounded-xl border p-4 space-y-2">
               <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                <Banknote className="h-3 w-3" /> Payment
+                <Banknote className="h-3 w-3" /> {t.invoiceDetail.payment}
               </p>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Paid Date</span>
+                <span className="text-gray-500">{t.invoiceDetail.paidDate}</span>
                 <span className="text-gray-700 font-medium">{formatDate(invoice.paidDate)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Paid Amount</span>
+                <span className="text-gray-500">{t.invoiceDetail.paidAmount}</span>
                 <span className="text-gray-700 font-medium">{formatIDR(invoice.paidAmount)}</span>
               </div>
               {invoice.paidBy && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Marked by</span>
+                  <span className="text-gray-500">{t.invoiceDetail.markedBy}</span>
                   <span className="text-gray-700">{invoice.paidBy.name}</span>
                 </div>
               )}
@@ -414,11 +413,11 @@ export default function InvoiceDetailPage() {
           ) : canMarkPaid ? (
             <div className="bg-white rounded-xl border p-4 space-y-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                <Banknote className="h-3 w-3" /> Tandai Lunas
+                <Banknote className="h-3 w-3" /> {t.invoiceDetail.markAsPaid}
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-400">Paid Date</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.paidDate}</label>
                   <input
                     type="date"
                     value={paidDateInput}
@@ -427,7 +426,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Paid Amount</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.paidAmount}</label>
                   <input
                     type="number"
                     value={paidAmountInput}
@@ -436,7 +435,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
               </div>
-              <Button size="sm" onClick={handleMarkPaid} disabled={acting} className="w-full">Tandai Lunas</Button>
+              <Button size="sm" onClick={handleMarkPaid} disabled={acting} className="w-full">{t.invoiceDetail.markAsPaid}</Button>
             </div>
           ) : null}
 
@@ -444,16 +443,16 @@ export default function InvoiceDetailPage() {
           {invoice.items.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <div className="px-4 py-3 border-b bg-gray-50">
-                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Invoice Items</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">{t.invoiceDetail.invoiceItems}</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left px-4 py-2 text-xs text-gray-500">Description</th>
-                      <th className="text-right px-4 py-2 text-xs text-gray-500">Qty</th>
-                      <th className="text-right px-4 py-2 text-xs text-gray-500 hidden sm:table-cell">Price</th>
-                      <th className="text-right px-4 py-2 text-xs text-gray-500">Total</th>
+                      <th className="text-left px-4 py-2 text-xs text-gray-500">{t.invoiceDetail.colDescription}</th>
+                      <th className="text-right px-4 py-2 text-xs text-gray-500">{t.invoiceDetail.colQty}</th>
+                      <th className="text-right px-4 py-2 text-xs text-gray-500 hidden sm:table-cell">{t.invoiceDetail.colPrice}</th>
+                      <th className="text-right px-4 py-2 text-xs text-gray-500">{t.invoiceDetail.colTotal}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -473,10 +472,10 @@ export default function InvoiceDetailPage() {
 
           {/* Delivery & PIC */}
           <div className="bg-white rounded-xl border p-4 space-y-3">
-            <p className="text-xs text-gray-400 uppercase tracking-wide">Delivery &amp; PIC</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.deliveryAndPic}</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-gray-400 flex items-center gap-1"><Send className="h-3 w-3" /> Send Date</label>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><Send className="h-3 w-3" /> {t.invoiceDetail.sendDate}</label>
                 <input
                   type="date"
                   value={sendDateInput}
@@ -486,7 +485,7 @@ export default function InvoiceDetailPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400 flex items-center gap-1"><Truck className="h-3 w-3" /> Delivered Date</label>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><Truck className="h-3 w-3" /> {t.invoiceDetail.deliveredDate}</label>
                 <input
                   type="date"
                   value={deliveredDateInput}
@@ -498,31 +497,31 @@ export default function InvoiceDetailPage() {
             </div>
             {canEditDelivery ? (
               <div>
-                <label className="text-xs text-gray-400 flex items-center gap-1"><UserIcon className="h-3 w-3" /> PIC (GA Staff)</label>
+                <label className="text-xs text-gray-400 flex items-center gap-1"><UserIcon className="h-3 w-3" /> {t.invoiceDetail.pic}</label>
                 <select
                   value={picId}
                   onChange={e => setPicId(e.target.value)}
                   className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">Unassigned</option>
+                  <option value="">{t.common.unassigned}</option>
                   {gaStaff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
             ) : role !== 'VENDOR' ? (
-              <p className="text-sm text-gray-600"><UserIcon className="h-3 w-3 inline mr-1" /> PIC: {invoice.pic?.name ?? '—'}</p>
+              <p className="text-sm text-gray-600"><UserIcon className="h-3 w-3 inline mr-1" /> {t.invoiceDetail.picLabel}: {invoice.pic?.name ?? '—'}</p>
             ) : null}
             {(canEditSendDate || canEditDelivery) && (
-              <Button size="sm" onClick={handleDeliverySave} disabled={acting}>Save Delivery Info</Button>
+              <Button size="sm" onClick={handleDeliverySave} disabled={acting}>{t.invoiceDetail.saveDeliveryInfo}</Button>
             )}
           </div>
 
           {/* Fix & Resubmit (REVISION) */}
           {canResubmit && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Perbaiki &amp; Ajukan Ulang</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.fixAndResubmit}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-400">Invoice Number</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.invoiceNumber}</label>
                   <input
                     type="text"
                     value={revNumber}
@@ -531,7 +530,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Invoice Date</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.invoiceDate}</label>
                   <input
                     type="date"
                     value={revInvoiceDate}
@@ -540,7 +539,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Due Date</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.dueDate}</label>
                   <input
                     type="date"
                     value={revDueDate}
@@ -549,7 +548,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Subtotal</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.subtotal}</label>
                   <input
                     type="number"
                     value={revSubtotal}
@@ -558,7 +557,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Tax Amount</label>
+                  <label className="text-xs text-gray-400">{t.upload.fieldTaxAmount}</label>
                   <input
                     type="number"
                     value={revTax}
@@ -567,7 +566,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400">Total Amount</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.total}</label>
                   <input
                     type="number"
                     value={revTotal}
@@ -577,7 +576,7 @@ export default function InvoiceDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-gray-400">Notes</label>
+                <label className="text-xs text-gray-400">{t.invoiceDetail.notes}</label>
                 <textarea
                   rows={2}
                   value={revNotes}
@@ -585,35 +584,35 @@ export default function InvoiceDetailPage() {
                   className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none"
                 />
               </div>
-              <Button onClick={handleResubmit} disabled={acting} className="w-full">Simpan &amp; Ajukan Ulang</Button>
+              <Button onClick={handleResubmit} disabled={acting} className="w-full">{t.invoiceDetail.saveAndResubmit}</Button>
             </div>
           )}
           {canUpdateStatus && transitionOptions.length > 0 && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">Update Status</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.updateStatus}</p>
               <select
                 value={newStatus}
                 onChange={e => setNewStatus(e.target.value)}
                 className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
               >
-                <option value="">Select new status...</option>
-                {transitionOptions.map(s => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
+                <option value="">{t.invoiceDetail.selectNewStatus}</option>
+                {transitionOptions.map(s => <option key={s} value={s}>{(t.status as Record<string, string>)[s] ?? s}</option>)}
               </select>
               <textarea
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-                placeholder="Comment (optional)..."
+                placeholder={t.invoiceDetail.commentPlaceholder}
                 rows={2}
                 value={comment}
                 onChange={e => setComment(e.target.value)}
               />
-              <Button onClick={handleStatusUpdate} disabled={acting || !newStatus} className="w-full">Update</Button>
+              <Button onClick={handleStatusUpdate} disabled={acting || !newStatus} className="w-full">{t.invoiceDetail.update}</Button>
             </div>
           )}
 
           {/* Notes */}
           {invoice.notes && (
             <div className="bg-white rounded-xl border p-4">
-              <p className="text-xs text-gray-400 mb-1">Notes</p>
+              <p className="text-xs text-gray-400 mb-1">{t.invoiceDetail.notes}</p>
               <p className="text-sm text-gray-600">{invoice.notes}</p>
             </div>
           )}
