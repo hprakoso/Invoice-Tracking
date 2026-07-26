@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL 16 + pgvector extension. Schema managed by Prisma (`prisma/schema.prisma`), migrations in `prisma/migrations/`. Local instance runs via `docker-compose.yml`, mapped to host port **5433** (container port 5432) to avoid clashing with a locally installed Postgres.
+PostgreSQL 16. Schema managed by Prisma (`prisma/schema.prisma`), migrations in `prisma/migrations/`. Local instance runs via `docker-compose.yml`, mapped to host port **5433** (container port 5432) to avoid clashing with a locally installed Postgres. Previously `pgvector/pgvector:pg16` — no `vector` column ever existed in the schema (chat has always answered from a static context string, not a live vector search, per `docs/ARCHITECTURE.md`), so downgraded to plain `postgres:16`. Chat itself is being rebuilt onto a structured `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2, independent of this change.
 
 ## Connection & SSL
 

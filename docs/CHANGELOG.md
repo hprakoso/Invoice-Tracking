@@ -8,6 +8,11 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-26 — docker-compose: pgvector → plain postgres
+**What:** `docker-compose.yml`'s `db.image` changed from `pgvector/pgvector:pg16` to `postgres:16`. Docs updated to match (`docs/ARCHITECTURE.md`, `docs/DATABASE.md`).
+**Why:** No `vector` column has ever existed in the schema — chat has always answered from a static context string (`docs/ARCHITECTURE.md`'s own Known Limitations section already said so), and is being rebuilt onto a structured `query_invoices` tool rather than vector search (`docs/PRODUCTION_PLAN.md` §5.2). Dead weight removed from the local dev image.
+**Not applied to the running container:** this only changes what a fresh `docker-compose up` provisions. The already-running local `invoice_demo_db` container (with this session's migrated + seeded data) was intentionally left untouched — recreating it wasn't asked for and risked live dev data for a cosmetic image swap.
+
 ### 2026-07-26 — Rate limiter: lazy sweep instead of a background setInterval
 **What:** `src/lib/rate-limit.ts`'s `setInterval(...).unref()` (swept expired entries every 60s) replaced with a lazy sweep — every 100th call to `rateLimit()` walks the Map and drops expired entries. New `src/lib/__tests__/rate-limit.test.ts` (4 cases: under-limit allowed, over-limit 429 + `Retry-After`, window reset, independent identifiers) — this file had no test coverage before.
 **Why:** A `setInterval` doesn't fire reliably on serverless (the process can freeze between invocations), so correctness shouldn't depend on it. The per-instance in-memory limiter itself is accepted as-is for now — see `docs/PRODUCTION_PLAN.md` §4.3 for why (protects an authenticated surface, not anonymous; degrades to "per instance" rather than failing open).

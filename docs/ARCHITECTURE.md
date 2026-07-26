@@ -11,7 +11,7 @@
 | Charts | recharts | Status donut, aging bar |
 | Auth | NextAuth v5 (Credentials provider, JWT sessions) | bcrypt (cost 12) password hashing |
 | ORM | Prisma 7.8.0 + `@prisma/adapter-pg` | Explicit `pg.Pool` (see [DATABASE.md](./DATABASE.md#connection--ssl)) |
-| Database | PostgreSQL 16 + pgvector | Local via Docker Compose, port **5433** on host |
+| Database | PostgreSQL 16 | Local via Docker Compose, port **5433** on host. Was `pgvector/pgvector:pg16`; downgraded to plain `postgres:16` — no `vector` column ever existed in the schema, and chat is being rebuilt onto a structured `query_invoices` tool (`docs/PRODUCTION_PLAN.md` §5.2) rather than vector search |
 | AI service | Python FastAPI (separate process) | OCR extraction + RAG chatbot |
 | OCR | Tesseract + PyMuPDF/pdf2image | Indonesian + English |
 | LLM orchestration | LangChain (LCEL) | Provider-agnostic via `LLM_PROVIDER` |
