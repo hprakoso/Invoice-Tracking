@@ -59,6 +59,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  // Contact name/email are mandatory on the vendor's own profile — checked
+  // against the post-update effective value (current, unless this PATCH
+  // overwrites it), not just whatever this particular request happens to
+  // touch. Scoped to the vendor's own self-service edit: ADMIN/GA_STAFF
+  // managing a vendor that hasn't filled its profile in yet (e.g. right
+  // after admin-seeding) shouldn't be blocked from unrelated edits like
+  // toggling isActive.
+  if (isOwner) {
+    const effectiveContactName = ('contactName' in filtered ? filtered.contactName : current.contactName) as string | null
+    const effectiveContactEmail = ('contactEmail' in filtered ? filtered.contactEmail : current.contactEmail) as string | null
+    if (!effectiveContactName?.trim() || !effectiveContactEmail?.trim()) {
+      return NextResponse.json(
+        { error: 'Contact name and contact email are required' },
+        { status: 400 },
+      )
+    }
+  }
+
   const vendor = await prisma.vendor.update({ where: { id }, data: filtered })
 
   await prisma.auditLog.create({

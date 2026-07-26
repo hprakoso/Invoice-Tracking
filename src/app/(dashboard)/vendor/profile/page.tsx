@@ -71,8 +71,20 @@ export default function VendorProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId])
 
+  function validate(): string | null {
+    if (!form.contactName.trim()) return 'Primary Contact Name is required'
+    if (!form.contactEmail.trim()) return 'Primary Contact Email is required'
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return 'Primary Contact Email is not a valid email address'
+    return null
+  }
+
   async function save() {
     if (!vendorId) return
+    const validationError = validate()
+    if (validationError) {
+      toast.error(validationError)
+      return
+    }
     setSaving(true)
     const res = await fetch(`/api/vendors/${vendorId}`, {
       method: 'PATCH',
@@ -84,7 +96,8 @@ export default function VendorProfilePage() {
       toast.success('Profile updated')
       load()
     } else {
-      toast.error('Update failed')
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? 'Update failed')
     }
   }
 
@@ -124,6 +137,7 @@ export default function VendorProfilePage() {
       <div>
         <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Company Profile</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">Manage your billing details and contacts</p>
+        <p className="text-xs text-gray-400 mt-1"><span className="text-red-500">*</span> Required field</p>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-4">
@@ -153,12 +167,12 @@ export default function VendorProfilePage() {
             <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Primary Contact Name</label>
+            <label className="text-xs text-gray-500 mb-1 block">Primary Contact Name <span className="text-red-500">*</span></label>
             <Input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Primary Contact Email</label>
-            <Input value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} />
+            <label className="text-xs text-gray-500 mb-1 block">Primary Contact Email <span className="text-red-500">*</span></label>
+            <Input type="email" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} />
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Bank Name</label>

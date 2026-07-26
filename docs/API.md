@@ -92,6 +92,8 @@ Auth: any authenticated user — like invoices, field-aware rather than a flat r
 
 `name`/`npwp` are locked to `ADMIN` — both are used to match tax documents, and a vendor changing them unilaterally would break that audit trail. Writes: `vendors` row (partial update), `audit_logs` (`action: 'vendor.updated'`, `metadata: { fields }`).
 
+**Mandatory contact fields** (`VENDOR` self-service only, `id === session.user.vendorId`): `contactName`/`contactEmail` must be non-empty in the *resulting* row after this update, not just in the submitted body — computed from the patch's value if it touches that field, else the vendor's current value. Rejects 400 with `{ error: "Contact name and contact email are required" }` if either would end up empty. Deliberately **not** enforced for `ADMIN`/`GA_STAFF`/`GA_MANAGER` edits — an admin-seeded vendor the owning `VENDOR` hasn't finished setting up yet shouldn't block unrelated admin operations like toggling `isActive`.
+
 ### `GET /api/vendors/[id]/contacts`
 Auth: same access rule as `GET /api/vendors/[id]`. Returns `vendor_contacts.*` for this vendor, ordered by `name`.
 

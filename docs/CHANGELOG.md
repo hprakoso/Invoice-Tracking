@@ -8,6 +8,15 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-27 — Mandatory vendor contact fields (Stage 3 of 5)
+**What:** `PATCH /api/vendors/[id]` now rejects (400) any update from the vendor's own self-service edit (`isOwner`) that would leave `contactName` or `contactEmail` empty — checked against the *effective* post-update value (this patch's value if it touches the field, else the current DB value), so an unrelated partial update (e.g. just `phone`) on a vendor that already has contact info filled in is never blocked by this. Deliberately scoped to `isOwner` only — `ADMIN`/`GA_STAFF`/`GA_MANAGER` can still freely edit an admin-seeded vendor that hasn't filled in its own profile yet (e.g. toggling `isActive`) without hitting this constraint.
+
+`/vendor/profile` (the vendor's own Company Profile page): added a red `*` to the Primary Contact Name/Email labels plus a "* Required field" legend, `type="email"` on the email input, and a `validate()` check before the save request fires — empty name, empty email, or a malformed email address all show a toast and never reach the API. Server error messages (e.g. the 400 above) now surface directly in the toast instead of a generic "Update failed".
+
+**Why:** User request — vendor profile completeness (at minimum, a named contact and their email) should be enforced, not just implied by the form having those fields. Explicitly chosen: validation on save (not a hard block on using the rest of the app, e.g. uploading invoices) — a vendor with an incomplete profile can still work, they just can't leave contact info blank when they do save the profile page itself.
+
+**Verified live against local Postgres:** as `vendor1`, attempted to clear both `contactName` and `contactEmail` via a direct API call — got the expected 400. Then sent an unrelated partial update (`phone` only, contact fields untouched) — succeeded 200 with the existing `contactName`/`contactEmail` preserved, confirming the fix doesn't block ordinary partial edits. `npx tsc --noEmit` clean (needed one explicit cast — `Object.fromEntries` collapses the filtered-fields object's value type to a union across every possible field, including `isActive: boolean`, so `.trim()` needed a `string | null` cast), `npm run lint` 0 errors, `npm test` 50/50 (unchanged — no new pure functions to unit test; the validation lives in a route handler and a client component).
+
 ### 2026-07-27 — Upload wizard restructure: company/vendor first, OCR-failure fallback (Stage 2 of 5)
 **What:** `src/app/(dashboard)/invoices/upload/page.tsx` rewritten around a new first stage, `select`: the user picks the bill-to `Company` and — for any non-`VENDOR` role — the `Vendor` sending the invoice, both from real dropdowns, before a file is even chosen. Only after that does the wizard show the drop-zone. `POST /api/invoices` now receives `companyId` and the explicitly-chosen `vendorId` at draft-creation time, not deferred to the review-step `PATCH`.
 
