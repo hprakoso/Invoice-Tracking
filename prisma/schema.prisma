@@ -45,20 +45,41 @@ model User {
 }
 
 model Vendor {
-  id           String   @id @default(uuid())
-  name         String
-  npwp         String?
-  contactName  String?  @map("contact_name")
-  contactEmail String?  @map("contact_email")
-  bankName     String?  @map("bank_name")
-  bankAccount  String?  @map("bank_account")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id                String   @id @default(uuid())
+  name              String
+  npwp              String?
+  contactName       String?  @map("contact_name")
+  contactEmail      String?  @map("contact_email")
+  bankName          String?  @map("bank_name")
+  bankAccount       String?  @map("bank_account")
+  address           String?
+  city              String?
+  phone             String?
+  bankAccountHolder String?  @map("bank_account_holder")
+  bankBranch        String?  @map("bank_branch")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   users        User[]
   invoices     Invoice[]
+  contacts     VendorContact[]
 
   @@map("vendors")
+}
+
+// A vendor may have several people involved (finance, sales, ops, ...) — kept
+// as a separate table rather than flat fields on Vendor.
+model VendorContact {
+  id       String  @id @default(uuid())
+  vendorId String  @map("vendor_id")
+  name     String
+  email    String?
+  phone    String?
+  role     String?
+
+  vendor   Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("vendor_contacts")
 }
 
 // The receiving entity ("bill-to") an invoice is submitted against — distinct

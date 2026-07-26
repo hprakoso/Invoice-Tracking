@@ -18,6 +18,7 @@ User ──1:N──> Notification
 
 Vendor ──1:N──> Invoice
 Vendor ──1:N──> User (vendor-portal users)
+Vendor ──1:N──> VendorContact (cascade delete)
 
 Company ──1:N──> Invoice (optional — the bill-to entity, distinct from Vendor)
 
@@ -44,11 +45,24 @@ Invoice ──1:N──> Notification (optional)
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| name | text | |
-| npwp | text, nullable | Indonesian tax ID |
-| contact_name / contact_email | text, nullable | |
-| bank_name / bank_account | text, nullable | |
+| name | text | **`ADMIN`-only to change** — used to match tax documents |
+| npwp | text, nullable | Indonesian tax ID — **`ADMIN`-only to change**, same reason |
+| contact_name / contact_email | text, nullable | primary contact; self-editable by the linked `VENDOR` |
+| bank_name / bank_account | text, nullable | self-editable |
+| address / city / phone | text, nullable | self-editable — added in migration `20260726180556_extend_vendor_profile` |
+| bank_account_holder / bank_branch | text, nullable | self-editable — added in the same migration |
 | is_active | bool, default true | |
+
+### `vendor_contacts`
+Multiple PICs per vendor (finance, sales, ops, ...) — kept as a separate table rather than flat fields on `vendors`.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| vendor_id | uuid FK → `vendors.id`, `onDelete: Cascade` | |
+| name | text | |
+| email / phone | text, nullable | |
+| role | text, nullable | free text, e.g. "Finance", "Sales" |
 | created_at | timestamp | |
 
 ### `companies`
@@ -136,6 +150,7 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726171012_simplify_roles` | Drops `MANAGER`, `FINANCE`, `VIEWER` from `Role` enum via type-swap (`UPDATE` remaps any existing rows to `GA_STAFF` first, then `CREATE TYPE ... AS ENUM` + `ALTER TABLE ... TYPE` + `DROP TYPE`); down to 4 roles: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` |
 | `20260726173942_add_payment_tracking` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'PAID'` (additive — no type-swap needed, unlike removing enum values); adds `invoices.paid_date`/`paid_amount`/`paid_by` (FK → `users.id`) |
 | `20260726175202_add_companies` | New `companies` table (8th table); adds `invoices.company_id` (nullable FK → `companies.id`) |
+| `20260726180556_extend_vendor_profile` | Adds `vendors.address`/`city`/`phone`/`bank_account_holder`/`bank_branch`; new `vendor_contacts` table (9th table) |
 
 ## Seed data (`prisma/seed.ts`)
 

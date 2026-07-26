@@ -8,6 +8,19 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-26 — Vendor profile: extended fields, VendorContact, self-service editing (3e)
+**What:** `Vendor` gains `address`/`city`/`phone`/`bankAccountHolder`/`bankBranch` (migration `20260726180556_extend_vendor_profile`). New `VendorContact` model (`vendor_contacts` table, cascade-deletes with its vendor) — a vendor can have several PICs (finance, sales, ops), kept as a separate table rather than flat fields.
+
+New endpoints: `POST /api/vendors` (`ADMIN`-only — creates the `Vendor` entity a `VENDOR`-role user account later links to via `POST /api/users`, a separate step); `GET/PATCH /api/vendors/[id]`; `GET/POST /api/vendors/[id]/contacts`; `DELETE /api/vendors/[id]/contacts/[contactId]`. `GET /api/vendors` (list) now scopes `VENDOR`-role callers to their own vendor only — previously returned the full list to everyone. `PATCH` uses the same field-aware-not-flat-role-gate pattern as invoices (`allowedVendorFields()`): `name`/`npwp` are `ADMIN`-only (they're used to match tax documents — a vendor renaming itself would break that audit trail), everything else is self-editable by `ADMIN`/`GA_STAFF`/`GA_MANAGER` for any vendor, or by the linked `VENDOR` for their own record only.
+
+New `/admin/vendors` page (create — `ADMIN` only — plus an expandable per-row edit panel with a contacts sub-list, open to `ADMIN`/`GA_STAFF`/`GA_MANAGER`) and `/vendor/profile` (self-service page for `VENDOR`, name/npwp shown read-only with a lock icon and an explanatory note, rest editable, own contacts manageable).
+
+**Resolved a conflict in my own plan while implementing:** `docs/PRODUCTION_PLAN.md` §6.5's prose said vendor-data editing is `ADMIN, GA_STAFF` only, but its own §11 role-matrix table listed `GA_MANAGER` as included. Went with including `GA_MANAGER` — consistent with the pattern established everywhere else this session (`GA_MANAGER` mirrors `GA_STAFF`'s operational permissions plus supervisory extras), and matches the more-recently-written summary table.
+
+**Why:** User request (3e) — vendor's own detail data (address, bank account, PICs) editable by the vendor after being seeded by admin; name/NPWP locked since they anchor tax-document matching.
+
+**Verified live against real Postgres and real sessions across three roles:** as `VENDOR`, confirmed a `name`/`npwp` change is silently dropped while `city`/`phone` in the same request still applies (partial-field filtering, not a hard reject); confirmed `GET /api/vendors` returns only the caller's own vendor; confirmed `GET`/`PATCH` on a different vendor's real id both return 403 (tested against an actual second vendor id, not just a malformed one); confirmed adding a contact works. As `GA_STAFF`: confirmed `POST /api/vendors` (create) is blocked 403 (`ADMIN`-only) while `PATCH` on an existing vendor's non-locked field succeeds, and a `name`-only `PATCH` correctly 403s (filtered field list ends up empty).
+
 ### 2026-07-26 — Company model: bill-to entity selection (3c/3d)
 **What:** New `Company` model (`companies` table, migration `20260726175202_add_companies`) — the invoice-receiving entity ("bill-to"), distinct from `Vendor` (the sender). `Invoice.companyId` is a nullable FK (nullable by design, not backfill laziness — avoids forcing a value onto rows that predate the feature; see `docs/PRODUCTION_PLAN.md` §6.3). New `GET/POST /api/companies` and `PATCH/DELETE /api/companies/[id]`, writes/deletes restricted to `ADMIN`/`GA_STAFF` (`GA_MANAGER` explicitly excluded — matches the plan's own permission matrix, which the Sidebar nav had drifted from, see below); `DELETE` soft-deletes (`isActive = false`) so existing invoice references stay valid. `GET` is open to any authenticated user, including `VENDOR` — it populates the upload wizard's company dropdown.
 

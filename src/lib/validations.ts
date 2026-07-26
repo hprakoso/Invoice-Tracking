@@ -67,6 +67,45 @@ export const updateCompanySchema = z.object({
   isActive: z.boolean().optional(),
 })
 
+export const createVendorSchema = z.object({
+  name: z.string().min(1, 'Vendor name required').max(200),
+  npwp: z.string().max(50).optional().nullable(),
+  contactName: z.string().max(200).optional().nullable(),
+  contactEmail: z.string().email().optional().nullable(),
+  bankName: z.string().max(100).optional().nullable(),
+  bankAccount: z.string().max(50).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  bankAccountHolder: z.string().max(200).optional().nullable(),
+  bankBranch: z.string().max(100).optional().nullable(),
+})
+
+// Superset of every field any role may submit — the route filters which of
+// these a given caller may actually write (name/npwp are ADMIN-only; VENDOR
+// self-editing gets everything else). See allowedVendorFields() in the route.
+export const updateVendorSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  npwp: z.string().max(50).optional().nullable(),
+  contactName: z.string().max(200).optional().nullable(),
+  contactEmail: z.string().email().optional().nullable(),
+  bankName: z.string().max(100).optional().nullable(),
+  bankAccount: z.string().max(50).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  bankAccountHolder: z.string().max(200).optional().nullable(),
+  bankBranch: z.string().max(100).optional().nullable(),
+  isActive: z.boolean().optional(),
+})
+
+export const vendorContactSchema = z.object({
+  name: z.string().min(1, 'Contact name required').max(200),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  role: z.string().max(100).optional().nullable(),
+})
+
 export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),

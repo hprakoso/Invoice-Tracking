@@ -71,7 +71,33 @@ Auth: any authenticated user; `VENDOR` 403 if not their invoice. Returns 503 whe
 ## Vendors
 
 ### `GET /api/vendors`
-Auth: any authenticated user. Returns `vendors.{id,name,npwp,contactEmail,bankName}` where `is_active = true`, ordered by `name`.
+Auth: any authenticated user. `VENDOR` role gets only their own vendor (full row, or `[]` if unlinked) — never the full list. Everyone else gets `vendors.{id,name,npwp,contactEmail,bankName}` where `is_active = true`, ordered by `name`.
+
+### `POST /api/vendors`
+Auth: `ADMIN` only. Body validated by `createVendorSchema`. Creates the `Vendor` entity a `VENDOR`-role user account is later linked to via `POST /api/users` (`vendorId`) — the two are separate steps. Writes: `vendors` row, `audit_logs` (`action: 'vendor.created'`).
+
+### `GET /api/vendors/[id]`
+Auth: any authenticated user; `VENDOR` gets 403 if `id !== session.user.vendorId`. Returns the full `vendors` row + `contacts[]` (all `vendor_contacts` for this vendor).
+
+### `PATCH /api/vendors/[id]`
+Auth: any authenticated user — like invoices, field-aware rather than a flat role gate (`allowedVendorFields()` in the route):
+
+| Role | Writable fields |
+|---|---|
+| `ADMIN` | everything, including `name`, `npwp`, `isActive` |
+| `GA_STAFF`, `GA_MANAGER` | everything **except** `name`, `npwp` |
+| `VENDOR` (`id === session.user.vendorId` only) | everything except `name`, `npwp`, `isActive` |
+
+`name`/`npwp` are locked to `ADMIN` — both are used to match tax documents, and a vendor changing them unilaterally would break that audit trail. Writes: `vendors` row (partial update), `audit_logs` (`action: 'vendor.updated'`, `metadata: { fields }`).
+
+### `GET /api/vendors/[id]/contacts`
+Auth: same access rule as `GET /api/vendors/[id]`. Returns `vendor_contacts.*` for this vendor, ordered by `name`.
+
+### `POST /api/vendors/[id]/contacts`
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, or the owning `VENDOR`. Body validated by `vendorContactSchema`. Writes: `vendor_contacts` row, `audit_logs` (`action: 'vendor.contact_added'`).
+
+### `DELETE /api/vendors/[id]/contacts/[contactId]`
+Auth: same as `POST`. Hard delete (contacts have no soft-delete flag). Writes `audit_logs` (`action: 'vendor.contact_removed'`).
 
 ## Companies
 

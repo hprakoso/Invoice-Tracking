@@ -7,7 +7,7 @@ import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, FileText, Upload, Users, MessageSquare,
-  Bell, ClipboardList, Menu, X, FileStack, ChevronRight, Building2, Settings
+  Bell, ClipboardList, Menu, X, FileStack, ChevronRight, Building2, Settings, Briefcase
 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -24,8 +24,10 @@ const NAV_ITEMS = [
   { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
   { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
   { href: '/admin/users', label: 'User Management', icon: Users, roles: ['ADMIN'], indent: false },
+  { href: '/admin/vendors', label: 'Vendors', icon: Briefcase, roles: ['ADMIN', 'GA_STAFF', 'GA_MANAGER'], indent: false },
   { href: '/admin/companies', label: 'Companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF'], indent: false },
   { href: '/admin/reminders', label: 'Reminder Settings', icon: Settings, roles: ['ADMIN'], indent: false },
+  { href: '/vendor/profile', label: 'Company Profile', icon: Briefcase, roles: ['VENDOR'], indent: false },
 ]
 
 function NavItem({ href, label, icon: Icon, active, indent }: { href: string; label: string; icon: React.ElementType; active: boolean; indent: boolean }) {

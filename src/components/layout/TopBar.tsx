@@ -19,6 +19,10 @@ const PAGE_TITLES: Record<string, string> = {
   '/chat': 'AI Assistant',
   '/audit': 'Audit Log',
   '/admin/users': 'User Management',
+  '/admin/vendors': 'Vendors',
+  '/admin/companies': 'Companies',
+  '/admin/reminders': 'Reminder Settings',
+  '/vendor/profile': 'Company Profile',
 }
 
 interface Notification {
