@@ -8,6 +8,17 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-27 — Fix: `prisma.config.ts`/`seed.ts` ignored `.env.local`
+**What:** Both files loaded env vars via plain `import "dotenv/config"`, which only reads `.env` — never `.env.local`. Whenever both files coexist (the common case: an old `.env` left over from earlier in the project, plus the `.env.local` `docs/SETUP.md` actually documents), `prisma migrate deploy` and `npx tsx prisma/seed.ts` would silently use `.env`'s values, completely ignoring `.env.local` edits, with no error — just the wrong database. Switched both to `@next/env`'s `loadEnvConfig()` (added as an explicit devDependency — was already bundled transitively via `next`), which is the exact mechanism `next dev` itself uses (`.env.local` overrides `.env`), so CLI tooling and the running app now resolve env vars identically. Also gave `seed.ts` the same Supabase-pooler SSL workaround `src/lib/db/prisma.ts` already had (explicit `pg.Pool` + `ssl` option, `sslmode`/`sslaccept` stripped from the URL) — it was building its own `PrismaPg` adapter directly from a connection string with no SSL handling at all, which would have failed against Supabase even after the env-loading fix. Fixed a stale `5434` fallback port in `prisma.config.ts` to `5433`, matching `docker-compose.yml`.
+
+**Why:** User-reported — ran the Supabase deployment guide's migrate/seed steps, got no visible error, but no data appeared in the new Supabase project. Root-caused via a hash comparison of `.env` vs `.env.local`'s `DATABASE_URL` (without ever printing the actual connection string) — confirmed `prisma.config.ts` was resolving to `.env`'s stale value, not `.env.local`'s.
+
+**Not user's config mistake, but flagged one anyway:** while diagnosing, found `DATABASE_URL` in the user's `.env.local` still matched the original local-docker default byte-for-byte — only `DIRECT_URL` had actually been updated to Supabase. Since the app runtime and seed script only ever read `DATABASE_URL` (never `DIRECT_URL`), this needed calling out separately from the code fix — the code fix alone doesn't help if `DATABASE_URL` itself was never pointed at Supabase.
+
+**Also removed** the stale `.env` file (untracked/gitignored, dated 2026-07-15, fully superseded by `.env.local`) per user request, to prevent this exact class of bug from recurring.
+
+**Verified:** `npx tsc --noEmit`, `npm run lint` (0 errors), `npm test` (47/47) all pass. Confirmed the fix's *precedence logic* via SHA-256 hash comparison of `.env`/`.env.local`/resolved values — never printed a real secret to verify. Did not run `migrate deploy`/`seed` against the user's live Supabase project myself (would mutate their real external database without being explicitly asked to in that moment); left for the user to re-run and confirm.
+
 ### 2026-07-26 — Supabase Storage, Gemini OCR/chat, Resend email — retired the Python ai-service
 **What:** Added `@supabase/supabase-js`, `@google/genai`, `resend` (explicit user approval per `CLAUDE.md`'s new-dependency rule). Removed `ai-service/` entirely (Python FastAPI + Tesseract + LangChain, explicit user approval — a separate destructive-action confirmation since it deletes tracked files).
 
@@ -198,10 +209,20 @@ UI: invoice detail page gets a "Tandai Lunas" card (paid date + amount inputs, d
 |---|---|---|
 | `ec0eee2` | 2026-07-26 | chore: add GitHub Actions CI running tsc/lint/test |
 | `a37d4fb` | 2026-07-26 | feat: Supabase Storage, Gemini OCR/chat, Resend email; retire ai-service |
+| `6681d1a` | 2026-07-26 | docs: record commit log entries for CI and the AI-service migration |
+
+### Phase 13 — Merged to main, deploy prep fixes
+`feat/deploy-ready` fast-forward merged into `main` at `27745ba` (no merge commit — main had no divergent commits) and pushed; `main` is now the deploy branch for the fresh Vercel/Supabase project.
+| Commit | Date | Message |
+|---|---|---|
+| `f7c8a27` | 2026-07-26 | chore: gitignore .agents/ and skills-lock.json |
+| `7d2e2e4` | 2026-07-26 | docs: document DIRECT_URL and clarify CRON_SECRET behavior on Vercel |
+| `27745ba` | 2026-07-26 | chore: remove obsolete version key from docker-compose.yml |
+| `4e03b10` | 2026-07-27 | fix: load .env.local in prisma.config.ts and seed.ts, not just .env |
 
 ## Commit Log
 
-Full history of the `feat/deploy-ready` branch (current branch, forked from `feat/production-hardening`), grouped by phase. `main` and this branch are at the same point through `b7ffd9e`; deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
+Full history of `main` (current branch — `feat/deploy-ready` was fast-forward merged into it at `27745ba`, see Phase 13), grouped by phase. Older deploy attempts live on separate branches (`deploy/option-a`, `deploy/option-b`, `chore/cleanup-tracked-files`) with their own merge commits, omitted here.
 
 ### Phase 0 — Scaffold
 | Commit | Date | Message |
