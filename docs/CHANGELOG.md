@@ -8,6 +8,11 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-26 — Rate limiter: lazy sweep instead of a background setInterval
+**What:** `src/lib/rate-limit.ts`'s `setInterval(...).unref()` (swept expired entries every 60s) replaced with a lazy sweep — every 100th call to `rateLimit()` walks the Map and drops expired entries. New `src/lib/__tests__/rate-limit.test.ts` (4 cases: under-limit allowed, over-limit 429 + `Retry-After`, window reset, independent identifiers) — this file had no test coverage before.
+**Why:** A `setInterval` doesn't fire reliably on serverless (the process can freeze between invocations), so correctness shouldn't depend on it. The per-instance in-memory limiter itself is accepted as-is for now — see `docs/PRODUCTION_PLAN.md` §4.3 for why (protects an authenticated surface, not anonymous; degrades to "per instance" rather than failing open).
+**Verified live:** hit `/api/chat` (limit 10/min) 11 times through the real running server as a logged-in `GA_MANAGER` — first 10 returned 200, the 11th returned 429, confirming the refactor preserved the exact limiting behavior, not just that it type-checks.
+
 ### 2026-07-26 — Notification bell: SSE stream → client polling
 **What:** Deleted `GET /api/notifications/stream` (held a `ReadableStream` open, polling the DB server-side every 15s for as long as the client stayed connected). `useNotificationStream.ts` now polls the existing `GET /api/notifications?unread=true` endpoint client-side every 60s and uses the response array's length as the unread count — no new route needed, the endpoint already existed for the notification-bell popover.
 **Why:** A held-open SSE connection doesn't fit a serverless function — Vercel bills and eventually terminates long-lived connections, and it defeats scale-to-zero. Client polling is one `fetch` per interval, fits the request/response model serverless is built for. See `docs/PRODUCTION_PLAN.md` §4.4.

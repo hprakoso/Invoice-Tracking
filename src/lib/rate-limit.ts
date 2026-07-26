@@ -7,13 +7,18 @@ interface RateLimitEntry {
 
 const store = new Map<string, RateLimitEntry>()
 
-// Cleanup stale entries every 60 seconds
-setInterval(() => {
-  const now = Date.now()
+// ponytail: a background setInterval sweep doesn't fire reliably on
+// serverless (the process can freeze between invocations), so expired
+// entries are instead swept lazily every SWEEP_EVERY calls. Bounds
+// memory without depending on a timer that may never run.
+const SWEEP_EVERY = 100
+let callCount = 0
+
+function sweepExpired(now: number) {
   for (const [key, entry] of store) {
     if (now > entry.resetAt) store.delete(key)
   }
-}, 60_000).unref()
+}
 
 export function rateLimit(
   identifier: string,
@@ -21,6 +26,10 @@ export function rateLimit(
   windowMs: number = 60_000,
 ): NextResponse<{ error: string }> | null {
   const now = Date.now()
+
+  callCount++
+  if (callCount % SWEEP_EVERY === 0) sweepExpired(now)
+
   const entry = store.get(identifier)
 
   if (!entry || now > entry.resetAt) {
