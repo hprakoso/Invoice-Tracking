@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
-import { readFile } from 'fs/promises'
-import { existsSync } from 'fs'
-import path from 'path'
+import { getFileBuffer } from '@/lib/services/fileService'
 
 const MIME_MAP: Record<string, string> = {
   pdf: 'application/pdf',
@@ -11,10 +9,6 @@ const MIME_MAP: Record<string, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
 }
-
-// Absolute path to the allowed upload directory.
-// All served files MUST live under this prefix to prevent path-traversal attacks.
-const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads', 'invoices')
 
 export async function GET(
   _req: NextRequest,
@@ -39,27 +33,14 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
-  if (process.env.VERCEL === '1') {
-    return NextResponse.json(
-      { error: 'File storage not available in this deployment. Contact admin.' },
-      { status: 503 }
-    )
-  }
-
-  // Confine the path to the upload directory — prevents directory traversal
-  const resolvedPath = path.resolve(invoice.filePath)
-  if (!resolvedPath.startsWith(UPLOAD_DIR + path.sep) && resolvedPath !== UPLOAD_DIR) {
-    return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-  }
-
-  if (!existsSync(resolvedPath)) {
+  const buffer = await getFileBuffer(invoice.filePath).catch(() => null)
+  if (!buffer) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
-  const buffer = await readFile(resolvedPath)
   const contentType = MIME_MAP[invoice.fileType ?? ''] ?? 'application/octet-stream'
 
-  return new NextResponse(buffer, {
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': 'private, max-age=3600',

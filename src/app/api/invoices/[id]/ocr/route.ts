@@ -2,8 +2,15 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
 import { rateLimit } from '@/lib/rate-limit'
+import { getFileBuffer } from '@/lib/services/fileService'
+import { extractInvoiceFields } from '@/lib/services/geminiExtraction'
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:8000'
+const MIME_MAP: Record<string, string> = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+}
 
 export async function GET(
   req: NextRequest,
@@ -35,24 +42,14 @@ export async function GET(
         }
 
         controller.enqueue(emit('status', { step: 'started', message: 'Memulai OCR...' }))
-
-        // Call AI service
         controller.enqueue(emit('status', { step: 'ocr', message: 'Membaca dokumen...' }))
 
-        const aiRes = await fetch(`${AI_SERVICE_URL}/ocr/extract`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_path: invoice.filePath, invoice_id: id }),
-          signal: AbortSignal.timeout(60000),
-        })
-
-        if (!aiRes.ok) {
-          throw new Error(`AI service error: ${aiRes.status}`)
-        }
-
-        const extracted = await aiRes.json()
+        const buffer = await getFileBuffer(invoice.filePath)
+        const mimeType = MIME_MAP[invoice.fileType ?? ''] ?? 'application/pdf'
 
         controller.enqueue(emit('status', { step: 'extracting', message: 'Mengekstrak data...' }))
+
+        const extracted = await extractInvoiceFields(buffer, mimeType)
 
         // Emit each field one by one for the animated reveal
         const fieldOrder = [
@@ -64,7 +61,7 @@ export async function GET(
           { key: 'subtotal', label: 'Subtotal' },
           { key: 'tax_amount', label: 'PPN' },
           { key: 'total_amount', label: 'Total' },
-        ]
+        ] as const
 
         for (const field of fieldOrder) {
           const fieldData = extracted[field.key]
@@ -106,7 +103,7 @@ export async function GET(
         if (extracted.line_items?.length > 0) {
           await prisma.invoiceItem.deleteMany({ where: { invoiceId: id } })
           await prisma.invoiceItem.createMany({
-            data: extracted.line_items.map((item: { description: string; quantity?: number; unit_price?: number; total?: number }, i: number) => ({
+            data: extracted.line_items.map((item, i) => ({
               invoiceId: id,
               description: item.description,
               quantity: item.quantity ?? null,

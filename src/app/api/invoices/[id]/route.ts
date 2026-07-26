@@ -7,6 +7,8 @@ import {
   validateDeliveryDates,
   validationErrorResponse,
 } from '@/lib/validations'
+import { sendEmail } from '@/lib/services/email'
+import { extraEmailsOf } from '@/lib/services/reminderScheduler'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await requireAuth()
@@ -177,13 +179,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // ReminderSetting.recipientRoles, unlike due_soon/overdue/invoice_submitted.
 async function notifyRevisionRequested(invoiceId: string, invoiceNumber: string, vendorId: string) {
   const setting = await prisma.reminderSetting.findUnique({ where: { type: 'revision_requested' } })
-  if (!setting?.isActive || !setting.inAppEnabled) return
+  if (!setting?.isActive || !(setting.inAppEnabled || setting.emailEnabled)) return
 
   const vendorUsers = await prisma.user.findMany({
     where: { vendorId, role: 'VENDOR', isActive: true },
-    select: { id: true },
+    select: { id: true, email: true },
   })
   if (vendorUsers.length === 0) return
+
+  if (setting.emailEnabled) {
+    const to = [...vendorUsers.map((u) => u.email), ...extraEmailsOf(setting.extraEmails)]
+    await sendEmail(
+      to,
+      `Invoice ${invoiceNumber} perlu direvisi`,
+      `<p>Invoice ${invoiceNumber} perlu diperbaiki. Silakan perbaiki dan ajukan ulang invoice ini.</p>`,
+    )
+  }
+
+  if (!setting.inAppEnabled) return
 
   await prisma.notification.createMany({
     data: vendorUsers.map((u) => ({

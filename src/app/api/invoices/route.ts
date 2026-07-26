@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
+import { sendEmail } from '@/lib/services/email'
+import { extraEmailsOf } from '@/lib/services/reminderScheduler'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
@@ -119,16 +121,27 @@ export async function POST(req: NextRequest) {
 
 async function notifyInvoiceSubmitted(invoiceId: string, invoiceNumber: string, vendorName: string) {
   const setting = await prisma.reminderSetting.findUnique({ where: { type: 'invoice_submitted' } })
-  if (!setting?.isActive || !setting.inAppEnabled) return
+  if (!setting?.isActive || !(setting.inAppEnabled || setting.emailEnabled)) return
 
   const roles = Array.isArray(setting.recipientRoles) ? (setting.recipientRoles as string[]) : []
   if (roles.length === 0) return
 
   const recipients = await prisma.user.findMany({
     where: { role: { in: roles as never[] }, isActive: true },
-    select: { id: true },
+    select: { id: true, email: true },
   })
   if (recipients.length === 0) return
+
+  if (setting.emailEnabled) {
+    const to = [...recipients.map((u) => u.email), ...extraEmailsOf(setting.extraEmails)]
+    await sendEmail(
+      to,
+      `Invoice baru dari ${vendorName}`,
+      `<p>Invoice ${invoiceNumber} dari ${vendorName} perlu diperiksa.</p>`,
+    )
+  }
+
+  if (!setting.inAppEnabled) return
 
   await prisma.notification.createMany({
     data: recipients.map((u) => ({

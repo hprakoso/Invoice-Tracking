@@ -4,8 +4,8 @@
 
 - Node.js 18+
 - Docker Desktop (for PostgreSQL)
-- Python 3.10+ (for the AI service)
-- Tesseract OCR — macOS: `brew install tesseract tesseract-lang`; Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-ind`
+
+That's it for local dev — Supabase Storage, Gemini, and Resend are optional; without them the app falls back to local-disk file storage, and OCR/chat/email calls no-op gracefully (see below).
 
 ## 1. Install dependencies
 
@@ -21,9 +21,20 @@ Create `.env.local` in the project root:
 DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
-AI_SERVICE_URL="http://localhost:8000"
 CRON_SECRET="any-random-string"  # required to call GET /api/cron/reminders locally; Vercel sets this automatically in production
+
+# Optional — see docs/API.md for what each powers. Omit any of these and the
+# corresponding feature degrades gracefully (local disk / no-op / friendly error)
+# instead of failing.
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+GOOGLE_API_KEY=
+GEMINI_MODEL="gemini-2.5-flash"   # optional override
+RESEND_API_KEY=
+RESEND_FROM_EMAIL="Invoice Tracking <onboarding@resend.dev>"
 ```
+
+See `.env.example` for the same list with inline comments. Never commit real values — `.env*` is gitignored except `.env.example`.
 
 > Host port is **5433**, not the Postgres default 5432 — see `docker-compose.yml` and commit `a56ffcd` (changed to avoid clashing with a locally installed Postgres).
 
@@ -40,37 +51,23 @@ npx prisma migrate deploy
 npx tsx prisma/seed.ts
 ```
 
-Creates all tables, 8 demo user accounts, demo vendors, and demo invoices across every status. The seed script refuses to run when `NODE_ENV=production`.
+Creates all tables, 6 demo user accounts, demo vendors/companies, and demo invoices across every status. The seed script refuses to run when `NODE_ENV=production`.
 
-## 5. Start the Next.js app
+## 5. Start the app
 
 ```bash
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000. That's the whole stack — there's no separate service to start; OCR, chat, file storage, and email are all called directly from Next.js API routes.
 
-## 6. Start the AI service (optional — needed for OCR and chatbot)
+## Optional: enabling OCR, chat, storage, and email
 
-```bash
-cd ai-service
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env: set LLM_PROVIDER and the matching API key
-uvicorn main:app --reload --port 8000
-```
+Each is independent — enable any subset:
 
-Supported `LLM_PROVIDER` values: `groq` (free, recommended default), `gemini`, `anthropic`, `openai`, `deepseek`, `ollama` (local, no key). See `ai-service/.env.example` for the full list of provider-specific keys and default model per provider.
-
-## All three processes together
-
-| Terminal | Command | Serves |
-|---|---|---|
-| 1 | `docker-compose up -d` | PostgreSQL on `localhost:5433` |
-| 2 | `npm run dev` | Web app on `localhost:3000` |
-| 3 | `cd ai-service && uvicorn main:app --reload --port 8000` | AI service on `localhost:8000` |
+- **Supabase Storage** — create a Supabase project, add a private bucket named `invoices`, set `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`. Without these, uploaded files are written to `uploads/invoices/` on local disk (fine for local dev, doesn't work on Vercel).
+- **Gemini (OCR + chat)** — get a `GOOGLE_API_KEY` from [Google AI Studio](https://aistudio.google.com/) (free tier available). Without it, OCR returns a clear SSE `error` event and the chatbot replies with a friendly "not available" message — neither crashes.
+- **Resend (email)** — get a `RESEND_API_KEY` from resend.dev, verify a sending domain (or use their `onboarding@resend.dev` test sender for local testing, which only delivers to the account owner's own address). Without it, reminder/notification emails silently no-op — in-app notifications still work.
 
 ## Demo accounts
 
@@ -99,11 +96,12 @@ npm run db:seed        # Re-run prisma/seed.ts
 
 ## Troubleshooting
 
-**OCR not working**
-- Check the AI service is up: `curl http://localhost:8000/health`
-- Check `tesseract --version` is installed and on `PATH`
-- Verify the LLM API key in `ai-service/.env` is valid for the selected `LLM_PROVIDER`
-- Inspect the response of `/api/invoices/[id]/ocr` in the browser network tab (SSE stream)
+**OCR fails with "GOOGLE_API_KEY is not configured"**
+- Set `GOOGLE_API_KEY` in `.env.local` and restart `npm run dev` (env vars are read at process start).
+- Inspect the response of `/api/invoices/[id]/ocr` in the browser network tab (SSE stream) for the exact `error` event message.
+
+**Uploaded files disappear / 404 on `/api/invoices/[id]/file`**
+- Without Supabase configured, files live in `uploads/invoices/` on local disk — confirm the file exists there. On Vercel this directory doesn't persist between requests; you need `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` set for deployed environments.
 
 **Database connection issues**
 - `docker-compose ps` — confirm the `db` container is healthy
@@ -123,4 +121,4 @@ npm run db:seed        # Re-run prisma/seed.ts
 
 ## Deployment note
 
-`vercel.json` sets a 30s max duration for API routes and runs `prisma generate && next build`. Because file storage is local-disk and the AI service is a separate long-running Python process, a Vercel deployment needs: (1) an external file store swapped in for `uploads/invoices/`, (2) the AI service hosted elsewhere with `AI_SERVICE_URL` pointed at it, (3) a hosted Postgres (e.g. Supabase) with `DATABASE_SSL_REJECT_UNAUTHORIZED` configured per the note above. See branches `deploy/option-a` / `deploy/option-b` for prior deployment attempts.
+`vercel.json` sets a 30s max duration for API routes (60s for OCR) and runs `prisma generate && next build`. For a real Vercel deployment set: `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` (file storage — local disk doesn't persist on Vercel), `GOOGLE_API_KEY` (OCR + chat), `RESEND_API_KEY`/`RESEND_FROM_EMAIL` (reminder emails), and a hosted Postgres `DATABASE_URL` (e.g. Supabase) with `DATABASE_SSL_REJECT_UNAUTHORIZED` configured per the note above. See branches `deploy/option-a` / `deploy/option-b` for prior deployment attempts.

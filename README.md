@@ -62,9 +62,8 @@ Everything runs locally on your machine — no cloud account required:
 | Service | Address |
 |---------|---------|
 | Next.js web app | `http://localhost:3000` |
-| Python AI service | `http://localhost:8000` |
 | PostgreSQL database | `localhost:5433` (via Docker) |
-| Uploaded files | `uploads/invoices/` (local disk) |
+| Uploaded files | Supabase Storage if configured, else `uploads/invoices/` (local disk) |
 
 ---
 
@@ -77,7 +76,7 @@ Manual invoice processing is slow, error-prone, and hard to audit. This project 
 3. **Surface overdue risks proactively** — an hourly scheduler flags invoices approaching or past their due date before they become a problem
 4. **Give finance teams a natural language interface** — instead of building complex filters, just ask the AI chatbot
 
-The LLM provider is fully configurable — swap between Groq (free), Gemini (free), Ollama (local/offline), Anthropic Claude, or OpenAI with a single environment variable change.
+OCR and chat both run on Gemini (`@google/genai`), called directly from Next.js API routes — no separate backend process.
 
 ---
 
@@ -87,10 +86,8 @@ The LLM provider is fully configurable — swap between Groq (free), Gemini (fre
 
 - [Node.js 18+](https://nodejs.org/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for PostgreSQL)
-- [Python 3.10+](https://www.python.org/) (for the AI service)
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed on your system
-  - macOS: `brew install tesseract tesseract-lang`
-  - Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-ind`
+
+That's it — Supabase Storage, Gemini, and Resend are optional (see Step 6 below); without them the app falls back to local-disk storage and OCR/chat/email calls degrade gracefully instead of failing.
 
 ---
 
@@ -112,8 +109,9 @@ Create a `.env.local` file in the project root:
 DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo"
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
-AI_SERVICE_URL="http://localhost:8000"
 ```
+
+See `.env.example` for the optional Supabase/Gemini/Resend variables (Step 6).
 
 ---
 
@@ -132,7 +130,7 @@ npx prisma migrate deploy
 npx tsx prisma/seed.ts
 ```
 
-  This creates all tables, populates 20 demo invoices across all statuses, and creates the 8 demo user accounts.
+  This creates all tables, populates 20 demo invoices across all statuses, and creates the 6 demo user accounts.
 
 ---
 
@@ -146,62 +144,34 @@ Open [http://localhost:3000](http://localhost:3000) and log in with any demo acc
 
 ---
 
-### Step 6 — Start the AI service *(optional — needed for OCR and chatbot)*
+### Step 6 — Enable OCR, chat, storage, and email *(optional)*
 
-```bash
-cd ai-service
-
-# Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure the LLM provider
-cp .env.example .env
-# Then edit .env and set LLM_PROVIDER + the matching API key
-```
-
-**Choose your LLM provider** (edit `ai-service/.env`):
+Add to `.env.local` — each is independent, enable any subset (see `.env.example`):
 
 ```env
-# Option 1: Groq — free tier, fast, recommended for demo
-LLM_PROVIDER=groq
-GROQ_API_KEY=your_groq_api_key
-
-# Option 2: Google Gemini — free tier available
-LLM_PROVIDER=gemini
+# OCR + chat — get a free-tier key at https://aistudio.google.com/
 GOOGLE_API_KEY=your_google_api_key
 
-# Option 3: Ollama — fully local, no API key needed
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
+# File storage — create a Supabase project + a private "invoices" bucket.
+# Without these, uploads fall back to local disk (uploads/invoices/).
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
 
-# Option 4: Anthropic Claude — highest quality
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=your_anthropic_api_key
-
-# Option 5: OpenAI GPT
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_openai_api_key
+# Reminder/notification emails via Resend. Without this, in-app
+# notifications still work — only the email side no-ops.
+RESEND_API_KEY=
 ```
 
-Start the service:
-
-```bash
-uvicorn main:app --reload --port 8000
-```
+Restart `npm run dev` after changing `.env.local` — env vars are read at process start. Without any of these set, OCR returns a clear error, the chatbot replies with a friendly "not available" message, and reminder emails silently no-op — nothing crashes.
 
 ---
 
-### All three terminals running
+### Two terminals, that's it
 
 | Terminal | Command | Result |
 |----------|---------|--------|
-| 1 | `docker-compose up -d` | Database on port 5432 |
+| 1 | `docker-compose up -d` | Database on port 5433 |
 | 2 | `npm run dev` | Web app on port 3000 |
-| 3 | `cd ai-service && uvicorn main:app --reload` | AI service on port 8000 |
 
 ---
 
@@ -212,10 +182,10 @@ Browser
   └── Next.js App (localhost:3000)
         ├── React UI  (Tailwind CSS + shadcn/ui + Framer Motion)
         └── Next.js API Routes
-              └── Python AI Service (localhost:8000)
-                    ├── POST /ocr/extract  →  Tesseract + LangChain → structured JSON
-                    └── POST /chat         →  LangChain + LLM → natural language answer
-              └── PostgreSQL + pgvector (localhost:5432)
+              ├── Gemini (@google/genai)      →  OCR (vision) + chat (query_invoices tool)
+              ├── Supabase Storage             →  file upload/serve (falls back to local disk)
+              ├── Resend                         →  reminder/notification emails
+              └── PostgreSQL (localhost:5433)
 ```
 
 **Key technology choices:**
@@ -227,12 +197,13 @@ Browser
 | Animations | Framer Motion | Smooth transitions with minimal code |
 | Charts | recharts | React-native, responsive by default |
 | Auth | NextAuth v5 | JWT sessions, role-based access |
-| Database | PostgreSQL 16 + pgvector | Relational data + vector search |
+| Database | PostgreSQL 16 | Relational data; no vector column — chat uses a `query_invoices` tool instead of RAG |
 | ORM | Prisma 7 | Type-safe queries, fast schema iteration |
-| AI service | FastAPI + LangChain LCEL | Lightweight, async, provider-agnostic |
-| OCR | Tesseract + PyMuPDF | Open-source, offline, Indonesian support |
+| AI | Gemini (`@google/genai`) | One model for OCR (vision, reads the file directly) and chat (function calling), no separate service |
+| File storage | Supabase Storage | Falls back to local disk when unconfigured |
+| Email | Resend | Reminder/notification emails; no-ops silently when unconfigured |
 | Realtime | Server-Sent Events (SSE) for OCR reveal; client polling (60s) for the notification bell | SSE doesn't fit a held-open serverless function for background polling |
-| Reminders | node-cron (hourly scan) | No external dependencies |
+| Reminders | Vercel Cron (daily) → `GET /api/cron/reminders` | Survives serverless scale-to-zero, unlike an in-process scheduler |
 
 ---
 
@@ -246,7 +217,8 @@ invoice-demo/
 │   │   ├── (dashboard)/           # All protected pages
 │   │   │   ├── page.tsx           # Dashboard (KPIs + charts)
 │   │   │   ├── invoices/          # Invoice list, upload, detail
-│   │   │   ├── approvals/         # Approval queue (Finance & Manager)
+│   │   │   ├── admin/             # Users, companies, vendors, reminder settings
+│   │   │   ├── vendor/profile/    # Vendor self-service company profile
 │   │   │   ├── chat/              # AI chatbot
 │   │   │   ├── reminders/         # Notification feed
 │   │   │   └── audit/             # Audit log
@@ -258,34 +230,28 @@ invoice-demo/
 │   └── lib/
 │       ├── auth/                  # NextAuth config + RBAC helpers
 │       ├── db/                    # Prisma client (with PrismaPg adapter)
-│       └── services/              # Due-date reminder scheduler
-├── ai-service/                    # Python FastAPI service
-│   ├── app/api/                   # /ocr and /chat endpoints
-│   └── app/services/              # OCR extraction, LangChain chain, chat
+│       └── services/              # fileService, geminiExtraction, geminiChat, email, reminderScheduler
 ├── prisma/
 │   ├── schema.prisma              # 9 database models
-│   └── seed.ts                    # 20 demo invoices, 6 vendors, 4 users
-└── docker-compose.yml             # PostgreSQL with pgvector
+│   └── seed.ts                    # 20 demo invoices, 6 vendors, 2 companies, 6 users
+└── docker-compose.yml             # PostgreSQL
 ```
 
 ---
 
 ## 🎬 Demo Script (10-minute walkthrough)
 
-1. **Log in as Finance** → see the pre-populated dashboard with animated KPI counters and charts
-2. **Upload a real invoice PDF** → watch OCR fields appear one by one with confidence bars
-3. **Confirm the extracted data** → invoice moves to "Pending Review"
-4. **Open the AI Chatbot** → ask *"Invoice mana yang sudah jatuh tempo?"*
-5. **Switch to GA Manager account** → approve Step 1, invoice moves to "Pending Approval"
-6. **Switch to Finance account** → give final approval → card animates out, status updates live
-7. **Open the Audit Log** → show every action recorded with user, role, and timestamp
+1. **Log in as Vendor** → upload a real invoice PDF, watch OCR fields appear one by one with confidence bars, pick a bill-to company, confirm
+2. **Log in as GA Staff** → see the new invoice on the dashboard, record delivery date + PIC, mark it Paid
+3. **Log in as GA Manager or Admin** → open the AI Chatbot, ask *"Invoice mana yang sudah jatuh tempo?"* — the assistant calls `query_invoices` against the real database, not a canned answer
+4. **Open the Audit Log** → show every action recorded with user, role, and timestamp
+5. **Open Admin → Reminder Settings** → show the due-soon/overdue thresholds and recipients are editable, not hardcoded
 
 ---
 
 ## ⚠️ Known Limitations (Demo MVP)
 
-- **Local disk storage** — files are saved to `uploads/invoices/`. Use S3 or equivalent in production.
-- **Hardcoded demo users** — no registration or password reset. Replace with a real identity provider for production.
-- **Synchronous OCR** — large PDFs may take a few seconds. In production, offload to a background queue (e.g. Celery + Redis).
-- **Chatbot uses general context** — the AI answers from its training knowledge about invoices, not live database queries. Full RAG with pgvector is the natural next step.
-- **In-app notifications only** — no email or SMS. Add a notification provider (e.g. SendGrid, Twilio) for production reminders.
+- **File storage falls back to local disk** when Supabase isn't configured — `uploads/invoices/`, which doesn't persist on Vercel.
+- **Hardcoded demo users** — no self-service registration; admin creates named accounts via `/admin/users` (see [ARCHITECTURE.md](./docs/ARCHITECTURE.md)).
+- **Synchronous OCR** — no job queue; the Gemini vision call blocks the SSE request for up to 60s.
+- **Per-instance rate limiting** — the in-memory limiter (`src/lib/rate-limit.ts`) resets per server instance/restart, not shared across a multi-instance deployment.

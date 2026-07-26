@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth/helpers'
 import { rateLimit } from '@/lib/rate-limit'
-
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:8000'
+import { runChat } from '@/lib/services/geminiChat'
 
 export async function POST(req: NextRequest) {
   const { error, session } = await requireRole(['ADMIN', 'GA_MANAGER'])
@@ -14,22 +13,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
 
   try {
-    const aiRes = await fetch(`${AI_SERVICE_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: body.message, history: body.history ?? [] }),
-      signal: AbortSignal.timeout(30000),
-    })
-
-    if (!aiRes.ok) {
-      return NextResponse.json(
-        { answer: 'Maaf, layanan AI sedang tidak tersedia. Silakan coba lagi.' },
-        { status: 200 }
-      )
-    }
-
-    const data = await aiRes.json()
-    return NextResponse.json(data)
+    const answer = await runChat(body.message, body.history ?? [])
+    return NextResponse.json({ answer })
   } catch {
     return NextResponse.json(
       { answer: 'Maaf, layanan AI sedang tidak tersedia. Silakan coba lagi.' },

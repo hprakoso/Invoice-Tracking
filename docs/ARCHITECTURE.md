@@ -11,14 +11,13 @@
 | Charts | recharts | Status donut, aging bar |
 | Auth | NextAuth v5 (Credentials provider, JWT sessions) | bcrypt (cost 12) password hashing |
 | ORM | Prisma 7.8.0 + `@prisma/adapter-pg` | Explicit `pg.Pool` (see [DATABASE.md](./DATABASE.md#connection--ssl)) |
-| Database | PostgreSQL 16 | Local via Docker Compose, port **5433** on host. Was `pgvector/pgvector:pg16`; downgraded to plain `postgres:16` — no `vector` column ever existed in the schema, and chat is being rebuilt onto a structured `query_invoices` tool (`docs/PRODUCTION_PLAN.md` §5.2) rather than vector search |
-| AI service | Python FastAPI (separate process) | OCR extraction + RAG chatbot |
-| OCR | Tesseract + PyMuPDF/pdf2image | Indonesian + English |
-| LLM orchestration | LangChain (LCEL) | Provider-agnostic via `LLM_PROVIDER` |
+| Database | PostgreSQL 16 | Local via Docker Compose, port **5433** on host. Was `pgvector/pgvector:pg16`; downgraded to plain `postgres:16` — no `vector` column has ever existed in the schema (chat uses a structured `query_invoices` tool instead, see below) |
+| AI | Gemini (`@google/genai`) | Single model does both OCR (vision, reads the uploaded file directly) and chat (function calling against `query_invoices`) — no separate service process |
+| Email | Resend (`resend`) | Reminder/notification emails; no-ops silently if `RESEND_API_KEY` isn't configured |
 | Background jobs | Vercel Cron → `GET /api/cron/reminders` | Daily due-date reminder scan (Hobby plan cap; see `docs/PRODUCTION_PLAN.md` §4.2) |
 | Testing | Vitest + @testing-library/react | `npm test` |
 | Excel export | exceljs | Dashboard KPI + invoice list, generated on demand, not persisted |
-| File storage | Local disk (`uploads/invoices/`) | Not available on Vercel (see limitation below) |
+| File storage | Supabase Storage (`@supabase/supabase-js`) | Falls back to local disk (`uploads/invoices/`) when `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` aren't set — local disk doesn't survive Vercel's serverless filesystem, so a real deployment needs Supabase configured |
 
 ## Service topology
 
@@ -30,26 +29,22 @@ Next.js app (localhost:3000)
   ├─ React UI (App Router, RSC by default, 'use client' where needed)
   ├─ API routes  src/app/api/**  ──────► PostgreSQL (Prisma, port 5433)
   ├─ NextAuth (JWT session, role + vendorId in token)
-  └─ GET /api/cron/reminders (Vercel Cron, CRON_SECRET-guarded, daily)
-        │
-        │ HTTP (server-to-server, no auth between them — trusted internal network)
-        ▼
-Python FastAPI AI service (localhost:8000)
-  ├─ POST /ocr/extract  → Tesseract OCR → LangChain LLM extraction → structured JSON
-  ├─ POST /chat         → LangChain LLM → natural-language answer
-  └─ GET  /health
+  ├─ GET /api/cron/reminders (Vercel Cron, CRON_SECRET-guarded, daily)
+  ├─ Gemini (@google/genai) ── OCR extraction (src/lib/services/geminiExtraction.ts)
+  │                        └── chat + query_invoices tool (src/lib/services/geminiChat.ts)
+  ├─ Supabase Storage ── file upload/serve (src/lib/services/fileService.ts, falls back to local disk)
+  └─ Resend ── reminder/notification emails (src/lib/services/email.ts, no-ops without RESEND_API_KEY)
 ```
 
-The Next.js app is the only thing PostgreSQL and the browser talk to directly; the AI service is a private internal dependency proxied through `src/app/api/chat/route.ts` and `src/app/api/invoices/[id]/ocr/route.ts`.
+Everything runs inside the single Next.js app — no separate backend process. Gemini, Supabase, and Resend are all called directly from API routes via their SDKs, not proxied through an internal service.
 
 ## Request flows
 
 ### OCR extraction (upload → structured data)
-1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file to `uploads/invoices/`. Status is untouched (already `SUBMITTED` from creation).
+1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file via `saveUploadedFile()` (Supabase Storage, or local disk if unconfigured). Status is untouched (already `SUBMITTED` from creation).
 2. Client opens `GET /api/invoices/[id]/ocr` (SSE stream, rate-limited 5 req/min/user).
-3. Route reads `Invoice.filePath`, calls AI service `POST /ocr/extract` with the file path.
-4. AI service: `ocr_service.py` (Tesseract text extraction) → `extraction_chain.py` (LangChain LLM call, structured JSON with per-field confidence) → response.
-5. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `SUBMITTED` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data.
+3. Route reads `Invoice.filePath`, fetches the file bytes via `getFileBuffer()`, and calls `extractInvoiceFields()` (`src/lib/services/geminiExtraction.ts`) — a single Gemini vision call reads the PDF/image directly (no separate OCR text-extraction step) and returns structured JSON (`responseSchema`-enforced) with a per-field `{value, confidence}`.
+4. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `SUBMITTED` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data.
 
 ### Invoice status lifecycle
 No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because payment execution happens outside the app (no payment gateway integration — `PAID` is a system record of an outcome, not an in-app transaction). The current lifecycle:
@@ -63,13 +58,13 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 
 **Role model (4 roles):** `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` — `MANAGER`, `FINANCE`, and `VIEWER` were removed (see `docs/PRODUCTION_PLAN.md` §4.9); their responsibilities were redistributed to `GA_STAFF`/`GA_MANAGER`. `GA_MANAGER` is **no longer deprecated** — it now carries the same operational permissions as `GA_STAFF` (create/upload/status invoices, mark invoices paid) plus supervisory-only access to the audit log and AI chat.
 
-### Chatbot (RAG)
-`POST /api/chat` (rate-limited 10 req/min/user, **`ADMIN`/`GA_MANAGER` only**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM. Being replaced with a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2 — this section will be rewritten once that lands.
+### Chatbot (query_invoices tool)
+`POST /api/chat` (rate-limited 10 req/min/user, **`ADMIN`/`GA_MANAGER` only**) calls `runChat()` (`src/lib/services/geminiChat.ts`) directly. Gemini is given a `query_invoices` function declaration (filters: status, vendorName, companyName, overdueOnly, due date range, limit) and is instructed to call it for anything involving real invoice data rather than guessing. When it does, the route executes an actual Prisma query — scoped to nothing beyond the route's own `ADMIN`/`GA_MANAGER`-only gate, since the user's explicit requirement is that chat can query **any** invoice regardless of status, not just `PAID` — and returns matched invoices plus a server-computed `totalMatched`/`sumTotalAmount` (so aggregate questions stay accurate even when there are more matches than the returned list). The result is fed back to Gemini as a `FunctionResponse` for a second turn that produces the final answer.
 
 ### Reminders
-`checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within N days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows, deduplicated per 24h window.
+`checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within N days (`due_soon`) or already past due (`overdue`); creates `Notification` rows (deduplicated per 24h window) when `inAppEnabled`, and sends one summary email via Resend when `emailEnabled` — the two channels are gated independently, not tied together.
 
-Thresholds and recipients for all four notification types (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`) are **admin-editable**, not hardcoded — `ReminderSetting` rows, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). `invoice_submitted` (vendor creates an invoice) and `revision_requested` (status → `REVISION`, always to the invoice's own vendor) fire inline from the invoice routes rather than the cron scan — see `docs/API.md#invoice-event-notifications`.
+Thresholds, recipients, and per-channel toggles for all four notification types (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`) are **admin-editable**, not hardcoded — `ReminderSetting` rows, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). `invoice_submitted` (vendor creates an invoice) and `revision_requested` (status → `REVISION`, always to the invoice's own vendor) fire inline from the invoice routes rather than the cron scan — see `docs/API.md#invoice-event-notifications`. Email delivery no-ops silently everywhere if `RESEND_API_KEY` isn't set.
 
 ### Dashboard Excel export
 `GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.
@@ -96,7 +91,7 @@ src/
 ├── lib/
 │   ├── db/prisma.ts                 # Prisma client singleton (explicit pg.Pool + SSL)
 │   ├── auth/                        # NextAuth config, authorize logic, RBAC helpers
-│   ├── services/                    # fileService, reminderScheduler, dashboardStats
+│   ├── services/                    # fileService (Supabase Storage/local disk), geminiExtraction, geminiChat, email (Resend), reminderScheduler, dashboardStats
 │   ├── validations.ts               # Zod schemas + status-transition state machine
 │   └── rate-limit.ts                # In-memory sliding-window limiter
 ├── types/                           # Shared TS types, NextAuth session augmentation
@@ -107,16 +102,10 @@ prisma/
 ├── migrations/
 └── seed.ts                          # Demo data (guarded against NODE_ENV=production)
 
-ai-service/                          # Python FastAPI, independent deployable
-├── main.py                          # App entry, CORS, router registration
-├── app/api/{ocr,chat}.py            # Route handlers
-├── app/services/                    # ocr_service, extraction_chain, chat_service
-└── app/models/schemas.py            # Pydantic request/response models
 ```
 
 ## Known architectural limitations (demo MVP)
 
-- **Local disk file storage** — `uploads/invoices/`; the file-serving route (`/api/invoices/[id]/file`) explicitly 503s when `process.env.VERCEL === '1'`. Needs S3/equivalent for any multi-instance or serverless deployment.
-- **Synchronous OCR** — no job queue; long-running Tesseract/LLM calls block the SSE request for up to 60s (enforced timeout).
-- **Chatbot is not live-RAG** — pgvector is provisioned but the chat endpoint answers from a static context string, not a per-query vector search over the invoices table.
-- **No auth between Next.js and the AI service** — internal network is assumed trusted; do not expose port 8000 publicly.
+- **File storage falls back to local disk when Supabase isn't configured** — `uploads/invoices/`, which doesn't survive Vercel's serverless filesystem. Set `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` for any multi-instance or serverless deployment.
+- **Synchronous OCR** — no job queue; the Gemini vision call blocks the SSE request for up to 60s (enforced timeout).
+- **Gemini/Resend calls are unauthenticated to the outside world by design** — they're outbound HTTPS calls to Google/Resend's own APIs using a server-side API key, not a separate internal service to secure.

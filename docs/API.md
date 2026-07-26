@@ -58,15 +58,15 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 
 | Streamed field | Source |
 |---|---|
-| `field.value`, `field.confidence` (per invoice field) | AI service `POST /ocr/extract` response — **Not Stored** as a distinct field, only the final parsed values persist |
-| Persisted after stream: `invoiceNumber`, `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the AI service response, falling back to existing DB value if the field wasn't extracted |
-| `ocrConfidence` | `invoices.ocr_confidence` ← AI service `overall_confidence` (average confidence of non-null extracted fields, computed in `ai-service/app/api/ocr.py`) |
-| Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the AI response |
+| `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
+| Persisted after stream: `invoiceNumber`, `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
+| `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
+| Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
 
 OCR no longer changes `invoices.status` on success or error — the invoice stays `SUBMITTED` throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data.
 
 ### `GET /api/invoices/[id]/file`
-Auth: any authenticated user; `VENDOR` 403 if not their invoice. Returns 503 when `process.env.VERCEL === '1'` (no persistent disk on Vercel). Path is resolved and confined to `uploads/invoices/` before reading (`path.resolve` + prefix check) to block path traversal. **Not Stored as an API field** — streams the raw file bytes referenced by `invoices.file_path`.
+Auth: any authenticated user; `VENDOR` 403 if not their invoice. Reads via `getFileBuffer()` (`src/lib/services/fileService.ts`) — Supabase Storage if configured, else local disk (`uploads/invoices/`, which doesn't survive Vercel's serverless filesystem). `filePath` is always server-derived (`{invoiceId}.{ext}`), never taken from user input, so there's no path-traversal surface. **Not Stored as an API field** — streams the raw file bytes referenced by `invoices.file_path`.
 
 ## Vendors
 
@@ -163,7 +163,7 @@ The notification bell's unread badge polls `GET /api/notifications?unread=true` 
 ## Chat
 
 ### `POST /api/chat`
-Auth: `ADMIN`, `GA_MANAGER` only (narrowed from "all but VENDOR" — chat is being rebuilt onto a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2; this doc will be updated again once that lands), rate-limited **10 requests/min/user**. Currently still proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
+Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{ message, history }` passed to `runChat()` (`src/lib/services/geminiChat.ts`). Gemini is given a `query_invoices` function declaration and instructed to call it for anything involving real invoice data; when it does, the route runs an actual Prisma query (see [ARCHITECTURE.md](./ARCHITECTURE.md) for the two-turn function-calling flow) — deliberately **not** scoped to any invoice status, since the requirement is that chat can answer about any invoice, not just `PAID` ones. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request. If `GOOGLE_API_KEY` isn't configured, or the Gemini call throws, returns `{ answer: "Maaf, layanan AI sedang tidak tersedia..." }` with a 200 (never surfaces a raw error to the chat UI).
 
 ## Users
 
@@ -196,7 +196,7 @@ Auth: `ADMIN` only. 404 if `type` isn't one of the four known values. Body valid
 ### `GET /api/cron/reminders`
 Auth: `Authorization: Bearer <CRON_SECRET>` header — checked inside the route (not `requireAuth`/`requireRole`, since there's no NextAuth session). `src/middleware.ts` explicitly excludes `/api/cron/**` from its session-required gate so the request reaches the route at all. Registered in `vercel.json` → `crons` (`0 1 * * *`, daily — Vercel Hobby plan caps cron at once/day; see `docs/PRODUCTION_PLAN.md` §4.2). Runs `checkDueDates()` (`src/lib/services/reminderScheduler.ts`), same logic previously invoked hourly by `node-cron` from `src/instrumentation.ts` (removed — doesn't survive serverless scale-to-zero).
 
-Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window. Skipped entirely per type when that row's `is_active` or `in_app_enabled` is false. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window — written only when `in_app_enabled` is true. Also sends one summary email (via Resend) to the same recipients plus `extra_emails` when `email_enabled` is true — not deduplicated beyond the cron's own once-daily schedule. The whole type is skipped when `is_active` is false, or when neither channel is enabled. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
 
 ## Invoice-event notifications
 
@@ -205,7 +205,7 @@ Two more `reminder_settings`-gated triggers, fired inline from the invoice route
 - **`invoice_submitted`** — `POST /api/invoices`, when the creating user's role is `VENDOR`. Notifies active users in `recipientRoles` (default `GA_STAFF`). Fires on invoice *creation*, which per the app's own model is the same moment as submission (`status = SUBMITTED` is set at creation, never touched by OCR) — including the wizard's initial placeholder-data draft, not just the fully-reviewed confirm step.
 - **`revision_requested`** — `PATCH /api/invoices/[id]`, when `status` transitions to `REVISION`. Always notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type.
 
-Both check `isActive`/`inAppEnabled` on their `reminder_settings` row before writing any `notifications` rows; `emailEnabled` is stored but not yet acted on (email delivery needs Resend, not yet wired — see `docs/PRODUCTION_PLAN.md` §6.2).
+Both channels are gated independently: `inAppEnabled` controls whether `notifications` rows are written, `emailEnabled` controls whether a Resend email is sent to the same recipients (plus `extraEmails`) — either, both, or neither can be on. If `RESEND_API_KEY` isn't configured, the email call no-ops silently (`src/lib/services/email.ts`) rather than failing the request.
 
 ## System
 
@@ -215,15 +215,3 @@ No auth. Runs `SELECT 1` against the database. Returns `{ status: 'ok'|'degraded
 ### `POST /api/auth/[...nextauth]`, `GET /api/auth/[...nextauth]`
 NextAuth v5 handler (`src/lib/auth/auth.ts`). Credentials provider: looks up `users.email`, checks `users.is_active`, verifies `bcrypt.compare(password, users.password_hash)`. On success, JWT carries `id`, `role`, `vendorId` (all from `users.*`); session mirrors the JWT.
 
-## AI service (`ai-service/`, port 8000)
-
-Not authenticated — trusted-network assumption (see [ARCHITECTURE.md](./ARCHITECTURE.md)). CORS restricted to `http://localhost:3000`.
-
-### `POST /ocr/extract`
-Body: `{ file_path, invoice_id }`. Pipeline: `ocr_service.extract_text_from_file()` (Tesseract) → `extraction_chain.extract_invoice_fields()` (LangChain LLM call against the configured provider) → per-field `{ value, confidence }` mapped into `OCRExtractResponse`. `overall_confidence` = average confidence of fields with a non-null value (`ai-service/app/api/ocr.py`). Returns 404 if the file doesn't exist, 500 (sanitized message, no internal detail leaked) on any other failure.
-
-### `POST /chat`
-Body: `{ message (max 4000 chars), history (last 20 entries kept server-side, only last 6 used in the prompt) }`. Runs the LangChain chain (`PromptTemplate | llm`) in a thread-pool executor so the FastAPI event loop isn't blocked. `SYSTEM_CONTEXT` is a static string describing the domain (statuses, Indonesian terminology) — **not** a pgvector similarity search.
-
-### `GET /health`
-No auth, no DB check — always returns `{status: "ok"}` if the process is up (distinct from the Next.js `/api/health`, which does check the DB).
