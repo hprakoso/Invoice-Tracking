@@ -9,6 +9,7 @@ Technical reference for the Invoice Intelligence System. The root [`README.md`](
 | [API.md](./API.md) | Every Next.js API route and AI-service endpoint, with response-field → data-source tracing |
 | [SETUP.md](./SETUP.md) | Local dev setup, environment variables, demo accounts, troubleshooting |
 | [CHANGELOG.md](./CHANGELOG.md) | Commit Log (full project history by phase) + Code Changes Made (running log for future work) |
+| [PRODUCTION_PLAN.md](./PRODUCTION_PLAN.md) | Plan to take the demo MVP to production on Vercel + Supabase: what breaks in serverless, the AI-service replacement, the five new features, and effort estimates |
 
 ## Other project docs (root)
 
