@@ -1,12 +1,25 @@
+import { loadEnvConfig } from '@next/env'
+loadEnvConfig(process.cwd())
+
 import { PrismaClient, Role, InvoiceStatus } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
 import bcrypt from 'bcryptjs'
 
 const connectionString =
   process.env.DATABASE_URL ??
   'postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo'
 
-const adapter = new PrismaPg({ connectionString })
+// Mirrors src/lib/db/prisma.ts — Supabase's pooler ignores sslmode URL params
+// under the Prisma v7 adapter-pg driver adapter, see docs/DATABASE.md.
+const url = new URL(connectionString)
+url.searchParams.delete('sslmode')
+url.searchParams.delete('sslaccept')
+const ssl =
+  process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false' ? { rejectUnauthorized: false } : undefined
+
+const pool = new Pool({ connectionString: url.toString(), ssl })
+const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function hashPassword(password: string): Promise<string> {

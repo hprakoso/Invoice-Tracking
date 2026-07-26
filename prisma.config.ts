@@ -1,5 +1,10 @@
-import "dotenv/config";
+import { loadEnvConfig } from "@next/env";
 import { defineConfig } from "prisma/config";
+
+// Same precedence Next.js itself uses (.env.local overrides .env) — plain
+// `dotenv/config` only reads `.env`, which silently pointed migrate/seed at
+// the wrong database whenever a stale `.env` coexisted with `.env.local`.
+loadEnvConfig(process.cwd());
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -11,6 +16,6 @@ export default defineConfig({
       url:
       process.env["DIRECT_URL"] ??
       process.env["DATABASE_URL"] ??
-      "postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo",
+      "postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo",
   },
 });
