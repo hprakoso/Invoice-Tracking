@@ -15,7 +15,7 @@ export async function GET() {
   const [stats, invoices] = await Promise.all([
     getDashboardStats(vendorFilter),
     prisma.invoice.findMany({
-      where: vendorFilter,
+      where: { ...vendorFilter, status: { not: 'DRAFT' } },
       orderBy: { createdAt: 'desc' },
       include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
     }),

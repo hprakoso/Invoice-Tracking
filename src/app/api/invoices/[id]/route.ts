@@ -9,6 +9,7 @@ import {
 } from '@/lib/validations'
 import { sendEmail } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
+import { notifyInvoiceSubmitted } from '@/app/api/invoices/route'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await requireAuth()
@@ -61,17 +62,20 @@ const CREATE_TIME_FIELDS = [
 // paidDate/paidAmount are available to GA_STAFF/GA_MANAGER regardless of
 // isEditor — marking an invoice paid isn't tied to who created it.
 function allowedFields(role: string, currentStatus: string, isOwner: boolean, isEditor: boolean): string[] {
-  const stillOpen = currentStatus === 'SUBMITTED' || currentStatus === 'REVISION'
+  const editable = currentStatus === 'DRAFT' || currentStatus === 'SUBMITTED' || currentStatus === 'REVISION'
+  // DRAFT needs 'status' available too — that's how the wizard's final Submit
+  // step transitions DRAFT -> SUBMITTED, same as REVISION -> SUBMITTED on resubmit.
+  const needsStatusField = currentStatus === 'DRAFT' || currentStatus === 'REVISION'
   switch (role) {
     case 'VENDOR':
       if (!isOwner) return []
-      if (!stillOpen) return ['sendDate']
-      return currentStatus === 'REVISION'
+      if (!editable) return ['sendDate']
+      return needsStatusField
         ? [...CREATE_TIME_FIELDS, 'sendDate', 'status']
         : [...CREATE_TIME_FIELDS, 'sendDate']
     case 'GA_STAFF':
     case 'GA_MANAGER':
-      return isEditor && stillOpen
+      return isEditor && editable
         ? [...CREATE_TIME_FIELDS, 'deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
         : ['deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
     default:
@@ -154,6 +158,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       paidAmount: markingPaid ? (filtered.paidAmount ?? current.totalAmount) : undefined,
       paidById: markingPaid ? session.user.id : undefined,
     },
+    include: { vendor: { select: { name: true } } },
   })
 
   await prisma.auditLog.create({
@@ -170,6 +175,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (filtered.status === 'REVISION') {
     await notifyRevisionRequested(id, invoice.invoiceNumber, current.vendorId)
+  }
+
+  // Fires the same "new invoice" notification the old flow sent at creation
+  // time — moved here since invoices are now created as DRAFT and only
+  // become real (SUBMITTED) once the wizard's final step confirms them.
+  if (current.status === 'DRAFT' && filtered.status === 'SUBMITTED' && role === 'VENDOR') {
+    await notifyInvoiceSubmitted(id, invoice.invoiceNumber, invoice.vendor.name)
   }
 
   return NextResponse.json(invoice)

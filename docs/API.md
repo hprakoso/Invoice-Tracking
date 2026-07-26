@@ -5,7 +5,7 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ## Invoices
 
 ### `GET /api/invoices`
-Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
+Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR). `status = 'DRAFT'` invoices are always excluded, regardless of the `status` query param — an in-progress upload-wizard session isn't a real invoice yet (see § Invoice status lifecycle in ARCHITECTURE.md).
 
 Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only).
 
@@ -20,7 +20,7 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 ### `POST /api/invoices`
 Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is optional here — the upload wizard creates a placeholder-data draft first and collects `companyId` in its review step via `PATCH`, same pattern as `sendDate`/`picId`.
 
-Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`). When the creator is `VENDOR`, also fires the `invoice_submitted` reminder trigger — see § Invoice-event notifications.
+Writes: `invoices` row (`status` = `'DRAFT'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`). No reminder notification fires here — `invoice_submitted` fires later, from `PATCH`, when the wizard actually confirms the invoice (`DRAFT → SUBMITTED`), not at this placeholder-creation step. See § Invoice-event notifications.
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
@@ -33,13 +33,15 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 | Role | Writable fields | When |
 |---|---|---|
 | `VENDOR` (own invoice only) | `sendDate` | any status |
-| | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `status→SUBMITTED` | while `status = REVISION` (fixing and resubmitting) |
+| | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `companyId`, `status→SUBMITTED` | while `status ∈ {DRAFT, REVISION}` (finishing the wizard, or fixing and resubmitting) |
 | | + same core fields (no `status`) | while `status = SUBMITTED` **and** this VENDOR created the invoice — finishes the post-OCR review step from the upload wizard |
-| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`), `paidDate`, `paidAmount` | always |
-| | + core fields above | while `status ∈ {SUBMITTED, REVISION}` **and** this GA_STAFF/GA_MANAGER created the invoice |
+| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (`DRAFT→SUBMITTED`, `SUBMITTED→*`, and `REVISION→SUBMITTED`), `paidDate`, `paidAmount` | always |
+| | + core fields above | while `status ∈ {DRAFT, SUBMITTED, REVISION}` **and** this GA_STAFF/GA_MANAGER created the invoice |
 | `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
 
 Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). The one exception `VALID_TRANSITIONS` itself doesn't encode: `REVISION → SUBMITTED` (resubmit) is further restricted to `VENDOR`/`ADMIN` only — `GA_STAFF` can request every other transition but not this one, since fixing a revision is the vendor's responsibility. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+
+**`DRAFT → SUBMITTED`** is the wizard's final confirm step. When the caller is `VENDOR`, this is also what fires the `invoice_submitted` reminder trigger (moved here from `POST /api/invoices` — see § Invoice-event notifications) — a `GA_STAFF`/`GA_MANAGER`/`ADMIN` submitting on a vendor's behalf does not, same as before.
 
 **Marking an invoice `PAID`** (`SUBMITTED → PAID`, `GA_STAFF`/`GA_MANAGER`/`ADMIN` only — never reachable by `VENDOR`, structurally: `status` isn't in `VENDOR`'s allowed-field list while `status = SUBMITTED`): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID` is terminal (`VALID_TRANSITIONS.PAID = []`) — marking an already-paid invoice paid again returns 400.
 
@@ -51,7 +53,7 @@ Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'CANCELLED'` (no row is
 ### `POST /api/invoices/[id]/upload`
 Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
 
-Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched — stays `SUBMITTED`), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
+Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched — stays `DRAFT`), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
 
 ### `GET /api/invoices/[id]/ocr` (SSE stream)
 Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Streams `status`, `field`, `line_items`, `done`/`error` events.
@@ -63,7 +65,7 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
 
-OCR no longer changes `invoices.status` on success or error — the invoice stays `SUBMITTED` throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data.
+OCR no longer changes `invoices.status` on success or error — the invoice stays `DRAFT` throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data and transitions to `SUBMITTED`.
 
 ### `GET /api/invoices/[id]/file`
 Auth: any authenticated user; `VENDOR` 403 if not their invoice. Reads via `getFileBuffer()` (`src/lib/services/fileService.ts`) — Supabase Storage if configured, else local disk (`uploads/invoices/`, which doesn't survive Vercel's serverless filesystem). `filePath` is always server-derived (`{invoiceId}.{ext}`), never taken from user input, so there's no path-traversal surface. **Not Stored as an API field** — streams the raw file bytes referenced by `invoices.file_path`.
@@ -122,7 +124,7 @@ Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.v
 
 | Response field | Source |
 |---|---|
-| `totalInvoices` | `formula`: `COUNT(invoices)` (vendor-scoped for VENDOR role) |
+| `totalInvoices` | `formula`: `COUNT(invoices)` where `status != 'DRAFT'` (vendor-scoped for VENDOR role) |
 | `totalPayable` | `formula`: `SUM(invoices.total_amount)` where `status IN ('SUBMITTED','REVISION')` (the two "open" statuses — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle)) |
 | `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()` and `status IN ('SUBMITTED','REVISION')` |
 | `openCount` | `formula`: `COUNT(invoices)` where `status IN ('SUBMITTED','REVISION')` (replaces the old `pendingApprovalCount`, no more approval concept) |
@@ -163,7 +165,7 @@ The notification bell's unread badge polls `GET /api/notifications?unread=true` 
 ## Chat
 
 ### `POST /api/chat`
-Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{ message, history }` passed to `runChat()` (`src/lib/services/geminiChat.ts`). Gemini is given a `query_invoices` function declaration and instructed to call it for anything involving real invoice data; when it does, the route runs an actual Prisma query (see [ARCHITECTURE.md](./ARCHITECTURE.md) for the two-turn function-calling flow) — deliberately **not** scoped to any invoice status, since the requirement is that chat can answer about any invoice, not just `PAID` ones. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request. If `GOOGLE_API_KEY` isn't configured, or the Gemini call throws, returns `{ answer: "Maaf, layanan AI sedang tidak tersedia..." }` with a 200 (never surfaces a raw error to the chat UI).
+Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{ message, history }` passed to `runChat()` (`src/lib/services/geminiChat.ts`). Gemini is given a `query_invoices` function declaration and instructed to call it for anything involving real invoice data; when it does, the route runs an actual Prisma query (see [ARCHITECTURE.md](./ARCHITECTURE.md) for the two-turn function-calling flow) — deliberately **not** scoped to any invoice status the model can explicitly ask for, since the requirement is that chat can answer about any invoice, not just `PAID` ones — the one exception is `DRAFT`, always excluded, since an in-progress upload-wizard session isn't a real invoice yet. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request. If `GOOGLE_API_KEY` isn't configured, or the Gemini call throws, returns `{ answer: "Maaf, layanan AI sedang tidak tersedia..." }` with a 200 (never surfaces a raw error to the chat UI).
 
 ## Users
 
@@ -202,7 +204,7 @@ Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REV
 
 Two more `reminder_settings`-gated triggers, fired inline from the invoice routes (not the cron job):
 
-- **`invoice_submitted`** — `POST /api/invoices`, when the creating user's role is `VENDOR`. Notifies active users in `recipientRoles` (default `GA_STAFF`). Fires on invoice *creation*, which per the app's own model is the same moment as submission (`status = SUBMITTED` is set at creation, never touched by OCR) — including the wizard's initial placeholder-data draft, not just the fully-reviewed confirm step.
+- **`invoice_submitted`** — `PATCH /api/invoices/[id]`, when `status` transitions `DRAFT → SUBMITTED` and the confirming user's role is `VENDOR`. Notifies active users in `recipientRoles` (default `GA_STAFF`). Fires at the wizard's actual confirm step, not at the earlier `POST /api/invoices` placeholder-creation step (that just creates the `DRAFT` row the wizard attaches the upload/OCR to) — a vendor closing the browser mid-upload never triggers a false "new invoice" notification.
 - **`revision_requested`** — `PATCH /api/invoices/[id]`, when `status` transitions to `REVISION`. Always notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type.
 
 Both channels are gated independently: `inAppEnabled` controls whether `notifications` rows are written, `emailEnabled` controls whether a Resend email is sent to the same recipients (plus `extraEmails`) — either, both, or neither can be on. If `RESEND_API_KEY` isn't configured, the email call no-ops silently (`src/lib/services/email.ts`) rather than failing the request.

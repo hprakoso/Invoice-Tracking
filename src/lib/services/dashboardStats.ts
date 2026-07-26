@@ -6,7 +6,10 @@ const OPEN_STATUSES: InvoiceStatus[] = ['SUBMITTED', 'REVISION']
 
 export async function getDashboardStats(vendorFilter: Prisma.InvoiceWhereInput) {
   const now = new Date()
-  const openFilter = { ...vendorFilter, status: { in: OPEN_STATUSES } }
+  // DRAFT invoices (upload wizard in progress) aren't "real" yet — excluded
+  // from every dashboard figure, not just the open/overdue ones.
+  const baseFilter: Prisma.InvoiceWhereInput = { ...vendorFilter, status: { not: 'DRAFT' } }
+  const openFilter = { ...baseFilter, status: { in: OPEN_STATUSES } }
 
   const d30 = new Date(now.getTime() - 30 * 86400000)
   const d60 = new Date(now.getTime() - 60 * 86400000)
@@ -14,8 +17,8 @@ export async function getDashboardStats(vendorFilter: Prisma.InvoiceWhereInput) 
 
   const [totalInvoices, statusCounts, totalPayable, overdueCount, openCount, agingBuckets] =
     await Promise.all([
-      prisma.invoice.count({ where: vendorFilter }),
-      prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: vendorFilter }),
+      prisma.invoice.count({ where: baseFilter }),
+      prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: baseFilter }),
       prisma.invoice.aggregate({ where: openFilter, _sum: { totalAmount: true } }),
       prisma.invoice.count({ where: { ...openFilter, dueDate: { lt: now } } }),
       prisma.invoice.count({ where: openFilter }),

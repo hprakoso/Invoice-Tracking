@@ -28,7 +28,7 @@ export const createInvoiceSchema = z.object({
   picId: z.string().uuid().optional().nullable(),
 })
 
-export const INVOICE_STATUSES = ['SUBMITTED', 'PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
+export const INVOICE_STATUSES = ['DRAFT', 'SUBMITTED', 'PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
 
 export const updateInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(100).optional(),
@@ -137,6 +137,7 @@ export const createUserSchema = z
   })
 
 export const VALID_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ['SUBMITTED', 'CANCELLED'],
   SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
   REVISION: ['SUBMITTED'],
   PAID: [],

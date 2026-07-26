@@ -47,7 +47,10 @@ interface QueryInvoicesArgs {
 }
 
 async function executeQueryInvoices(args: QueryInvoicesArgs) {
-  const where: Prisma.InvoiceWhereInput = {}
+  // DRAFT invoices (upload wizard in progress, not yet submitted) are never
+  // queryable — not a real invoice yet, and STATUS_VALUES has no DRAFT option
+  // for the model to explicitly ask for anyway.
+  const where: Prisma.InvoiceWhereInput = { status: { not: 'DRAFT' } }
 
   if (args.status && STATUS_VALUES.includes(args.status)) where.status = args.status
   if (args.vendorName) where.vendor = { name: { contains: args.vendorName, mode: 'insensitive' } }

@@ -41,20 +41,21 @@ Everything runs inside the single Next.js app — no separate backend process. G
 ## Request flows
 
 ### OCR extraction (upload → structured data)
-1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file via `saveUploadedFile()` (Supabase Storage, or local disk if unconfigured). Status is untouched (already `SUBMITTED` from creation).
+1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file via `saveUploadedFile()` (Supabase Storage, or local disk if unconfigured). Status is untouched (still `DRAFT` from creation — see lifecycle below).
 2. Client opens `GET /api/invoices/[id]/ocr` (SSE stream, rate-limited 5 req/min/user).
 3. Route reads `Invoice.filePath`, fetches the file bytes via `getFileBuffer()`, and calls `extractInvoiceFields()` (`src/lib/services/geminiExtraction.ts`) — a single Gemini vision call reads the PDF/image directly (no separate OCR text-extraction step) and returns structured JSON (`responseSchema`-enforced) with a per-field `{value, confidence}`.
-4. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `SUBMITTED` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data.
+4. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `DRAFT` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data and transitions to `SUBMITTED`.
 
 ### Invoice status lifecycle
 No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because payment execution happens outside the app (no payment gateway integration — `PAID` is a system record of an outcome, not an in-app transaction). The current lifecycle:
 
-1. `VENDOR` or `GA_STAFF` creates/uploads an invoice → `status = SUBMITTED` (set at creation, never touched by OCR).
+0. `POST /api/invoices` creates the row as `status = DRAFT` — the upload wizard needs an invoice ID to attach the file/OCR to before the user has confirmed anything. `DRAFT` invoices are invisible everywhere else: excluded from `GET /api/invoices`, dashboard stats/KPIs, Excel export, the `query_invoices` chat tool, and reminder scans — they're not a "real" invoice yet, just wizard-in-progress state. `VALID_TRANSITIONS.DRAFT = [SUBMITTED, CANCELLED]`.
+1. The user (any role that can upload) finishes the wizard and confirms → `PATCH /api/invoices/[id]` with `status: SUBMITTED`. This is the moment `invoice_submitted` notifications/emails fire (only when the confirming user is `VENDOR` — see § Invoice-event notifications), not at the earlier `DRAFT` creation.
 2. `GA_STAFF` physically receives the hardcopy and forwards it to whoever settles it — **outside the app**. In-app, GA_STAFF records `deliveredDate` + becomes/reassigns the `pic` (person in charge) via `PATCH /api/invoices/[id]`, with a hard rule: `deliveredDate` can never predate `sendDate` (`validateDeliveryDates()` in `src/lib/validations.ts`, enforced client- and server-side).
 3. Once the external outcome is known, `GA_STAFF`, `GA_MANAGER`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction). Marking `PAID` additionally records `paidDate`/`paidAmount` (defaulting to now/`totalAmount`) and server-assigns `paidById` — see [DATABASE.md](./DATABASE.md#invoices).
 4. `REVISION` loops back: the `VENDOR` (owner) or `GA_STAFF`/`GA_MANAGER` fixes the core fields and resubmits, `status → SUBMITTED`.
 
-`VALID_TRANSITIONS` (`src/lib/validations.ts`): `SUBMITTED → {PAID, CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
+`VALID_TRANSITIONS` (`src/lib/validations.ts`): `DRAFT → {SUBMITTED, CANCELLED}`, `SUBMITTED → {PAID, CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
 
 **Role model (4 roles):** `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` — `MANAGER`, `FINANCE`, and `VIEWER` were removed (see `docs/PRODUCTION_PLAN.md` §4.9); their responsibilities were redistributed to `GA_STAFF`/`GA_MANAGER`. `GA_MANAGER` is **no longer deprecated** — it now carries the same operational permissions as `GA_STAFF` (create/upload/status invoices, mark invoices paid) plus supervisory-only access to the audit log and AI chat.
 

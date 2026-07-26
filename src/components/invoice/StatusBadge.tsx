@@ -1,7 +1,8 @@
-import { Send, RotateCcw, Ban, XCircle, ShieldOff, CircleCheck } from 'lucide-react'
+import { Send, RotateCcw, Ban, XCircle, ShieldOff, CircleCheck, FileEdit } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const STATUS_CONFIG: Record<string, { label: string; className: string; icon: React.ElementType }> = {
+  DRAFT:     { label: 'Draf',       className: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',              icon: FileEdit },
   SUBMITTED: { label: 'Diajukan',   className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',           icon: Send },
   PAID:      { label: 'Lunas',      className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',       icon: CircleCheck },
   REVISION:  { label: 'Revisi',     className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',       icon: RotateCcw },

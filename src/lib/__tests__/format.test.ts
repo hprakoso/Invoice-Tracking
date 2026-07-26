@@ -20,7 +20,7 @@ describe('isOverdue', () => {
     expect(isOverdue(future, 'SUBMITTED')).toBe(false)
   })
 
-  it.each(['PAID', 'CANCELLED', 'REJECTED', 'VOID'])(
+  it.each(['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'DRAFT'])(
     'is false for terminal status %s even with a past due date',
     (status) => {
       expect(isOverdue(past, status)).toBe(false)

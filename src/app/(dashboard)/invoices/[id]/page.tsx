@@ -61,6 +61,7 @@ import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 // Duplicated (not imported) from src/lib/validations.ts — that module also
 // pulls in next/server, which can't be bundled into this client component.
 const VALID_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ['SUBMITTED', 'CANCELLED'],
   SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
   REVISION: ['SUBMITTED'],
   PAID: [],
@@ -69,7 +70,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   VOID: [],
 }
 const STATUS_LABELS: Record<string, string> = {
-  SUBMITTED: 'Diajukan', PAID: 'Lunas', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
+  DRAFT: 'Draf', SUBMITTED: 'Diajukan', PAID: 'Lunas', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
 }
 
 function ConfidenceBar({ value }: { value: number }) {

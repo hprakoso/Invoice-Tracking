@@ -91,7 +91,7 @@ The invoice-receiving entity ("bill-to") a vendor submits against — distinct f
 | currency | text, default `IDR` | |
 | subtotal / tax_amount | decimal(15,2), nullable | |
 | total_amount | decimal(15,2) | |
-| status | enum `InvoiceStatus` | `SUBMITTED` (default, set on create) → one of `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `PAID` re-added in migration `20260726173942_add_payment_tracking` — this is a system record of an outcome decided outside the app (there's no payment gateway integration), not a live payment execution. |
+| status | enum `InvoiceStatus` | `DRAFT` (set on create, invisible everywhere else — see below) → `SUBMITTED` (wizard confirmed) → one of `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `DRAFT` added in migration `20260727000000_add_draft_invoice_status` so an incomplete upload-wizard session (file not yet uploaded, OCR not yet reviewed) never counts as a real invoice — excluded from `GET /api/invoices`, dashboard stats, Excel export, and the chat tool's `query_invoices`. `PAID` re-added in migration `20260726173942_add_payment_tracking` — this is a system record of an outcome decided outside the app (there's no payment gateway integration), not a live payment execution. |
 | send_date | timestamp, nullable | date the vendor sent the physical hardcopy to the office; set by `VENDOR` (own invoice) or `GA_STAFF`/`ADMIN` |
 | delivered_date | timestamp, nullable | date GA Staff physically received the hardcopy; set by `GA_STAFF`/`ADMIN`; must not be earlier than `send_date` (`validateDeliveryDates()`) |
 | pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF`/`GA_MANAGER` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
@@ -171,6 +171,7 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726180556_extend_vendor_profile` | Adds `vendors.address`/`city`/`phone`/`bank_account_holder`/`bank_branch`; new `vendor_contacts` table (9th table) |
 | `20260726181558_add_must_change_password` | Adds `users.must_change_password` (`NOT NULL DEFAULT true`) |
 | `20260726182449_add_reminder_settings` | New `reminder_settings` table (unique `type`, FK `updated_by` → `users.id`) |
+| `20260727000000_add_draft_invoice_status` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'DRAFT'` (additive) — upload wizard's in-progress state, invisible to lists/dashboard/chat/reminders until submitted |
 
 ## Seed data (`prisma/seed.ts`)
 
