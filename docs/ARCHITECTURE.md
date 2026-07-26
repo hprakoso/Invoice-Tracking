@@ -40,11 +40,15 @@ Everything runs inside the single Next.js app — no separate backend process. G
 
 ## Request flows
 
-### OCR extraction (upload → structured data)
+### Upload wizard (company/vendor → file → OCR → review → submit)
+`src/app/(dashboard)/invoices/upload/page.tsx`, a single-page wizard driven by a `stage` state machine (`select → drop → uploading → ocr → review → done`):
+
+0. **`select`** — the user picks the bill-to `Company` and (for non-`VENDOR` roles) the `Vendor` sending the invoice, *before* any file exists. No auto-selection of "the first vendor in the list" — that was a real bug where GA Staff/Admin uploads could get attributed to the wrong vendor.
 1. `POST /api/invoices/[id]/upload` — validates MIME type + magic bytes + 10MB limit, saves file via `saveUploadedFile()` (Supabase Storage, or local disk if unconfigured). Status is untouched (still `DRAFT` from creation — see lifecycle below).
 2. Client opens `GET /api/invoices/[id]/ocr` (SSE stream, rate-limited 5 req/min/user).
 3. Route reads `Invoice.filePath`, fetches the file bytes via `getFileBuffer()`, and calls `extractInvoiceFields()` (`src/lib/services/geminiExtraction.ts`) — a single Gemini vision call reads the PDF/image directly (no separate OCR text-extraction step) and returns structured JSON (`responseSchema`-enforced) with a per-field `{value, confidence}`.
 4. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `DRAFT` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data and transitions to `SUBMITTED`.
+5. **OCR failure fallback**: if the SSE stream emits an `error` event or the connection itself drops (`EventSource.onerror`) before any field was extracted, the wizard still advances to `review` — it populates the 8 standard fields as empty, manually-editable inputs (same keys the server would have sent) instead of rendering a blank form, with a red banner explaining OCR failed. The uploaded file is never lost; only the AI extraction step failed, so the user finishes the invoice by typing the values in themselves.
 
 ### Invoice status lifecycle
 No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because payment execution happens outside the app (no payment gateway integration — `PAID` is a system record of an outcome, not an in-app transaction). The current lifecycle:

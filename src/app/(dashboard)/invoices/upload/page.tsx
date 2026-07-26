@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react'
+import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
@@ -26,7 +26,21 @@ interface LineItem {
   total: number
 }
 
-type UploadStage = 'drop' | 'uploading' | 'ocr' | 'review' | 'done'
+// Matches the server's field order in GET /api/invoices/[id]/ocr — used to
+// populate 8 empty, manually-fillable fields when OCR fails entirely (no
+// 'field' events ever arrive), so review never shows a blank form.
+const FIELD_DEFS = [
+  { key: 'vendor_name', label: 'Nama Vendor' },
+  { key: 'invoice_number', label: 'Nomor Invoice' },
+  { key: 'invoice_date', label: 'Tanggal Invoice' },
+  { key: 'due_date', label: 'Jatuh Tempo' },
+  { key: 'currency', label: 'Mata Uang' },
+  { key: 'subtotal', label: 'Subtotal' },
+  { key: 'tax_amount', label: 'PPN' },
+  { key: 'total_amount', label: 'Total' },
+] as const
+
+type UploadStage = 'select' | 'drop' | 'uploading' | 'ocr' | 'review' | 'done'
 
 function ConfidenceBar({ confidence }: { confidence: number }) {
   const color =
@@ -73,11 +87,18 @@ export default function UploadPage() {
   // auto-assigned as PIC on load — that default only fits the person who
   // actually receives the hardcopy.
   const canAssignPic = isGaStaff || role === 'GA_MANAGER'
-  const vendorId = (session?.user as { vendorId?: string | null })?.vendorId
-  const [stage, setStage] = useState<UploadStage>('drop')
+  const sessionVendorId = (session?.user as { vendorId?: string | null })?.vendorId
+
+  const [stage, setStage] = useState<UploadStage>('select')
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
+  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
+  const [companyIdValue, setCompanyIdValue] = useState('')
+  const [selectedVendorId, setSelectedVendorId] = useState('')
+
   const [file, setFile] = useState<File | null>(null)
   const [statusMsg, setStatusMsg] = useState('')
   const [fields, setFields] = useState<ExtractedField[]>([])
+  const [ocrFailed, setOcrFailed] = useState(false)
   const [lineItems, setLineItems] = useState<LineItem[]>([])
   const [overallConfidence, setOverallConfidence] = useState(0)
   const [invoiceId, setInvoiceId] = useState<string | null>(null)
@@ -85,18 +106,34 @@ export default function UploadPage() {
   const [sendDateValue, setSendDateValue] = useState('')
   const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
   const [picIdValue, setPicIdValue] = useState('')
-  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
-  const [companyIdValue, setCompanyIdValue] = useState('')
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isGaStaff) setPicIdValue(session?.user?.id ?? '')
     if (['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(role ?? '')) {
       fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
+      fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
     }
     fetch('/api/companies').then(r => r.json()).then((d: unknown) => setCompanies(Array.isArray(d) ? d : []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role])
+
+  // Resolved once the user leaves the 'select' stage: the vendor's own id for
+  // VENDOR callers, or whichever vendor a GA/Admin picked. Never defaults to
+  // "the first vendor in the list" — that was a real bug (wrong vendor billed).
+  const effectiveVendorId = isVendor ? sessionVendorId : selectedVendorId
+
+  function continueFromSelect() {
+    if (!companyIdValue) {
+      toast.error('Pilih PT/company tujuan terlebih dahulu')
+      return
+    }
+    if (!isVendor && !selectedVendorId) {
+      toast.error('Pilih vendor terlebih dahulu')
+      return
+    }
+    setStage('drop')
+  }
 
   const onDrop = useCallback(async (accepted: File[]) => {
     const f = accepted[0]
@@ -118,55 +155,52 @@ export default function UploadPage() {
     disabled: stage !== 'drop',
   })
 
+  function fallbackToManualFields() {
+    setOcrFailed(true)
+    setFields((prev) => (prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ ...f, value: null, confidence: 0 }))))
+  }
+
   async function runOCR(uploadFile: File) {
     setStage('uploading')
-    setStatusMsg('Fetching vendor data...')
+    setStatusMsg('Membuat data invoice...')
     setFields([])
     setLineItems([])
+    setOcrFailed(false)
 
     try {
-      // 0. Determine vendorId — VENDOR users use their own, others fetch first vendor
-      let placeholderVendorId: string | null = null
-      if (isVendor && vendorId) {
-        placeholderVendorId = vendorId
-      } else {
-        const vendorsRes = await fetch('/api/vendors?limit=1')
-        if (!vendorsRes.ok) throw new Error('Failed to fetch vendor data')
-        const vendors = await vendorsRes.json()
-        placeholderVendorId =
-          Array.isArray(vendors) && vendors.length > 0 ? vendors[0].id : null
-        if (!placeholderVendorId) throw new Error('No vendors available. Please add a vendor first.')
-      }
+      if (!effectiveVendorId) throw new Error('Vendor belum dipilih')
 
-      // 1. Create invoice record
-      setStatusMsg('Creating invoice record...')
+      // 1. Create invoice record (DRAFT — invisible everywhere until Submit)
       const createRes = await fetch('/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vendorId: placeholderVendorId,
+          vendorId: effectiveVendorId,
+          companyId: companyIdValue,
           invoiceNumber: `DRAFT-${Date.now()}`,
           totalAmount: 0,
         }),
       })
-      if (!createRes.ok) throw new Error('Failed to create invoice record')
+      if (!createRes.ok) throw new Error('Gagal membuat data invoice')
       const invoice = await createRes.json()
       const id: string = invoice.id
       setInvoiceId(id)
 
       // 2. Upload file
-      setStatusMsg('Uploading file...')
+      setStatusMsg('Mengunggah file...')
       const formData = new FormData()
       formData.append('file', uploadFile)
       const uploadRes = await fetch(`/api/invoices/${id}/upload`, {
         method: 'POST',
         body: formData,
       })
-      if (!uploadRes.ok) throw new Error('Failed to upload file')
+      if (!uploadRes.ok) throw new Error('Gagal mengunggah file')
 
-      // 3. SSE OCR stream
+      // 3. SSE OCR stream — the upload itself already succeeded at this point,
+      // so any failure from here on falls back to manual entry (review stage
+      // with empty fields), never back to 'drop'. The file stays uploaded.
       setStage('ocr')
-      setStatusMsg('Starting OCR...')
+      setStatusMsg('Memulai OCR...')
 
       const es = new EventSource(`/api/invoices/${id}/ocr`)
 
@@ -192,28 +226,30 @@ export default function UploadPage() {
         setStatusMsg(d.message)
         setStage('review')
         es.close()
-        toast.success('OCR complete! Please review and confirm the data.')
+        toast.success('OCR selesai! Silakan periksa dan konfirmasi data.')
       })
 
       es.addEventListener('error', (e) => {
         try {
           const d = JSON.parse((e as MessageEvent).data ?? '{}')
-          setStatusMsg(d.message ?? 'OCR failed')
+          setStatusMsg(d.message ?? 'OCR gagal')
         } catch {
-          setStatusMsg('OCR failed')
+          setStatusMsg('OCR gagal')
         }
         setStage('review')
+        fallbackToManualFields()
         es.close()
-        toast.error('OCR failed. Please enter the data manually.')
+        toast.error('OCR gagal membaca dokumen. Silakan isi data secara manual di bawah.')
       })
 
       es.onerror = () => {
         setStage('review')
+        fallbackToManualFields()
         es.close()
-        toast.error('Connection to AI service lost. Please check the data manually.')
+        toast.error('Koneksi ke layanan AI terputus. Silakan isi data secara manual.')
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
+      const msg = err instanceof Error ? err.message : 'Terjadi kesalahan'
       toast.error(msg)
       setStage('drop')
     }
@@ -221,17 +257,14 @@ export default function UploadPage() {
 
   async function confirmAndSubmit() {
     if (!invoiceId) return
-    if (isVendor && !companyIdValue) {
-      toast.error('Please select which company this invoice is for')
-      return
-    }
     const vendorNameField = editableValues['vendor_name']
     const totalField = editableValues['total_amount']
 
-    await fetch(`/api/invoices/${invoiceId}`, {
+    const res = await fetch(`/api/invoices/${invoiceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        status: 'SUBMITTED',
         invoiceNumber: editableValues['invoice_number'] || `INV-${Date.now()}`,
         invoiceDate: editableValues['invoice_date'] || null,
         dueDate: editableValues['due_date'] || null,
@@ -244,14 +277,37 @@ export default function UploadPage() {
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
         sendDate: sendDateValue || null,
         picId: canAssignPic ? (picIdValue || null) : undefined,
-        companyId: companyIdValue || undefined,
       }),
     })
 
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? 'Gagal mengirim invoice')
+      return
+    }
+
     setStage('done')
-    toast.success('Invoice submitted successfully!')
+    toast.success('Invoice berhasil diajukan!')
     setTimeout(() => router.push('/invoices'), 1500)
   }
+
+  function resetWizard() {
+    setStage('select')
+    setFile(null)
+    setFields([])
+    setOcrFailed(false)
+    setLineItems([])
+    setInvoiceId(null)
+    setEditableValues({})
+    setOverallConfidence(0)
+    setCompanyIdValue('')
+    setSelectedVendorId('')
+  }
+
+  const selectedCompanyName = companies.find((c) => c.id === companyIdValue)?.name
+  const selectedVendorName = isVendor
+    ? undefined
+    : vendors.find((v) => v.id === selectedVendorId)?.name
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -264,13 +320,59 @@ export default function UploadPage() {
         </Link>
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Upload Invoice</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">AI will extract data automatically</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">AI akan mengekstrak data secara otomatis</p>
         </div>
       </div>
 
+      {/* Step 1: Select company + vendor */}
+      {stage === 'select' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 p-5 sm:p-6 space-y-4"
+        >
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Invoice ini ditujukan ke mana?</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Pilih PT/company dan vendor sebelum mengunggah dokumen.</p>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Company / PT tujuan (bill-to) *</label>
+            <select
+              value={companyIdValue}
+              onChange={(e) => setCompanyIdValue(e.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Pilih company...</option>
+              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          {!isVendor && (
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Vendor (pengirim invoice) *</label>
+              <select
+                value={selectedVendorId}
+                onChange={(e) => setSelectedVendorId(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Pilih vendor...</option>
+                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </div>
+          )}
+          <Button onClick={continueFromSelect} className="w-full gap-2">
+            Lanjutkan <ArrowRight className="h-4 w-4" />
+          </Button>
+        </motion.div>
+      )}
+
       {/* Drop Zone */}
       {stage === 'drop' && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3 py-2">
+            <span>Tujuan: <strong className="text-gray-700 dark:text-gray-200">{selectedCompanyName}</strong></span>
+            {selectedVendorName && <span>· Vendor: <strong className="text-gray-700 dark:text-gray-200">{selectedVendorName}</strong></span>}
+            <button onClick={() => setStage('select')} className="ml-auto text-blue-600 hover:underline">Ubah</button>
+          </div>
           <div
             {...getRootProps()}
             className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
@@ -287,9 +389,9 @@ export default function UploadPage() {
               <Upload className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
             </motion.div>
             <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
-              {isDragActive ? 'Drop the file here...' : 'Drag & drop invoice file'}
+              {isDragActive ? 'Lepaskan file di sini...' : 'Drag & drop file invoice'}
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">or click to browse files</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">atau klik untuk memilih file</p>
             <div className="flex items-center justify-center gap-4 mt-4">
               {(['PDF', 'JPG', 'PNG'] as const).map((ext) => (
                 <span
@@ -332,7 +434,7 @@ export default function UploadPage() {
           {fields.length > 0 && (
             <div className="space-y-3">
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                Extracted Data
+                Data Terekstrak
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {fields.map((field) => (
@@ -351,73 +453,54 @@ export default function UploadPage() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-4"
         >
-          {/* Overall confidence banner */}
-          <div
-            className={`rounded-xl px-4 py-3 flex items-center gap-3 ${
-              overallConfidence >= 80
-                ? 'bg-green-50 border border-green-200'
-                : 'bg-yellow-50 border border-yellow-200'
-            }`}
-          >
-            {overallConfidence >= 80 ? (
-              <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
-            ) : (
-              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
-            )}
-            <div>
-              <p className="text-sm font-medium text-gray-700">
-                {overallConfidence >= 80 ? 'Extraction successful!' : 'Please verify the data'}
-              </p>
-              <p className="text-xs text-gray-500">
-                Overall accuracy: {overallConfidence.toFixed(0)}%
-              </p>
+          {/* Overall confidence / OCR-failed banner */}
+          {ocrFailed ? (
+            <div className="rounded-xl px-4 py-3 flex items-center gap-3 bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                  OCR gagal membaca dokumen
+                </p>
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  Dokumen tetap tersimpan — silakan isi data invoice secara manual di bawah ini.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div
+              className={`rounded-xl px-4 py-3 flex items-center gap-3 ${
+                overallConfidence >= 80
+                  ? 'bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800'
+                  : 'bg-yellow-50 border border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800'
+              }`}
+            >
+              {overallConfidence >= 80 ? (
+                <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              ) : (
+                <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+              )}
+              <div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {overallConfidence >= 80 ? 'Ekstraksi berhasil!' : 'Mohon periksa kembali data berikut'}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Akurasi keseluruhan: {overallConfidence.toFixed(0)}%
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Editable Fields */}
-          <div className="bg-white rounded-xl border p-4 sm:p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-700">Verify &amp; Edit Data</h3>
-            {isVendor && (
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Company / PT tujuan (bill-to) *</label>
-                <select
-                  value={companyIdValue}
-                  onChange={(e) => setCompanyIdValue(e.target.value)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">Select company...</option>
-                  {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            )}
-            {isVendor && (
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Send Date (hardcopy sent to office)</label>
-                <input
-                  type="date"
-                  value={sendDateValue}
-                  onChange={(e) => setSendDateValue(e.target.value)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                />
-              </div>
-            )}
-            {canAssignPic && (
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">PIC (GA Staff handling this invoice)</label>
-                <select
-                  value={picIdValue}
-                  onChange={(e) => setPicIdValue(e.target.value)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">Unassigned</option>
-                  {gaStaff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </div>
-            )}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Periksa &amp; Edit Data</h3>
+              <span className="text-xs text-gray-400 dark:text-gray-500">Bill to: {selectedCompanyName}</span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {fields.map((field) => (
                 <div key={field.key}>
-                  <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{field.label}</label>
                   <Input
                     value={editableValues[field.key] ?? ''}
                     onChange={(e) =>
@@ -425,7 +508,7 @@ export default function UploadPage() {
                     }
                     className="h-10 text-sm"
                   />
-                  <ConfidenceBar confidence={field.confidence} />
+                  {!ocrFailed && <ConfidenceBar confidence={field.confidence} />}
                 </div>
               ))}
             </div>
@@ -435,16 +518,16 @@ export default function UploadPage() {
               <>
                 <Separator />
                 <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                    Invoice Items
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                    Item Invoice
                   </p>
                   <div className="space-y-1">
                     {lineItems.map((item, i) => (
                       <div key={i} className="flex justify-between text-sm">
-                        <span className="text-gray-600 flex-1 min-w-0 truncate">
+                        <span className="text-gray-600 dark:text-gray-300 flex-1 min-w-0 truncate">
                           {item.description}
                         </span>
-                        <span className="text-gray-700 font-medium ml-4">
+                        <span className="text-gray-700 dark:text-gray-200 font-medium ml-4">
                           Rp {Number(item.total).toLocaleString('id-ID')}
                         </span>
                       </div>
@@ -453,27 +536,41 @@ export default function UploadPage() {
                 </div>
               </>
             )}
+
+            <Separator />
+
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Tanggal hardcopy dikirim ke kantor</label>
+              <input
+                type="date"
+                value={sendDateValue}
+                onChange={(e) => setSendDateValue(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
+            </div>
+            {canAssignPic && (
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">PIC (GA Staff yang menangani invoice ini)</label>
+                <select
+                  value={picIdValue}
+                  onChange={(e) => setPicIdValue(e.target.value)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Belum ditentukan</option>
+                  {gaStaff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-2">
             <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
-              Confirm &amp; Submit
+              Konfirmasi &amp; Ajukan
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setStage('drop')
-                setFile(null)
-                setFields([])
-                setLineItems([])
-                setInvoiceId(null)
-                setEditableValues({})
-                setOverallConfidence(0)
-              }}
-            >
-              Upload Again
+            <Button variant="outline" onClick={resetWizard}>
+              Unggah Ulang
             </Button>
           </div>
         </motion.div>
@@ -487,8 +584,8 @@ export default function UploadPage() {
           className="text-center py-12"
         >
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900">Invoice Submitted Successfully!</h2>
-          <p className="text-gray-500 mt-2">Redirecting to invoice list...</p>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Invoice Berhasil Diajukan!</h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">Mengarahkan ke daftar invoice...</p>
         </motion.div>
       )}
     </div>
