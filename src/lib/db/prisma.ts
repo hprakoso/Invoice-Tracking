@@ -12,11 +12,6 @@ function createPrismaClient() {
   url.searchParams.delete('sslmode')
   url.searchParams.delete('sslaccept')
 
-  // Strip sslmode/sslaccept from URL — explicit ssl option below takes precedence
-  const url = new URL(connectionString)
-  url.searchParams.delete('sslmode')
-  url.searchParams.delete('sslaccept')
-
   const ssl = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false'
     ? { rejectUnauthorized: false }
     : undefined
