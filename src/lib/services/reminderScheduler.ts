@@ -1,31 +1,17 @@
-import cron from 'node-cron'
 import { prisma } from '@/lib/db/prisma'
+import type { InvoiceStatus, Role } from '@prisma/client'
 
-let schedulerStarted = false
+const OPEN_STATUSES: InvoiceStatus[] = ['SUBMITTED', 'REVISION']
+const RECIPIENT_ROLES: Role[] = ['GA_STAFF', 'GA_MANAGER']
 
-export function startReminderScheduler() {
-  if (schedulerStarted) return
-  schedulerStarted = true
-
-  // Run every hour
-  cron.schedule('0 * * * *', async () => {
-    await checkDueDates()
-  })
-
-  // Also run once on startup for demo purposes
-  setTimeout(checkDueDates, 5000)
-
-  console.log('✅ Reminder scheduler started')
-}
-
-async function checkDueDates() {
+export async function checkDueDates() {
   const now = new Date()
   const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000)
 
   // Invoices due within 3 days (not yet notified today)
   const dueSoon = await prisma.invoice.findMany({
     where: {
-      status: { in: ['SUBMITTED', 'REVISION'] as any[] },
+      status: { in: OPEN_STATUSES },
       dueDate: { gte: now, lte: threeDaysFromNow },
     },
     include: { vendor: { select: { name: true } } },
@@ -34,18 +20,24 @@ async function checkDueDates() {
   // Overdue invoices
   const overdue = await prisma.invoice.findMany({
     where: {
-      status: { in: ['SUBMITTED', 'REVISION'] as any[] },
+      status: { in: OPEN_STATUSES },
       dueDate: { lt: now },
     },
     include: { vendor: { select: { name: true } } },
   })
 
   const recipients = await prisma.user.findMany({
-    where: { role: { in: ['GA_STAFF', 'GA_MANAGER'] }, isActive: true },
+    where: { role: { in: RECIPIENT_ROLES }, isActive: true },
     select: { id: true },
   })
 
-  const notifications = []
+  const notifications: {
+    userId: string
+    invoiceId: string
+    type: string
+    title: string
+    body: string
+  }[] = []
 
   for (const invoice of dueSoon) {
     for (const user of recipients) {
@@ -92,7 +84,8 @@ async function checkDueDates() {
   }
 
   if (notifications.length > 0) {
-    await prisma.notification.createMany({ data: notifications as any })
-    console.log(`📬 Created ${notifications.length} reminder notifications`)
+    await prisma.notification.createMany({ data: notifications })
   }
+
+  return { dueSoonCount: dueSoon.length, overdueCount: overdue.length, notificationsCreated: notifications.length }
 }

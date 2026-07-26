@@ -8,8 +8,15 @@ export default auth((req) => {
   const { pathname } = req.nextUrl
   const isLoggedIn = !!req.auth
 
-  // Public routes
-  if (pathname === '/login' || pathname.startsWith('/api/auth') || pathname === '/api/health') {
+  // Public routes. /api/cron/** has no NextAuth session (Vercel Cron calls
+  // it directly) — it authenticates itself via the CRON_SECRET bearer token
+  // checked inside the route handler, so middleware must let it through.
+  if (
+    pathname === '/login' ||
+    pathname.startsWith('/api/auth') ||
+    pathname === '/api/health' ||
+    pathname.startsWith('/api/cron/')
+  ) {
     if (isLoggedIn && pathname === '/login') {
       return NextResponse.redirect(new URL('/', req.url))
     }

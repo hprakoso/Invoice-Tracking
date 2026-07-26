@@ -15,7 +15,7 @@
 | AI service | Python FastAPI (separate process) | OCR extraction + RAG chatbot |
 | OCR | Tesseract + PyMuPDF/pdf2image | Indonesian + English |
 | LLM orchestration | LangChain (LCEL) | Provider-agnostic via `LLM_PROVIDER` |
-| Background jobs | node-cron | Hourly due-date reminder scan, in-process |
+| Background jobs | Vercel Cron → `GET /api/cron/reminders` | Daily due-date reminder scan (Hobby plan cap; see `docs/PRODUCTION_PLAN.md` §4.2) |
 | Testing | Vitest + @testing-library/react | `npm test` |
 | Excel export | exceljs | Dashboard KPI + invoice list, generated on demand, not persisted |
 | File storage | Local disk (`uploads/invoices/`) | Not available on Vercel (see limitation below) |
@@ -30,7 +30,7 @@ Next.js app (localhost:3000)
   ├─ React UI (App Router, RSC by default, 'use client' where needed)
   ├─ API routes  src/app/api/**  ──────► PostgreSQL (Prisma, port 5433)
   ├─ NextAuth (JWT session, role + vendorId in token)
-  └─ node-cron reminder scheduler (in-process, started via src/instrumentation.ts)
+  └─ GET /api/cron/reminders (Vercel Cron, CRON_SECRET-guarded, daily)
         │
         │ HTTP (server-to-server, no auth between them — trusted internal network)
         ▼
@@ -67,7 +67,7 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 `POST /api/chat` (rate-limited 10 req/min/user, **`ADMIN`/`GA_MANAGER` only**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM. Being replaced with a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2 — this section will be rewritten once that lands.
 
 ### Due-date reminders
-`src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `GA_STAFF`/`GA_MANAGER` users, deduplicated per 24h window.
+`checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `GA_STAFF`/`GA_MANAGER` users, deduplicated per 24h window.
 
 ### Dashboard Excel export
 `GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.
@@ -97,8 +97,7 @@ src/
 │   ├── validations.ts               # Zod schemas + status-transition state machine
 │   └── rate-limit.ts                # In-memory sliding-window limiter
 ├── types/                           # Shared TS types, NextAuth session augmentation
-├── instrumentation.ts               # Boots the reminder scheduler on server start
-└── middleware.ts                    # NextAuth route protection (Edge runtime)
+└── middleware.ts                    # NextAuth route protection (Edge runtime); excludes /api/cron/**
 
 prisma/
 ├── schema.prisma                    # 7 models — see docs/DATABASE.md
@@ -117,5 +116,4 @@ ai-service/                          # Python FastAPI, independent deployable
 - **Local disk file storage** — `uploads/invoices/`; the file-serving route (`/api/invoices/[id]/file`) explicitly 503s when `process.env.VERCEL === '1'`. Needs S3/equivalent for any multi-instance or serverless deployment.
 - **Synchronous OCR** — no job queue; long-running Tesseract/LLM calls block the SSE request for up to 60s (enforced timeout).
 - **Chatbot is not live-RAG** — pgvector is provisioned but the chat endpoint answers from a static context string, not a per-query vector search over the invoices table.
-- **In-process cron** — `node-cron` runs inside the Next.js server process; on serverless/multi-instance deployments this either won't fire reliably or will fire once per instance. Fine for a single long-running Node process (e.g. VM, container), not for Vercel-style scale-to-zero.
 - **No auth between Next.js and the AI service** — internal network is assumed trusted; do not expose port 8000 publicly.

@@ -133,6 +133,13 @@ Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` 
 ### `PATCH /api/users/[id]`
 Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Writes: `users` row (partial update), `audit_logs` (`action: 'user.role_updated'`, `metadata: { from, to }`).
 
+## Cron
+
+### `GET /api/cron/reminders`
+Auth: `Authorization: Bearer <CRON_SECRET>` header — checked inside the route (not `requireAuth`/`requireRole`, since there's no NextAuth session). `src/middleware.ts` explicitly excludes `/api/cron/**` from its session-required gate so the request reaches the route at all. Registered in `vercel.json` → `crons` (`0 1 * * *`, daily — Vercel Hobby plan caps cron at once/day; see `docs/PRODUCTION_PLAN.md` §4.2). Runs `checkDueDates()` (`src/lib/services/reminderScheduler.ts`), same logic previously invoked hourly by `node-cron` from `src/instrumentation.ts` (removed — doesn't survive serverless scale-to-zero).
+
+Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within 3 days or overdue, recipients = active `GA_STAFF`/`GA_MANAGER` users, deduplicated per `(userId, invoiceId, type)` within a 24h window. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+
 ## System
 
 ### `GET /api/health`

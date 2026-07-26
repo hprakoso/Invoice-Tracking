@@ -22,6 +22,7 @@ DATABASE_URL="postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo
 NEXTAUTH_SECRET="any-random-string-at-least-32-chars"
 NEXTAUTH_URL="http://localhost:3000"
 AI_SERVICE_URL="http://localhost:8000"
+CRON_SECRET="any-random-string"  # required to call GET /api/cron/reminders locally; Vercel sets this automatically in production
 ```
 
 > Host port is **5433**, not the Postgres default 5432 — see `docker-compose.yml` and commit `a56ffcd` (changed to avoid clashing with a locally installed Postgres).
