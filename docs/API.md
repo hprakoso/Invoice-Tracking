@@ -171,10 +171,13 @@ Auth: `ADMIN`, `GA_MANAGER` only (narrowed from "all but VENDOR" — chat is bei
 Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
 
 ### `POST /api/users`
-Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` defaults to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
 
 ### `PATCH /api/users/[id]`
-Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Writes: `users` row (partial update), `audit_logs` (`action: 'user.role_updated'`, `metadata: { from, to }`).
+Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Writes: `users` row (partial update), `audit_logs` (`action: 'user.role_updated'`, `metadata: { from, to }`). The admin users page's Active/Inactive badge is a toggle button wired to this with `{ isActive }` — deactivated users fail login at `authorize()` (`!user.isActive` check in `auth.ts`).
+
+### `PATCH /api/users/me/password`
+Auth: any authenticated user, changing their own password only (no `id` param — always `session.user.id`). Body validated by `changePasswordSchema` (`{ currentPassword, newPassword }`). Verifies `currentPassword` against `users.password_hash` first (400 if wrong) — this isn't gated behind `mustChangePassword`, so it doubles as the general "change my password" endpoint, not just the first-login flow. Writes: `users.password_hash` (rehashed), `users.must_change_password = false`, `audit_logs` (`action: 'user.password_changed'`). The `/change-password` page calls NextAuth's client-side `update()` after a successful response to refresh the JWT (`trigger: 'update'` branch in `auth.ts`'s `jwt` callback re-reads `must_change_password` from the DB) — otherwise the stateless JWT would keep gating the user until natural token expiry.
 
 ## Cron
 

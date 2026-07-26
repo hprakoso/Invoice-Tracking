@@ -106,6 +106,11 @@ export const vendorContactSchema = z.object({
   role: z.string().max(100).optional().nullable(),
 })
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+})
+
 export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),

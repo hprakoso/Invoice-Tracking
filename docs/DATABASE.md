@@ -38,6 +38,7 @@ Invoice ──1:N──> Notification (optional)
 | role | enum `Role` | `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR`. `MANAGER`/`FINANCE`/`VIEWER` were removed in migration `20260726171012_simplify_roles` (see `docs/PRODUCTION_PLAN.md` §4.9) — `GA_MANAGER` now carries `GA_STAFF`'s operational permissions plus supervisory access (audit log, AI chat) |
 | password_hash | text | bcrypt, cost 12 (migrated from SHA-256, commit `dc87d56`) |
 | is_active | bool, default true | inactive users cannot authenticate |
+| must_change_password | bool, default true | set on every `POST /api/users`-created account; cleared by `PATCH /api/users/me/password`. `middleware.ts` redirects any page route to `/change-password` while true — added in migration `20260726181558_add_must_change_password`. Demo seed accounts explicitly set this `false` so the shared `demo123` login isn't gated |
 | created_at / updated_at | timestamp | |
 | vendor_id | uuid FK → `vendors.id`, nullable | set only for `VENDOR` role; drives data isolation |
 
@@ -151,6 +152,7 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726173942_add_payment_tracking` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'PAID'` (additive — no type-swap needed, unlike removing enum values); adds `invoices.paid_date`/`paid_amount`/`paid_by` (FK → `users.id`) |
 | `20260726175202_add_companies` | New `companies` table (8th table); adds `invoices.company_id` (nullable FK → `companies.id`) |
 | `20260726180556_extend_vendor_profile` | Adds `vendors.address`/`city`/`phone`/`bank_account_holder`/`bank_branch`; new `vendor_contacts` table (9th table) |
+| `20260726181558_add_must_change_password` | Adds `users.must_change_password` (`NOT NULL DEFAULT true`) |
 
 ## Seed data (`prisma/seed.ts`)
 

@@ -40,6 +40,7 @@ async function main() {
         name: 'Budi Santoso',
         role: Role.ADMIN,
         passwordHash: demoHash,
+        mustChangePassword: false,
       },
     }),
     prisma.user.create({
@@ -48,6 +49,7 @@ async function main() {
         name: 'Rina Kusuma',
         role: Role.GA_STAFF,
         passwordHash: demoHash,
+        mustChangePassword: false,
       },
     }),
     prisma.user.create({
@@ -56,6 +58,7 @@ async function main() {
         name: 'Hendra Wijaya',
         role: Role.GA_MANAGER,
         passwordHash: demoHash,
+        mustChangePassword: false,
       },
     }),
     prisma.user.create({
@@ -64,6 +67,7 @@ async function main() {
         name: 'Putri Anggraini',
         role: Role.GA_STAFF,
         passwordHash: demoHash,
+        mustChangePassword: false,
       },
     }),
   ])
@@ -145,6 +149,7 @@ async function main() {
         name: 'Hendra Kusuma (Maju Jaya)',
         role: Role.VENDOR,
         passwordHash: demoHash,
+        mustChangePassword: false,
         vendorId: vendors[0].id,
       },
     }),
@@ -154,6 +159,7 @@ async function main() {
         name: 'Rina Susanti (Teknologi Nusantara)',
         role: Role.VENDOR,
         passwordHash: demoHash,
+        mustChangePassword: false,
         vendorId: vendors[1].id,
       },
     }),

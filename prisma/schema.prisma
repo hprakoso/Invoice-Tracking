@@ -29,6 +29,7 @@ model User {
   role          Role
   passwordHash  String   @map("password_hash")
   isActive      Boolean  @default(true) @map("is_active")
+  mustChangePassword Boolean @default(true) @map("must_change_password")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

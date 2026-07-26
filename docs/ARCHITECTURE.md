@@ -98,7 +98,7 @@ src/
 │   ├── validations.ts               # Zod schemas + status-transition state machine
 │   └── rate-limit.ts                # In-memory sliding-window limiter
 ├── types/                           # Shared TS types, NextAuth session augmentation
-└── middleware.ts                    # NextAuth route protection (Edge runtime); excludes /api/cron/**
+└── middleware.ts                    # NextAuth route protection (Edge runtime); excludes /api/cron/**; redirects to /change-password while mustChangePassword
 
 prisma/
 ├── schema.prisma                    # 8 models — see docs/DATABASE.md

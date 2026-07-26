@@ -8,6 +8,19 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-26 — Forced password change for admin-created accounts + active toggle (3a)
+**What:** `User.mustChangePassword` (bool, default `true`; migration `20260726181558_add_must_change_password`). `POST /api/users` now creates accounts that must set their own password before reaching anything else — `middleware.ts` redirects every page route to `/change-password` while the flag is true (API routes stay reachable — the change-password call itself is one). New `PATCH /api/users/me/password` (verifies `currentPassword`, rehashes, clears the flag, writes `audit_logs`). New `/change-password` page.
+
+**The stale-JWT problem and how it's handled:** NextAuth JWT sessions are stateless, so clearing the DB flag alone wouldn't update the session the user is already holding — they'd stay gated until the token's natural expiry. Fixed with NextAuth's `trigger: 'update'` mechanism: `/change-password` calls the client-side `update()` after a successful password change, which POSTs to `/api/auth/session` and re-runs `auth.ts`'s `jwt` callback with `trigger === 'update'`, re-reading `mustChangePassword` from the DB and re-encoding the cookie. Had to fix this in **two places**, not one — `middleware.ts` runs against the separate Edge-safe `authConfig` (no DB access), which has its own `jwt`/`session` callbacks that only forwarded `id`/`role` onto `session.user`; `mustChangePassword` had to be added there too or middleware would never see it even though the full `auth.ts` config set it correctly.
+
+Also wired up the admin users page's previously-static "Yes/No" Active column into a clickable toggle (`PATCH /api/users/[id]` with `{isActive}` — that endpoint already accepted the field, just had no UI control).
+
+Demo seed accounts (`prisma/seed.ts`) explicitly set `mustChangePassword: false` on all 6 — otherwise the shared `demo123` quick-login buttons on the login page would force a password reset on every demo account's first use, breaking the documented demo flow.
+
+**Why:** User request (3a) — the remaining gap from the existing admin-user-creation flow, per `docs/PRODUCTION_PLAN.md` §6.1 (welcome-email delivery is the other listed gap, deferred pending the Resend decision).
+
+**Verified live end-to-end, not just compiled:** confirmed demo `admin@demo.com` logs in and reaches the dashboard without any redirect (seed's `false` flag holds); created a real user via `POST /api/users`, logged in as them, confirmed the session correctly carried `mustChangePassword: true`, confirmed a page route redirected to `/change-password` while an API route (`GET /api/invoices`) did not; confirmed a wrong `currentPassword` is rejected 400; confirmed a correct change succeeds and the JWT stays stale until the `update()` call is simulated (`POST /api/auth/session`), after which the session flips to `false` and the dashboard becomes reachable in the same request round-trip.
+
 ### 2026-07-26 — Vendor profile: extended fields, VendorContact, self-service editing (3e)
 **What:** `Vendor` gains `address`/`city`/`phone`/`bankAccountHolder`/`bankBranch` (migration `20260726180556_extend_vendor_profile`). New `VendorContact` model (`vendor_contacts` table, cascade-deletes with its vendor) — a vendor can have several PICs (finance, sales, ops), kept as a separate table rather than flat fields.
 

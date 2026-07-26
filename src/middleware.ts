@@ -36,6 +36,12 @@ export default auth((req) => {
     return NextResponse.redirect(new URL('/login', req.url))
   }
 
+  // Admin-created accounts must change their initial password before
+  // reaching anything else. /change-password itself must stay reachable.
+  if (req.auth?.user.mustChangePassword && pathname !== '/change-password') {
+    return NextResponse.redirect(new URL('/change-password', req.url))
+  }
+
   return NextResponse.next()
 })
 

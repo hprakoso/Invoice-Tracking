@@ -31,16 +31,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: user.name,
           role: user.role,
           vendorId: user.vendorId,
+          mustChangePassword: user.mustChangePassword,
         }
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id
         token.role = (user as { role: Role }).role
         token.vendorId = (user as { vendorId?: string | null }).vendorId ?? null
+        token.mustChangePassword = (user as { mustChangePassword?: boolean }).mustChangePassword ?? false
+      }
+      // Password-change flow calls session.update() client-side to refresh
+      // this without forcing a full re-login — JWT sessions are otherwise
+      // stateless, so the flag would stay stale until the token naturally expired.
+      if (trigger === 'update' && token.id) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: { mustChangePassword: true },
+        })
+        if (fresh) token.mustChangePassword = fresh.mustChangePassword
       }
       return token
     },
@@ -49,6 +61,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.id as string
         session.user.role = token.role as Role
         session.user.vendorId = token.vendorId as string | null
+        session.user.mustChangePassword = token.mustChangePassword as boolean
       }
       return session
     },

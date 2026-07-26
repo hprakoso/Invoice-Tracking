@@ -4,6 +4,7 @@ declare module 'next-auth' {
   interface User {
     role: Role
     vendorId?: string | null
+    mustChangePassword?: boolean
   }
   interface Session {
     user: {
@@ -12,6 +13,7 @@ declare module 'next-auth' {
       name: string
       role: Role
       vendorId: string | null
+      mustChangePassword: boolean
     }
   }
 }
@@ -21,5 +23,6 @@ declare module 'next-auth/jwt' {
     id: string
     role: Role
     vendorId: string | null
+    mustChangePassword: boolean
   }
 }

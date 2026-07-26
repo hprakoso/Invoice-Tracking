@@ -50,6 +50,20 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function toggleActive(user: UserRow) {
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: !user.isActive }),
+    })
+    if (res.ok) {
+      toast.success(user.isActive ? 'User deactivated' : 'User reactivated')
+      fetchUsers()
+    } else {
+      toast.error('Failed to update')
+    }
+  }
+
   async function createUser() {
     setSaving(true)
     const res = await fetch('/api/users', {
@@ -136,7 +150,18 @@ export default function AdminUsersPage() {
                       {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{u.isActive ? 'Yes' : 'No'}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => toggleActive(u)}
+                      className={`text-xs font-medium px-2 py-1 rounded-full transition-colors ${
+                        u.isActive
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400'
+                      }`}
+                    >
+                      {u.isActive ? 'Active' : 'Inactive'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
