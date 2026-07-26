@@ -15,6 +15,7 @@ enum Role {
 
 enum InvoiceStatus {
   SUBMITTED
+  PAID
   CANCELLED
   REJECTED
   VOID
@@ -36,6 +37,7 @@ model User {
 
   createdInvoices   Invoice[]          @relation("CreatedBy")
   picInvoices       Invoice[]          @relation("Pic")
+  paidInvoices      Invoice[]          @relation("PaidBy")
   auditLogs         AuditLog[]
   notifications     Notification[]
 
@@ -81,9 +83,14 @@ model Invoice {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
+  paidDate       DateTime?     @map("paid_date")
+  paidAmount     Decimal?      @map("paid_amount") @db.Decimal(15, 2)
+  paidById       String?       @map("paid_by")
+
   vendor         Vendor         @relation(fields: [vendorId], references: [id])
   createdBy      User           @relation("CreatedBy", fields: [createdById], references: [id])
   pic            User?          @relation("Pic", fields: [picId], references: [id])
+  paidBy         User?          @relation("PaidBy", fields: [paidById], references: [id])
   items          InvoiceItem[]
   auditLogs      AuditLog[]
   notifications  Notification[]

@@ -58,7 +58,7 @@ Invoice ──1:N──> Notification (optional)
 | currency | text, default `IDR` | |
 | subtotal / tax_amount | decimal(15,2), nullable | |
 | total_amount | decimal(15,2) | |
-| status | enum `InvoiceStatus` | `SUBMITTED` (default, set on create) → one of `CANCELLED`, `REJECTED`, `VOID` (terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `PAID` was removed — this app never records actual payment, Finance pays outside the system. |
+| status | enum `InvoiceStatus` | `SUBMITTED` (default, set on create) → one of `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `PAID` re-added in migration `20260726173942_add_payment_tracking` — this is a system record of an outcome decided outside the app (there's no payment gateway integration), not a live payment execution. |
 | send_date | timestamp, nullable | date the vendor sent the physical hardcopy to the office; set by `VENDOR` (own invoice) or `GA_STAFF`/`ADMIN` |
 | delivered_date | timestamp, nullable | date GA Staff physically received the hardcopy; set by `GA_STAFF`/`ADMIN`; must not be earlier than `send_date` (`validateDeliveryDates()`) |
 | pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF`/`GA_MANAGER` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
@@ -67,6 +67,9 @@ Invoice ──1:N──> Notification (optional)
 | notes | text, nullable | |
 | created_by | uuid FK → `users.id` | settable by `ADMIN`, `VENDOR`, `GA_STAFF`, or `GA_MANAGER` |
 | created_at / updated_at | timestamp | |
+| paid_date | timestamp, nullable | set when `status → PAID`; defaults to `now()` if the caller doesn't supply one |
+| paid_amount | decimal(15,2), nullable | set when `status → PAID`; defaults to `total_amount` if the caller doesn't supply one — an explicit lower value records a partial payment (still a terminal `PAID` status; there's no `PARTIALLY_PAID` state) |
+| paid_by | uuid FK → `users.id`, nullable | **always server-assigned** to the acting user's id — never accepted from the request body, regardless of role (including `ADMIN`) |
 
 ### `invoice_items`
 | Column | Type | Notes |
@@ -114,6 +117,7 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260618082131_add_vendor_ga_roles` | `VENDOR`, `GA_STAFF`, `GA_MANAGER` roles; `vendor_id` FK on `users` |
 | `20260715171000_invoice_workflow_overhaul` | Drops `approval_workflows` table and `ApprovalStatus` enum; replaces `InvoiceStatus` enum values entirely (`SUBMITTED`/`CANCELLED`/`REJECTED`/`VOID`/`REVISION`, `PAID` removed); adds `invoices.send_date`, `delivered_date`, `pic_id` |
 | `20260726171012_simplify_roles` | Drops `MANAGER`, `FINANCE`, `VIEWER` from `Role` enum via type-swap (`UPDATE` remaps any existing rows to `GA_STAFF` first, then `CREATE TYPE ... AS ENUM` + `ALTER TABLE ... TYPE` + `DROP TYPE`); down to 4 roles: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` |
+| `20260726173942_add_payment_tracking` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'PAID'` (additive — no type-swap needed, unlike removing enum values); adds `invoices.paid_date`/`paid_amount`/`paid_by` (FK → `users.id`) |
 
 ## Seed data (`prisma/seed.ts`)
 

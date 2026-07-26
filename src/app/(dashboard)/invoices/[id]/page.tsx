@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import {
   ArrowLeft, FileText, Calendar, Building2,
-  ChevronLeft, ChevronRight, AlertTriangle, Send, Truck, User as UserIcon,
+  ChevronLeft, ChevronRight, AlertTriangle, Send, Truck, User as UserIcon, Banknote,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -46,9 +46,12 @@ interface Invoice {
   notes: string | null
   filePath: string | null
   fileType: string | null
+  paidDate: string | null
+  paidAmount: string | null
   vendor: { id: string; name: string; npwp?: string | null }
   createdBy: { id: string; name: string }
   pic: { id: string; name: string } | null
+  paidBy: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string; sortOrder: number }[]
 }
 
@@ -57,14 +60,15 @@ import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 // Duplicated (not imported) from src/lib/validations.ts — that module also
 // pulls in next/server, which can't be bundled into this client component.
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  SUBMITTED: ['CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
+  SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
   REVISION: ['SUBMITTED'],
+  PAID: [],
   CANCELLED: [],
   REJECTED: [],
   VOID: [],
 }
 const STATUS_LABELS: Record<string, string> = {
-  SUBMITTED: 'Diajukan', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
+  SUBMITTED: 'Diajukan', PAID: 'Lunas', CANCELLED: 'Dibatalkan', REJECTED: 'Ditolak', VOID: 'Void', REVISION: 'Revisi',
 }
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -161,6 +165,8 @@ export default function InvoiceDetailPage() {
   const [revTax, setRevTax] = useState('')
   const [revTotal, setRevTotal] = useState('')
   const [revNotes, setRevNotes] = useState('')
+  const [paidDateInput, setPaidDateInput] = useState('')
+  const [paidAmountInput, setPaidAmountInput] = useState('')
 
   const fetchInvoice = async () => {
     try {
@@ -182,6 +188,8 @@ export default function InvoiceDetailPage() {
         setRevTax(data.taxAmount ?? '')
         setRevTotal(data.totalAmount ?? '')
         setRevNotes(data.notes ?? '')
+        setPaidDateInput(data.paidDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10))
+        setPaidAmountInput(data.paidAmount ?? data.totalAmount ?? '')
         setFetchError(null)
       }
     } catch {
@@ -206,7 +214,10 @@ export default function InvoiceDetailPage() {
   const canResubmit = invoice?.status === 'REVISION' && (role === 'ADMIN' || isOwner)
   const canEditDelivery = ['GA_STAFF', 'GA_MANAGER', 'ADMIN'].includes(role ?? '')
   const canEditSendDate = canEditDelivery || (role === 'VENDOR' && isOwner)
-  const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []) : []
+  const canMarkPaid = canUpdateStatus && invoice?.status === 'SUBMITTED'
+  // PAID has its own dedicated form (below) that collects paidDate/paidAmount —
+  // excluded here so the generic status dropdown can't set it without those.
+  const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []).filter(s => s !== 'PAID') : []
 
   const patchInvoice = async (body: Record<string, unknown>, successMsg: string) => {
     setActing(true)
@@ -242,6 +253,17 @@ export default function InvoiceDetailPage() {
     totalAmount: revTotal !== '' ? Number(revTotal) : undefined,
     notes: revNotes || undefined,
   }, 'Invoice diperbaiki & diajukan ulang')
+
+  const handleMarkPaid = () => {
+    if (!paidAmountInput || Number(paidAmountInput) <= 0) {
+      toast.error('Enter a valid paid amount')
+      return
+    }
+    patchInvoice(
+      { status: 'PAID', paidDate: paidDateInput || undefined, paidAmount: Number(paidAmountInput) },
+      'Invoice ditandai lunas',
+    )
+  }
 
   const handleDeliverySave = () => {
     if (deliveredDateInput && sendDateInput && deliveredDateInput < sendDateInput) {
@@ -363,6 +385,56 @@ export default function InvoiceDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Payment */}
+          {invoice.status === 'PAID' ? (
+            <div className="bg-white rounded-xl border p-4 space-y-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                <Banknote className="h-3 w-3" /> Payment
+              </p>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Paid Date</span>
+                <span className="text-gray-700 font-medium">{formatDate(invoice.paidDate)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Paid Amount</span>
+                <span className="text-gray-700 font-medium">{formatIDR(invoice.paidAmount)}</span>
+              </div>
+              {invoice.paidBy && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Marked by</span>
+                  <span className="text-gray-700">{invoice.paidBy.name}</span>
+                </div>
+              )}
+            </div>
+          ) : canMarkPaid ? (
+            <div className="bg-white rounded-xl border p-4 space-y-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                <Banknote className="h-3 w-3" /> Tandai Lunas
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400">Paid Date</label>
+                  <input
+                    type="date"
+                    value={paidDateInput}
+                    onChange={e => setPaidDateInput(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Paid Amount</label>
+                  <input
+                    type="number"
+                    value={paidAmountInput}
+                    onChange={e => setPaidAmountInput(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+              </div>
+              <Button size="sm" onClick={handleMarkPaid} disabled={acting} className="w-full">Tandai Lunas</Button>
+            </div>
+          ) : null}
 
           {/* Line Items */}
           {invoice.items.length > 0 && (

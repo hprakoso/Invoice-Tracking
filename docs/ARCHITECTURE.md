@@ -52,14 +52,14 @@ The Next.js app is the only thing PostgreSQL and the browser talk to directly; t
 5. Route streams each field back to the client as an SSE `field` event (300ms stagger, drives the animated reveal UI), then persists parsed fields to `Invoice` + replaces `InvoiceItem` rows. Status stays `SUBMITTED` regardless of outcome — the client's review step (`PATCH /api/invoices/[id]`) is what commits corrected data.
 
 ### Invoice status lifecycle
-No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because the actual approval/payment decision happens outside the app (Finance does not pay through this system). The current lifecycle:
+No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE sign-off (`ApprovalWorkflow` model, `/api/approvals/**`), removed because payment execution happens outside the app (no payment gateway integration — `PAID` is a system record of an outcome, not an in-app transaction). The current lifecycle:
 
 1. `VENDOR` or `GA_STAFF` creates/uploads an invoice → `status = SUBMITTED` (set at creation, never touched by OCR).
-2. `GA_STAFF` physically receives the hardcopy and forwards it to the Finance team — **outside the app**. In-app, GA_STAFF records `deliveredDate` + becomes/reassigns the `pic` (person in charge) via `PATCH /api/invoices/[id]`, with a hard rule: `deliveredDate` can never predate `sendDate` (`validateDeliveryDates()` in `src/lib/validations.ts`, enforced client- and server-side).
-3. Once the external outcome is known, `GA_STAFF`, `GA_MANAGER`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction).
+2. `GA_STAFF` physically receives the hardcopy and forwards it to whoever settles it — **outside the app**. In-app, GA_STAFF records `deliveredDate` + becomes/reassigns the `pic` (person in charge) via `PATCH /api/invoices/[id]`, with a hard rule: `deliveredDate` can never predate `sendDate` (`validateDeliveryDates()` in `src/lib/validations.ts`, enforced client- and server-side).
+3. Once the external outcome is known, `GA_STAFF`, `GA_MANAGER`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction). Marking `PAID` additionally records `paidDate`/`paidAmount` (defaulting to now/`totalAmount`) and server-assigns `paidById` — see [DATABASE.md](./DATABASE.md#invoices).
 4. `REVISION` loops back: the `VENDOR` (owner) or `GA_STAFF`/`GA_MANAGER` fixes the core fields and resubmits, `status → SUBMITTED`.
 
-`VALID_TRANSITIONS` (`src/lib/validations.ts`): `SUBMITTED → {CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
+`VALID_TRANSITIONS` (`src/lib/validations.ts`): `SUBMITTED → {PAID, CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
 
 **Role model (4 roles):** `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` — `MANAGER`, `FINANCE`, and `VIEWER` were removed (see `docs/PRODUCTION_PLAN.md` §4.9); their responsibilities were redistributed to `GA_STAFF`/`GA_MANAGER`. `GA_MANAGER` is **no longer deprecated** — it now carries the same operational permissions as `GA_STAFF` (create/upload/status invoices, mark invoices paid) plus supervisory-only access to the audit log and AI chat.
 

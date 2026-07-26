@@ -27,7 +27,7 @@ export const createInvoiceSchema = z.object({
   picId: z.string().uuid().optional().nullable(),
 })
 
-export const INVOICE_STATUSES = ['SUBMITTED', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
+export const INVOICE_STATUSES = ['SUBMITTED', 'PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
 
 export const updateInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(100).optional(),
@@ -43,6 +43,8 @@ export const updateInvoiceSchema = z.object({
   sendDate: isoDateString.optional().nullable(),
   deliveredDate: isoDateString.optional().nullable(),
   picId: z.string().uuid().optional().nullable(),
+  paidDate: isoDateString.optional().nullable(),
+  paidAmount: z.number().nonnegative().optional().nullable(),
   comment: z.string().max(2000).optional(),
 })
 
@@ -60,8 +62,9 @@ export const createUserSchema = z
   })
 
 export const VALID_TRANSITIONS: Record<string, string[]> = {
-  SUBMITTED: ['CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
+  SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
   REVISION: ['SUBMITTED'],
+  PAID: [],
   CANCELLED: [],
   REJECTED: [],
   VOID: [],

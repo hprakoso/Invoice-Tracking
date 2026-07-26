@@ -168,8 +168,8 @@ async function main() {
   // to demo "not yet received"). createdBy varies across VENDOR/GA_STAFF/GA_MANAGER.
   const invoiceData = [
     // SUBMITTED (10), mix of on-time / due-soon / overdue for the reminder scheduler
-    { vendor: vendors[0], num: 'INV-2024-001', status: InvoiceStatus.SUBMITTED, total: 45000000, tax: 4500000, created: daysAgo(10), due: daysFromNow(20), confidence: 94, creator: 'vendor', pic: gaStaff, sent: daysAgo(11), delivered: daysAgo(9) },
-    { vendor: vendors[1], num: 'INV-2024-002', status: InvoiceStatus.SUBMITTED, total: 120000000, tax: 12000000, created: daysAgo(8), due: daysFromNow(22), confidence: 88, creator: 'vendor', pic: gaStaff2, sent: daysAgo(9), delivered: daysAgo(7) },
+    { vendor: vendors[0], num: 'INV-2024-001', status: InvoiceStatus.PAID, total: 45000000, tax: 4500000, created: daysAgo(10), due: daysFromNow(20), confidence: 94, creator: 'vendor', pic: gaStaff, sent: daysAgo(11), delivered: daysAgo(9), paidDate: daysAgo(2) },
+    { vendor: vendors[1], num: 'INV-2024-002', status: InvoiceStatus.PAID, total: 120000000, tax: 12000000, created: daysAgo(8), due: daysFromNow(22), confidence: 88, creator: 'vendor', pic: gaStaff2, sent: daysAgo(9), delivered: daysAgo(7), paidDate: daysAgo(1) },
     { vendor: vendors[2], num: 'INV-2024-003', status: InvoiceStatus.SUBMITTED, total: 28500000, tax: 2850000, created: daysAgo(6), due: daysFromNow(24), confidence: 91, creator: 'gastaff', pic: gaStaff, sent: daysAgo(6), delivered: daysAgo(6) },
     { vendor: vendors[3], num: 'INV-2024-004', status: InvoiceStatus.SUBMITTED, total: 75000000, tax: 7500000, created: daysAgo(4), due: daysFromNow(2), confidence: 96, creator: 'vendor', pic: null, sent: daysAgo(4), delivered: null },
     { vendor: vendors[4], num: 'INV-2024-005', status: InvoiceStatus.SUBMITTED, total: 55000000, tax: 5500000, created: daysAgo(3), due: daysFromNow(1), confidence: 89, creator: 'gamanager', pic: gaStaff2, sent: daysAgo(3), delivered: daysAgo(2) },
@@ -213,6 +213,9 @@ async function main() {
         deliveredDate: d.delivered,
         picId: d.pic?.id ?? null,
         createdById: creator.id,
+        paidDate: d.status === InvoiceStatus.PAID ? d.paidDate : null,
+        paidAmount: d.status === InvoiceStatus.PAID ? d.total : null,
+        paidById: d.status === InvoiceStatus.PAID ? gaManager.id : null,
         items: {
           create: [
             {

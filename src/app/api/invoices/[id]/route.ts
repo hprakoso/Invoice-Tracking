@@ -21,6 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       createdBy: { select: { id: true, name: true, role: true } },
       items: { orderBy: { sortOrder: 'asc' } },
       pic: { select: { id: true, name: true, role: true } },
+      paidBy: { select: { id: true, name: true, role: true } },
     },
   })
 
@@ -53,6 +54,8 @@ const CREATE_TIME_FIELDS = [
 // ADMIN bypasses this (and the VALID_TRANSITIONS table) for corrections.
 // isEditor: VENDOR owns the invoice's vendor, or GA_STAFF created it — either
 // way, the field is still being finalized (SUBMITTED/REVISION) post-upload.
+// paidDate/paidAmount are available to GA_STAFF/GA_MANAGER regardless of
+// isEditor — marking an invoice paid isn't tied to who created it.
 function allowedFields(role: string, currentStatus: string, isOwner: boolean, isEditor: boolean): string[] {
   const stillOpen = currentStatus === 'SUBMITTED' || currentStatus === 'REVISION'
   switch (role) {
@@ -65,8 +68,8 @@ function allowedFields(role: string, currentStatus: string, isOwner: boolean, is
     case 'GA_STAFF':
     case 'GA_MANAGER':
       return isEditor && stillOpen
-        ? [...CREATE_TIME_FIELDS, 'deliveredDate', 'picId', 'sendDate', 'status']
-        : ['deliveredDate', 'picId', 'sendDate', 'status']
+        ? [...CREATE_TIME_FIELDS, 'deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
+        : ['deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
     default:
       return []
   }
@@ -87,7 +90,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const current = await prisma.invoice.findUnique({
     where: { id },
-    select: { status: true, sendDate: true, deliveredDate: true, vendorId: true, createdById: true },
+    select: { status: true, sendDate: true, deliveredDate: true, vendorId: true, createdById: true, totalAmount: true },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -123,6 +126,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // Marking PAID: paidById is server-assigned (never client-supplied), and
+  // paidDate/paidAmount default to now/totalAmount when the caller omits them.
+  const markingPaid = filtered.status === 'PAID'
+
   const invoice = await prisma.invoice.update({
     where: { id },
     data: {
@@ -138,6 +145,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,
       deliveredDate: filtered.deliveredDate ? new Date(filtered.deliveredDate) : undefined,
       picId: filtered.picId,
+      paidDate: markingPaid ? new Date(filtered.paidDate ?? Date.now()) : undefined,
+      paidAmount: markingPaid ? (filtered.paidAmount ?? current.totalAmount) : undefined,
+      paidById: markingPaid ? session.user.id : undefined,
     },
   })
 

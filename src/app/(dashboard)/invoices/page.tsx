@@ -33,6 +33,7 @@ interface Vendor { id: string; name: string }
 const STATUSES = [
   { value: '', label: 'All Statuses' },
   { value: 'SUBMITTED', label: 'Diajukan' },
+  { value: 'PAID', label: 'Lunas' },
   { value: 'REVISION', label: 'Revisi' },
   { value: 'CANCELLED', label: 'Dibatalkan' },
   { value: 'REJECTED', label: 'Ditolak' },

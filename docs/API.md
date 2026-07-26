@@ -25,7 +25,7 @@ Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`. `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -35,11 +35,13 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 | `VENDOR` (own invoice only) | `sendDate` | any status |
 | | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `status→SUBMITTED` | while `status = REVISION` (fixing and resubmitting) |
 | | + same core fields (no `status`) | while `status = SUBMITTED` **and** this VENDOR created the invoice — finishes the post-OCR review step from the upload wizard |
-| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`) | always |
+| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`), `paidDate`, `paidAmount` | always |
 | | + core fields above | while `status ∈ {SUBMITTED, REVISION}` **and** this GA_STAFF/GA_MANAGER created the invoice |
 | `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
 
 Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). The one exception `VALID_TRANSITIONS` itself doesn't encode: `REVISION → SUBMITTED` (resubmit) is further restricted to `VENDOR`/`ADMIN` only — `GA_STAFF` can request every other transition but not this one, since fixing a revision is the vendor's responsibility. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+
+**Marking an invoice `PAID`** (`SUBMITTED → PAID`, `GA_STAFF`/`GA_MANAGER`/`ADMIN` only — never reachable by `VENDOR`, structurally: `status` isn't in `VENDOR`'s allowed-field list while `status = SUBMITTED`): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID` is terminal (`VALID_TRANSITIONS.PAID = []`) — marking an already-paid invoice paid again returns 400.
 
 Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`.
 
@@ -90,7 +92,7 @@ Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.v
 Auth: any authenticated user, same `VENDOR` scoping as `GET /api/dashboard`. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
 - Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `createdBy.name` + `pic.name`.
+- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/**Paid Date/Paid Amount**/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 
