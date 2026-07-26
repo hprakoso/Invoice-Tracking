@@ -8,14 +8,6 @@ export function useTheme() {
   const [theme, setTheme] = useState<Theme>('light')
   const [mounted, setMounted] = useState(false)
 
-  useEffect(() => {
-    setMounted(true)
-    const stored = localStorage.getItem('theme') as Theme | null
-    const initial = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    setTheme(initial)
-    applyTheme(initial)
-  }, [])
-
   const applyTheme = (t: Theme) => {
     const html = document.documentElement
     if (t === 'dark') {
@@ -25,6 +17,17 @@ export function useTheme() {
     }
     localStorage.setItem('theme', t)
   }
+
+  useEffect(() => {
+    // Reading localStorage/matchMedia must happen client-side after mount to
+    // avoid an SSR/client hydration mismatch — can't move into lazy useState init.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+    const stored = localStorage.getItem('theme') as Theme | null
+    const initial = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    setTheme(initial)
+    applyTheme(initial)
+  }, [])
 
   const toggle = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light'

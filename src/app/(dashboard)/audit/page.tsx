@@ -116,6 +116,7 @@ export default function AuditPage() {
   )
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() sets a loading flag before its async fetch
     load(page)
   }, [load, page])
 

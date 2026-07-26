@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to')
 
   const where: Prisma.InvoiceWhereInput = {}
-  if (status) where.status = status as any
+  if (status) where.status = status as Prisma.EnumInvoiceStatusFilter['equals']
   if (search) where.invoiceNumber = { contains: search, mode: 'insensitive' }
   if (from || to) {
     where.dueDate = {}

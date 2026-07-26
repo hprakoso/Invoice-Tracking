@@ -66,6 +66,7 @@ export default function VendorProfilePage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() sets a loading flag before its async fetch
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId])
@@ -115,7 +116,7 @@ export default function VendorProfilePage() {
 
   if (loading) return <div className="text-sm text-gray-500">Loading...</div>
   if (!vendorId || !vendor) {
-    return <div className="text-sm text-gray-500">Your account isn't linked to a vendor. Contact an admin.</div>
+    return <div className="text-sm text-gray-500">Your account isn&apos;t linked to a vendor. Contact an admin.</div>
   }
 
   return (
@@ -134,7 +135,7 @@ export default function VendorProfilePage() {
           <label className="text-xs text-gray-400 flex items-center gap-1"><Lock className="h-3 w-3" /> NPWP</label>
           <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mt-1">{vendor.npwp ?? '—'}</p>
         </div>
-        <p className="text-xs text-gray-400">Name and NPWP are set by admin only — they're used to match tax documents.</p>
+        <p className="text-xs text-gray-400">Name and NPWP are set by admin only — they&apos;re used to match tax documents.</p>
 
         <Separator />
 

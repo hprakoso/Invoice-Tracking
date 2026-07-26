@@ -89,6 +89,7 @@ export default function UploadPage() {
   const [companyIdValue, setCompanyIdValue] = useState('')
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isGaStaff) setPicIdValue(session?.user?.id ?? '')
     if (['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(role ?? '')) {
       fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
@@ -101,6 +102,7 @@ export default function UploadPage() {
     const f = accepted[0]
     if (!f) return
     setFile(f)
+    // eslint-disable-next-line react-hooks/immutability -- runOCR is a hoisted function declaration, safe to call here
     await runOCR(f)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/helpers'
 
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
   const entityType = searchParams.get('entityType')
   const userId = searchParams.get('userId')
 
-  const where: any = {}
+  const where: Prisma.AuditLogWhereInput = {}
   if (entityType) where.entityType = entityType
   if (userId) where.userId = userId
 

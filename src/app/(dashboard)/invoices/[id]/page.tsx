@@ -201,6 +201,7 @@ export default function InvoiceDetailPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchInvoice() sets a loading flag before its async fetch
     fetchInvoice()
     fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
     // eslint-disable-next-line react-hooks/exhaustive-deps

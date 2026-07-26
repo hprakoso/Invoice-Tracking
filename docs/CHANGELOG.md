@@ -8,6 +8,15 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-26 — GitHub Actions CI (typecheck/lint/test on every push and PR)
+**What:** New `.github/workflows/ci.yml` — on `push` to `main` and every `pull_request`: `npm ci` → `npx prisma generate` (schema-only, no live DB needed) → `npx tsc --noEmit` → `npm run lint` → `npm test`. Node 22, npm-cached.
+
+**Fixed the pre-existing lint errors this surfaced** (none newly introduced — `npm run lint` had never been run clean across the whole repo before, only spot-checked per file): `src/hooks/useTheme.ts` had `applyTheme` referenced before its declaration and two `setState`-in-effect calls flagged by `eslint-plugin-react-hooks`'s newer rules — reordered `applyTheme` above the effect, and scoped `eslint-disable-next-line` on the two calls that are the standard client-only-hydration pattern (reading `localStorage`/`matchMedia` can't move into a lazy `useState` initializer without a server/client render mismatch). The same `setState`-in-effect pattern (an effect calling a `useCallback`/function that sets a loading flag before its async fetch — a legitimate, common data-fetch-on-mount shape) recurs in `audit/page.tsx`, `invoices/[id]/page.tsx`, `invoices/upload/page.tsx`, `reminders/page.tsx`, and the new `vendor/profile/page.tsx`; same scoped-disable treatment. `invoices/upload/page.tsx` also had `runOCR` (a hoisted `function` declaration, safe at runtime) referenced by an earlier `useCallback` — disabled `react-hooks/immutability` at the one call site rather than relocating a 90-line function. Two `<p>`/`<div>` apostrophes in `vendor/profile/page.tsx` needed `&apos;` (`react/no-unescaped-entities`). Two `any`-typed Prisma `where` clauses (`api/audit/route.ts`, `api/invoices/route.ts`) replaced with `Prisma.AuditLogWhereInput`/`Prisma.EnumInvoiceStatusFilter['equals']`.
+
+**Why:** `CLAUDE.md` requires unit tests before finishing tasks; a CI workflow makes that automatic on every push/PR instead of relying on remembering to run it locally. Fixing the lint errors it surfaced was necessary — a CI job that fails on its first run against `main` isn't useful, and none of these were touched by unrelated refactoring beyond what made the rule pass.
+
+**Verified locally by running the exact 4 CI steps against this working tree:** `npx prisma generate` (105ms, no DB connection attempted), `npx tsc --noEmit` (clean), `npm run lint` (0 errors, 1 pre-existing unused-arg warning on `notifications/route.ts`'s `PATCH(req)` — Next.js route handlers require the parameter even when unused, left as-is), `npm test` (47/47 passing, 5 files). Did not push a branch to actually trigger GitHub Actions — that requires the repo's Actions to be enabled/observed on GitHub, outside local verification.
+
 ### 2026-07-26 — Admin-editable reminder settings, replacing hardcoded thresholds (3f)
 **What:** New `ReminderSetting` model (`reminder_settings` table, unique `type`) — one row per notification type (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`), each with `isActive`, `daysBefore` (only meaningful for `due_soon`), `recipientRoles` (JSON array of `Role`), `extraEmails`, `emailEnabled`, `inAppEnabled`, and a server-assigned `updatedById`. New `GET /api/admin/reminders` + `PATCH /api/admin/reminders/[type]` (`ADMIN`-only, writes `audit_logs`). New `/admin/reminders` page — one card per type with an active toggle, days-before input (`due_soon` only), a role multi-select, a comma-separated extra-emails field, and separate email/in-app switches. Per the plan, deliberately **no** send-time/frequency controls — Vercel Hobby's cron cap means only "once daily" is actually deliverable, and a UI promising more would be a lie.
 
@@ -148,6 +157,22 @@ UI: invoice detail page gets a "Tandai Lunas" card (paid date + amount inputs, d
 ### 2026-07-15 — Dashboard page: Export to Excel link, Open Invoices card
 **What:** `src/app/(dashboard)/page.tsx`: added an "Export to Excel" link (`<a href="/api/dashboard/export" download>`, native browser download, no client-side fetch/blob needed) next to the page header; renamed the 4th KPI card from "Pending Approval"/`pendingApprovalCount` to "Open Invoices"/`openCount`, matching the API field renamed in the Excel-export commit.
 **Why:** Completes the two preceding commits (Excel export, status lifecycle) on the frontend — accidentally left uncommitted when those landed.
+
+### Phase 11 — Production-readiness plan execution: role simplification, payment tracking, Company/Vendor/Reminder features
+| Commit | Date | Message |
+|---|---|---|
+| `cd753a6` | 2026-07-26 | fix: remove duplicate const url declaration blocking build |
+| `5c19eb6` | 2026-07-26 | docs: add production readiness plan |
+| `d0627ec` | 2026-07-26 | refactor: simplify role model from 7 to 4 roles |
+| `d1e46f7` | 2026-07-26 | refactor: replace node-cron with Vercel Cron for reminders |
+| `117302b` | 2026-07-26 | refactor: notification bell polls instead of holding an SSE stream |
+| `d4e6b1c` | 2026-07-26 | refactor: rate limiter uses lazy sweep instead of setInterval |
+| `6c8e47a` | 2026-07-26 | chore: downgrade local dev Postgres image from pgvector to plain |
+| `7764daa` | 2026-07-26 | feat: add payment tracking (PAID status) |
+| `bc92958` | 2026-07-26 | feat: add Company model for vendor bill-to selection (3c/3d) |
+| `7889ba2` | 2026-07-26 | feat: vendor profile self-service editing (3e) |
+| `a067057` | 2026-07-26 | feat: force password change for admin-created accounts (3a) |
+| `3f32262` | 2026-07-26 | feat: admin-editable reminder settings (3f) |
 
 ## Commit Log
 
