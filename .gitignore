@@ -69,6 +69,8 @@ ai-service/.env
 
 # Claude / AI assistant
 .claude/
+.agents/
+skills-lock.json
 AGENTS.md
 memory.md
 CLAUDE.md
