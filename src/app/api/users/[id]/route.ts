@@ -4,7 +4,7 @@ import { requireRole } from '@/lib/auth/helpers'
 import { z } from 'zod'
 
 const patchUserSchema = z.object({
-  role: z.enum(['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']).optional(),
+  role: z.enum(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']).optional(),
   isActive: z.boolean().optional(),
   vendorId: z.string().uuid().optional().nullable(),
 })

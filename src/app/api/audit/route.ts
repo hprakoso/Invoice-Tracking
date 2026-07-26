@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/helpers'
 
 export async function GET(req: NextRequest) {
-  const { error } = await requireRole(['ADMIN', 'MANAGER', 'FINANCE'])
+  const { error } = await requireRole(['ADMIN', 'GA_MANAGER'])
   if (error) return error
 
   const { searchParams } = req.nextUrl

@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR', 'GA_STAFF'])
+  const { error, session } = await requireRole(['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'])
   if (error || !session) return error
 
   const body = await req.json()

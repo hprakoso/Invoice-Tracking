@@ -50,7 +50,7 @@ export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),
     email: z.string().email(),
-    role: z.enum(['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
+    role: z.enum(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
     vendorId: z.string().uuid().optional().nullable(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
   })

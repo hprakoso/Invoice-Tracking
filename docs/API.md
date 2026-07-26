@@ -18,7 +18,7 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 | `items[]` | `invoice_items.*` where `invoice_id = invoices.id`, ordered by `sort_order` |
 
 ### `POST /api/invoices`
-Auth: `FINANCE`, `ADMIN`, `VENDOR`, `GA_STAFF`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`.
 
 Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
 
@@ -35,11 +35,8 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 | `VENDOR` (own invoice only) | `sendDate` | any status |
 | | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `status→SUBMITTED` | while `status = REVISION` (fixing and resubmitting) |
 | | + same core fields (no `status`) | while `status = SUBMITTED` **and** this VENDOR created the invoice — finishes the post-OCR review step from the upload wizard |
-| `GA_STAFF` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`) | always |
-| | + core fields above | while `status ∈ {SUBMITTED, REVISION}` **and** this GA_STAFF created the invoice |
-| `FINANCE` | `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `ocrConfidence` | any status |
-| | + `status` (`SUBMITTED→*` only, not the `REVISION` resubmit direction) | while `status = SUBMITTED` |
-| `GA_MANAGER`, `VIEWER` | none (403) | — |
+| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (both `SUBMITTED→*` and `REVISION→SUBMITTED`) | always |
+| | + core fields above | while `status ∈ {SUBMITTED, REVISION}` **and** this GA_STAFF/GA_MANAGER created the invoice |
 | `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
 
 Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). The one exception `VALID_TRANSITIONS` itself doesn't encode: `REVISION → SUBMITTED` (resubmit) is further restricted to `VENDOR`/`ADMIN` only — `GA_STAFF` can request every other transition but not this one, since fixing a revision is the vendor's responsibility. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
@@ -50,7 +47,7 @@ Writes: `invoices` row (partial update, only the filtered/allowed fields). `audi
 Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'CANCELLED'` (no row is actually deleted). Writes `audit_logs` (`action: 'invoice.cancelled'`).
 
 ### `POST /api/invoices/[id]/upload`
-Auth: `FINANCE`, `ADMIN`, `VENDOR`, `GA_STAFF` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
 
 Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched — stays `SUBMITTED`), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
 
@@ -98,7 +95,7 @@ Auth: any authenticated user, same `VENDOR` scoping as `GET /api/dashboard`. **N
 ## Audit
 
 ### `GET /api/audit`
-Auth: `ADMIN`, `MANAGER`, `FINANCE`. Paginated (`page`, fixed `limit=20`), filterable by `entityType`, `userId`.
+Auth: `ADMIN`, `GA_MANAGER`. Paginated (`page`, fixed `limit=20`), filterable by `entityType`, `userId`.
 
 | Response field | Source |
 |---|---|
@@ -123,12 +120,12 @@ Auth: any authenticated user. Polls `COUNT(notifications) WHERE user_id = sessio
 ## Chat
 
 ### `POST /api/chat`
-Auth: any authenticated user **except `VENDOR`**, rate-limited **10 requests/min/user**. Proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. On AI-service failure or timeout, returns a canned Indonesian fallback message with HTTP 200 (not an error status — see [Known Limitations](./ARCHITECTURE.md#known-architectural-limitations-demo-mvp)). `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
+Auth: `ADMIN`, `GA_MANAGER` only (narrowed from "all but VENDOR" — chat is being rebuilt onto a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2; this doc will be updated again once that lands), rate-limited **10 requests/min/user**. Currently still proxies `{ message, history }` to AI service `POST /chat` with a 30s timeout. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request.
 
 ## Users
 
 ### `GET /api/users`
-Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `FINANCE` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
 
 ### `POST /api/users`
 Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).

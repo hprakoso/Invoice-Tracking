@@ -41,7 +41,7 @@ async function checkDueDates() {
   })
 
   const recipients = await prisma.user.findMany({
-    where: { role: { in: ['FINANCE', 'GA_STAFF'] as any[] }, isActive: true },
+    where: { role: { in: ['GA_STAFF', 'GA_MANAGER'] }, isActive: true },
     select: { id: true },
   })
 

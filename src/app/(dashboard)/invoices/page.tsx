@@ -72,7 +72,7 @@ export default function InvoicesPage() {
     return () => clearTimeout(timer)
   }, [fetchInvoices])
 
-  const canUpload = ['ADMIN', 'FINANCE', 'VENDOR', 'GA_STAFF'].includes(session?.user?.role ?? '')
+  const canUpload = ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'].includes(session?.user?.role ?? '')
 
   return (
     <div className="space-y-4">

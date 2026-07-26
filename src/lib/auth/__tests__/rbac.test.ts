@@ -32,10 +32,10 @@ describe('requireAuth', () => {
   })
 
   it('returns session when authenticated', async () => {
-    mockSession.mockResolvedValue(makeSession('FINANCE'))
+    mockSession.mockResolvedValue(makeSession('GA_STAFF'))
     const { error, session } = await requireAuth()
     expect(error).toBeNull()
-    expect(session?.user.role).toBe('FINANCE')
+    expect(session?.user.role).toBe('GA_STAFF')
   })
 })
 
@@ -46,13 +46,13 @@ describe('requireRole', () => {
 
   it.each([
     ['ADMIN', ['ADMIN'], true],
-    ['GA_STAFF', ['GA_STAFF', 'GA_MANAGER', 'FINANCE'], true],
-    ['GA_MANAGER', ['GA_MANAGER', 'FINANCE'], true],
-    ['FINANCE', ['GA_MANAGER', 'FINANCE'], true],
-    ['VENDOR', ['FINANCE', 'ADMIN', 'VENDOR'], true],
-    ['VENDOR', ['FINANCE', 'ADMIN'], false],
-    ['GA_STAFF', ['GA_MANAGER', 'FINANCE'], false],
-    ['VIEWER', ['GA_MANAGER', 'FINANCE', 'GA_STAFF'], false],
+    ['GA_STAFF', ['GA_STAFF', 'GA_MANAGER'], true],
+    ['GA_MANAGER', ['GA_MANAGER', 'ADMIN'], true],
+    ['GA_MANAGER', ['ADMIN'], false],
+    ['VENDOR', ['ADMIN', 'VENDOR'], true],
+    ['VENDOR', ['ADMIN'], false],
+    ['GA_STAFF', ['GA_MANAGER', 'ADMIN'], false],
+    ['GA_STAFF', ['ADMIN'], false],
   ] as [Role, Role[], boolean][])(
     '%s accessing %s — allowed: %s',
     async (role, allowedRoles, allowed) => {
@@ -77,7 +77,7 @@ describe('VENDOR data isolation logic', () => {
   })
 
   it('non-VENDOR session has null vendorId', async () => {
-    mockSession.mockResolvedValue(makeSession('FINANCE', null))
+    mockSession.mockResolvedValue(makeSession('GA_STAFF', null))
     const { session } = await requireAuth()
     expect(session?.user.vendorId).toBeNull()
   })

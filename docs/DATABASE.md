@@ -31,7 +31,7 @@ Invoice ──1:N──> Notification (optional)
 | id | uuid PK | `default(uuid())` |
 | email | text, unique | login identifier |
 | name | text | |
-| role | enum `Role` | `ADMIN`, `MANAGER` (deprecated, kept for back-compat), `FINANCE`, `VIEWER`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` |
+| role | enum `Role` | `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR`. `MANAGER`/`FINANCE`/`VIEWER` were removed in migration `20260726171012_simplify_roles` (see `docs/PRODUCTION_PLAN.md` §4.9) — `GA_MANAGER` now carries `GA_STAFF`'s operational permissions plus supervisory access (audit log, AI chat) |
 | password_hash | text | bcrypt, cost 12 (migrated from SHA-256, commit `dc87d56`) |
 | is_active | bool, default true | inactive users cannot authenticate |
 | created_at / updated_at | timestamp | |
@@ -61,11 +61,11 @@ Invoice ──1:N──> Notification (optional)
 | status | enum `InvoiceStatus` | `SUBMITTED` (default, set on create) → one of `CANCELLED`, `REJECTED`, `VOID` (terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `PAID` was removed — this app never records actual payment, Finance pays outside the system. |
 | send_date | timestamp, nullable | date the vendor sent the physical hardcopy to the office; set by `VENDOR` (own invoice) or `GA_STAFF`/`ADMIN` |
 | delivered_date | timestamp, nullable | date GA Staff physically received the hardcopy; set by `GA_STAFF`/`ADMIN`; must not be earlier than `send_date` (`validateDeliveryDates()`) |
-| pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
+| pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF`/`GA_MANAGER` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
 | ocr_confidence | float, nullable | overall confidence score written by the OCR route (0–100), sourced from the AI service's `overall_confidence` |
 | file_path / file_type | text, nullable | local disk path under `uploads/invoices/`; never returned raw to VENDOR-role users from other vendors (IDOR check in `/api/invoices/[id]/file`) |
 | notes | text, nullable | |
-| created_by | uuid FK → `users.id` | now settable by `FINANCE`, `ADMIN`, `VENDOR`, or `GA_STAFF` (previously FINANCE/ADMIN/VENDOR only) |
+| created_by | uuid FK → `users.id` | settable by `ADMIN`, `VENDOR`, `GA_STAFF`, or `GA_MANAGER` |
 | created_at / updated_at | timestamp | |
 
 ### `invoice_items`
@@ -99,7 +99,7 @@ Every mutating API route writes one `AuditLog` row per action — see [API.md](.
 | id | uuid PK | |
 | user_id | uuid FK → `users.id` | recipient |
 | invoice_id | uuid FK → `invoices.id`, nullable | |
-| type | text | `due_soon`, `overdue` (sent to `FINANCE`/`GA_STAFF` for `SUBMITTED`/`REVISION` invoices) |
+| type | text | `due_soon`, `overdue` (sent to `GA_STAFF`/`GA_MANAGER` for `SUBMITTED`/`REVISION` invoices) |
 | title / body | text | Indonesian copy, generated server-side |
 | is_read | bool, default false | |
 | created_at / read_at | timestamp | |
@@ -113,7 +113,8 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260608182209_init` | Initial schema — all 7 tables, base `Role` enum (`ADMIN`, `MANAGER`, `FINANCE`, `VIEWER`) |
 | `20260618082131_add_vendor_ga_roles` | `VENDOR`, `GA_STAFF`, `GA_MANAGER` roles; `vendor_id` FK on `users` |
 | `20260715171000_invoice_workflow_overhaul` | Drops `approval_workflows` table and `ApprovalStatus` enum; replaces `InvoiceStatus` enum values entirely (`SUBMITTED`/`CANCELLED`/`REJECTED`/`VOID`/`REVISION`, `PAID` removed); adds `invoices.send_date`, `delivered_date`, `pic_id` |
+| `20260726171012_simplify_roles` | Drops `MANAGER`, `FINANCE`, `VIEWER` from `Role` enum via type-swap (`UPDATE` remaps any existing rows to `GA_STAFF` first, then `CREATE TYPE ... AS ENUM` + `ALTER TABLE ... TYPE` + `DROP TYPE`); down to 4 roles: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` |
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 9 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, and 20 demo invoices distributed across the 5 statuses with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, and 20 demo invoices distributed across the 5 statuses with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.

@@ -24,12 +24,9 @@ The UI is fully responsive — it works on mobile, tablet, and desktop.
 
 | Role | What they can do |
 |------|-----------------|
-| **Finance** | Upload invoices, run OCR, review extracted data, final approval |
-| **GA Manager** | First-level approval, review documents |
-| **GA Staff** | Read-only review of invoices in approval queue |
-| **Manager** | Deprecated role (retained for backward compatibility) |
-| **Admin** | Full access — all pages including audit log |
-| **Viewer** | Read-only access — browse invoices and dashboard |
+| **Admin** | Full access — all pages including audit log, AI chat, user/company/reminder management |
+| **GA Manager** | Same operational permissions as GA Staff (create/upload/status invoices, mark paid), plus audit log and AI chat access |
+| **GA Staff** | Create/upload/status invoices, record hardcopy delivery + PIC, mark invoices paid |
 | **Vendor** | View and upload invoices for their own company only |
 
 **Demo accounts (all password: `demo123`):**
@@ -38,12 +35,10 @@ The UI is fully responsive — it works on mobile, tablet, and desktop.
 |-------|------|
 | `admin@demo.com` | Admin |
 | `gastaff@demo.com` | GA Staff |
+| `gastaff2@demo.com` | GA Staff |
 | `gamanager@demo.com` | GA Manager |
-| `finance@demo.com` | Finance |
 | `vendor1@demo.com` | Vendor (PT Maju Jaya Abadi) |
 | `vendor2@demo.com` | Vendor (CV Teknologi Nusantara) |
-| `viewer@demo.com` | Viewer |
-| `manager@demo.com` | Manager (deprecated) |
 
 ---
 

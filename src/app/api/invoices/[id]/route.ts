@@ -63,13 +63,10 @@ function allowedFields(role: string, currentStatus: string, isOwner: boolean, is
         ? [...CREATE_TIME_FIELDS, 'sendDate', 'status']
         : [...CREATE_TIME_FIELDS, 'sendDate']
     case 'GA_STAFF':
+    case 'GA_MANAGER':
       return isEditor && stillOpen
         ? [...CREATE_TIME_FIELDS, 'deliveredDate', 'picId', 'sendDate', 'status']
         : ['deliveredDate', 'picId', 'sendDate', 'status']
-    case 'FINANCE':
-      return currentStatus === 'REVISION'
-        ? [...CREATE_TIME_FIELDS, 'ocrConfidence']
-        : [...CREATE_TIME_FIELDS, 'ocrConfidence', 'status']
     default:
       return []
   }

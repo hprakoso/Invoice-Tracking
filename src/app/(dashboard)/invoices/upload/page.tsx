@@ -69,6 +69,10 @@ export default function UploadPage() {
   const role = (session?.user as { role?: string })?.role
   const isVendor = role === 'VENDOR'
   const isGaStaff = role === 'GA_STAFF'
+  // GA_MANAGER shares GA_STAFF's PIC-assignment permission but isn't
+  // auto-assigned as PIC on load — that default only fits the person who
+  // actually receives the hardcopy.
+  const canAssignPic = isGaStaff || role === 'GA_MANAGER'
   const vendorId = (session?.user as { vendorId?: string | null })?.vendorId
   const [stage, setStage] = useState<UploadStage>('drop')
   const [file, setFile] = useState<File | null>(null)
@@ -84,7 +88,7 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (isGaStaff) setPicIdValue(session?.user?.id ?? '')
-    if (['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'FINANCE'].includes(role ?? '')) {
+    if (['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(role ?? '')) {
       fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -230,7 +234,7 @@ export default function UploadPage() {
           parseFloat(editableValues['subtotal']?.replace(/[^0-9.]/g, '') ?? '0') || null,
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
         sendDate: sendDateValue || null,
-        picId: isGaStaff ? (picIdValue || null) : undefined,
+        picId: canAssignPic ? (picIdValue || null) : undefined,
       }),
     })
 
@@ -374,7 +378,7 @@ export default function UploadPage() {
                 />
               </div>
             )}
-            {isGaStaff && (
+            {canAssignPic && (
               <div>
                 <label className="block text-xs text-gray-500 mb-1">PIC (GA Staff handling this invoice)</label>
                 <select

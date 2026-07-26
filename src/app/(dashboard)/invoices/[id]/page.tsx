@@ -200,11 +200,11 @@ export default function InvoiceDetailPage() {
   const role = (session?.user as { role?: string } | undefined)?.role
   const sessionVendorId = (session?.user as { vendorId?: string | null } | undefined)?.vendorId
   const isOwner = role === 'VENDOR' && invoice?.vendor?.id === sessionVendorId
-  const canUpdateStatus = ['GA_STAFF', 'FINANCE', 'ADMIN'].includes(role ?? '')
-  // Fixing & resubmitting a revision is the vendor's job — GA_STAFF only
-  // creates/handles intake, they don't correct the vendor's own data.
+  const canUpdateStatus = ['GA_STAFF', 'GA_MANAGER', 'ADMIN'].includes(role ?? '')
+  // Fixing & resubmitting a revision is the vendor's job — GA_STAFF/GA_MANAGER
+  // only create/handle intake, they don't correct the vendor's own data.
   const canResubmit = invoice?.status === 'REVISION' && (role === 'ADMIN' || isOwner)
-  const canEditDelivery = ['GA_STAFF', 'ADMIN'].includes(role ?? '')
+  const canEditDelivery = ['GA_STAFF', 'GA_MANAGER', 'ADMIN'].includes(role ?? '')
   const canEditSendDate = canEditDelivery || (role === 'VENDOR' && isOwner)
   const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []) : []
 

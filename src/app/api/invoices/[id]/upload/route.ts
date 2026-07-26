@@ -7,7 +7,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, session } = await requireRole(['FINANCE', 'ADMIN', 'VENDOR', 'GA_STAFF'])
+  const { error, session } = await requireRole(['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'])
   if (error || !session) return error ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params

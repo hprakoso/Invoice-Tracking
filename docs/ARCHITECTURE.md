@@ -56,18 +56,18 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 
 1. `VENDOR` or `GA_STAFF` creates/uploads an invoice → `status = SUBMITTED` (set at creation, never touched by OCR).
 2. `GA_STAFF` physically receives the hardcopy and forwards it to the Finance team — **outside the app**. In-app, GA_STAFF records `deliveredDate` + becomes/reassigns the `pic` (person in charge) via `PATCH /api/invoices/[id]`, with a hard rule: `deliveredDate` can never predate `sendDate` (`validateDeliveryDates()` in `src/lib/validations.ts`, enforced client- and server-side).
-3. Once the external outcome is known, `GA_STAFF`, `FINANCE`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction).
-4. `REVISION` loops back: the `VENDOR` (owner) or `GA_STAFF` fixes the core fields and resubmits, `status → SUBMITTED`.
+3. Once the external outcome is known, `GA_STAFF`, `GA_MANAGER`, or `ADMIN` updates the invoice's status via the same `PATCH` route to one of: `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (needs correction).
+4. `REVISION` loops back: the `VENDOR` (owner) or `GA_STAFF`/`GA_MANAGER` fixes the core fields and resubmits, `status → SUBMITTED`.
 
 `VALID_TRANSITIONS` (`src/lib/validations.ts`): `SUBMITTED → {CANCELLED, REJECTED, VOID, REVISION}`, `REVISION → {SUBMITTED}`, all others terminal. `ADMIN` bypasses this table for corrections. Every status change writes an `AuditLog` row (`action: 'invoice.status_changed'`, `metadata: { from, to, comment }`).
 
-`GA_MANAGER` is now a deprecated role (same treatment as `MANAGER`) — its only prior function (step-1 approval) no longer exists; it retains only baseline read access.
+**Role model (4 roles):** `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` — `MANAGER`, `FINANCE`, and `VIEWER` were removed (see `docs/PRODUCTION_PLAN.md` §4.9); their responsibilities were redistributed to `GA_STAFF`/`GA_MANAGER`. `GA_MANAGER` is **no longer deprecated** — it now carries the same operational permissions as `GA_STAFF` (create/upload/status invoices, mark invoices paid) plus supervisory-only access to the audit log and AI chat.
 
 ### Chatbot (RAG)
-`POST /api/chat` (rate-limited 10 req/min/user, **blocked for `VENDOR`**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM.
+`POST /api/chat` (rate-limited 10 req/min/user, **`ADMIN`/`GA_MANAGER` only**) proxies to AI service `POST /chat`, which builds a prompt from a **static system context string** (not a live pgvector query — see Known Limitations in root README) plus trimmed conversation history, and calls the configured LLM. Being replaced with a `query_invoices` tool per `docs/PRODUCTION_PLAN.md` §5.2 — this section will be rewritten once that lands.
 
 ### Due-date reminders
-`src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `FINANCE`/`GA_STAFF` users, deduplicated per 24h window.
+`src/lib/services/reminderScheduler.ts`, started once via `node-cron` (`0 * * * *`, plus once 5s after boot). Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within 3 days (`due_soon`) or already past due (`overdue`), and creates `Notification` rows for `GA_STAFF`/`GA_MANAGER` users, deduplicated per 24h window.
 
 ### Dashboard Excel export
 `GET /api/dashboard/export` builds an `.xlsx` workbook on demand with `exceljs`: a "KPI Summary" sheet (same numbers as the Dashboard cards, computed via the shared `getDashboardStats()` helper) and an "Invoices" sheet (full invoice list, unfiltered). Streamed directly in the response, nothing persisted to disk.

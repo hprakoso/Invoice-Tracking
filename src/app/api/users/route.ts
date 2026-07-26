@@ -5,7 +5,7 @@ import { requireRole } from '@/lib/auth/helpers'
 import { createUserSchema, validationErrorResponse } from '@/lib/validations'
 
 export async function GET(req: NextRequest) {
-  const { error, session } = await requireRole(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'FINANCE'])
+  const { error, session } = await requireRole(['ADMIN', 'GA_STAFF', 'GA_MANAGER'])
   if (error || !session) return error
 
   const role = req.nextUrl.searchParams.get('role')

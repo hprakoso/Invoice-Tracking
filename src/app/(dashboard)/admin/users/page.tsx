@@ -15,14 +15,14 @@ interface UserRow {
   isActive: boolean
 }
 
-const ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'VIEWER', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
+const ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', role: 'VIEWER', vendorId: '', password: '' })
+  const [form, setForm] = useState({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
   const [saving, setSaving] = useState(false)
 
   const fetchUsers = () =>
@@ -61,7 +61,7 @@ export default function AdminUsersPage() {
     if (res.ok) {
       toast.success('User created')
       setShowCreate(false)
-      setForm({ name: '', email: '', role: 'VIEWER', vendorId: '', password: '' })
+      setForm({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
       fetchUsers()
     } else {
       const data = await res.json().catch(() => ({}))

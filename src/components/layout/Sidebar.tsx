@@ -7,20 +7,25 @@ import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, FileText, Upload, Users, MessageSquare,
-  Bell, ClipboardList, Menu, X, FileStack, ChevronRight
+  Bell, ClipboardList, Menu, X, FileStack, ChevronRight, Building2, Settings
 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+const ALL_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
+
 const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER', 'VENDOR'], indent: false },
-  { href: '/invoices', label: 'Invoices', icon: FileText, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER', 'VENDOR'], indent: false },
-  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'FINANCE', 'VENDOR', 'GA_STAFF'], indent: true },
-  { href: '/reminders', label: 'Reminders', icon: Bell, roles: ['ADMIN', 'MANAGER', 'GA_MANAGER', 'FINANCE'], indent: false },
-  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'MANAGER', 'GA_STAFF', 'GA_MANAGER', 'FINANCE', 'VIEWER'], indent: false },
-  { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'GA_MANAGER', 'FINANCE'], indent: false },
+  { href: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ALL_ROLES, indent: false },
+  { href: '/invoices', label: 'Invoices', icon: FileText, roles: ALL_ROLES, indent: false },
+  { href: '/invoices/upload', label: 'Upload Invoice', icon: Upload, roles: ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'], indent: true },
+  // Notification feed is filtered server-side by userId — every role sees only their own.
+  { href: '/reminders', label: 'Reminders', icon: Bell, roles: ALL_ROLES, indent: false },
+  { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
+  { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
   { href: '/admin/users', label: 'User Management', icon: Users, roles: ['ADMIN'], indent: false },
+  { href: '/admin/companies', label: 'Companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF', 'GA_MANAGER'], indent: false },
+  { href: '/admin/reminders', label: 'Reminder Settings', icon: Settings, roles: ['ADMIN'], indent: false },
 ]
 
 function NavItem({ href, label, icon: Icon, active, indent }: { href: string; label: string; icon: React.ElementType; active: boolean; indent: boolean }) {
@@ -46,10 +51,14 @@ function NavItem({ href, label, icon: Icon, active, indent }: { href: string; la
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
-  const { data: session } = useSession()
-  const role = (session?.user as { role?: string })?.role ?? 'VIEWER'
+  const { data: session, status } = useSession()
+  const role = (session?.user as { role?: string })?.role
 
-  const visibleItems = NAV_ITEMS.filter(item => item.roles.includes(role))
+  // Don't fall back to a role while the session is still loading — that
+  // would render nav items the user may not actually be permitted to see.
+  const visibleItems = status === 'authenticated' && role
+    ? NAV_ITEMS.filter(item => item.roles.includes(role))
+    : []
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900">

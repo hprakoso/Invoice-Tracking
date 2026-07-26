@@ -10,7 +10,6 @@ const DEMO_ACCOUNTS = [
   { email: 'vendor2@demo.com',   role: 'Vendor 2',   color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
   { email: 'gastaff@demo.com',   role: 'GA Staff',   color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' },
   { email: 'gamanager@demo.com', role: 'GA Manager', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' },
-  { email: 'finance@demo.com',   role: 'Finance',    color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
   { email: 'admin@demo.com',     role: 'Admin',      color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
 ]
 

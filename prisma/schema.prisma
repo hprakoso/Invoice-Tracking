@@ -8,9 +8,6 @@ datasource db {
 
 enum Role {
   ADMIN
-  MANAGER
-  FINANCE
-  VIEWER
   GA_STAFF
   GA_MANAGER
   VENDOR

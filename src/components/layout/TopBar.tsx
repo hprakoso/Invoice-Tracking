@@ -52,15 +52,12 @@ export function TopBar() {
 
   const roleColors: Record<string, string> = {
     ADMIN:      'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-    MANAGER:    'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-    FINANCE:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
     GA_STAFF:   'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
     GA_MANAGER: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
     VENDOR:     'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
-    VIEWER:     'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   }
 
-  const role = (session?.user as { role?: string })?.role ?? 'VIEWER'
+  const role = (session?.user as { role?: string })?.role
   const pathname = usePathname()
   const { theme, toggle, mounted } = useTheme()
   const pageTitle = Object.entries(PAGE_TITLES)
@@ -127,7 +124,7 @@ export function TopBar() {
 
       {/* User */}
       <div className="flex items-center gap-2">
-        <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${roleColors[role]}`}>
+        <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${role ? roleColors[role] : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
           <User className="h-3 w-3" />
           <span className="hidden sm:inline">{session?.user?.name?.split(' ')[0]}</span>
           <span className="sm:hidden">{role}</span>

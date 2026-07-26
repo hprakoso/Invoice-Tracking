@@ -43,30 +43,6 @@ async function main() {
     }),
     prisma.user.create({
       data: {
-        email: 'manager@demo.com',
-        name: 'Siti Rahayu',
-        role: Role.MANAGER,
-        passwordHash: demoHash,
-      },
-    }),
-    prisma.user.create({
-      data: {
-        email: 'finance@demo.com',
-        name: 'Agus Wijaya',
-        role: Role.FINANCE,
-        passwordHash: demoHash,
-      },
-    }),
-    prisma.user.create({
-      data: {
-        email: 'viewer@demo.com',
-        name: 'Dewi Lestari',
-        role: Role.VIEWER,
-        passwordHash: demoHash,
-      },
-    }),
-    prisma.user.create({
-      data: {
         email: 'gastaff@demo.com',
         name: 'Rina Kusuma',
         role: Role.GA_STAFF,
@@ -91,10 +67,8 @@ async function main() {
     }),
   ])
 
-  const [admin, manager, finance, viewer, gaStaff, gaManager, gaStaff2] = users
+  const [admin, gaStaff, gaManager, gaStaff2] = users
   void admin
-  void viewer
-  void gaManager
   console.log('Users created')
 
   // Create vendors
@@ -191,14 +165,14 @@ async function main() {
 
   // Create 20 invoices across the 5 statuses. sendDate = vendor sent hardcopy,
   // deliveredDate/pic = GA Staff who received it (null on a few SUBMITTED rows
-  // to demo "not yet received"). createdBy varies across VENDOR/GA_STAFF/FINANCE.
+  // to demo "not yet received"). createdBy varies across VENDOR/GA_STAFF/GA_MANAGER.
   const invoiceData = [
     // SUBMITTED (10), mix of on-time / due-soon / overdue for the reminder scheduler
     { vendor: vendors[0], num: 'INV-2024-001', status: InvoiceStatus.SUBMITTED, total: 45000000, tax: 4500000, created: daysAgo(10), due: daysFromNow(20), confidence: 94, creator: 'vendor', pic: gaStaff, sent: daysAgo(11), delivered: daysAgo(9) },
     { vendor: vendors[1], num: 'INV-2024-002', status: InvoiceStatus.SUBMITTED, total: 120000000, tax: 12000000, created: daysAgo(8), due: daysFromNow(22), confidence: 88, creator: 'vendor', pic: gaStaff2, sent: daysAgo(9), delivered: daysAgo(7) },
     { vendor: vendors[2], num: 'INV-2024-003', status: InvoiceStatus.SUBMITTED, total: 28500000, tax: 2850000, created: daysAgo(6), due: daysFromNow(24), confidence: 91, creator: 'gastaff', pic: gaStaff, sent: daysAgo(6), delivered: daysAgo(6) },
     { vendor: vendors[3], num: 'INV-2024-004', status: InvoiceStatus.SUBMITTED, total: 75000000, tax: 7500000, created: daysAgo(4), due: daysFromNow(2), confidence: 96, creator: 'vendor', pic: null, sent: daysAgo(4), delivered: null },
-    { vendor: vendors[4], num: 'INV-2024-005', status: InvoiceStatus.SUBMITTED, total: 55000000, tax: 5500000, created: daysAgo(3), due: daysFromNow(1), confidence: 89, creator: 'finance', pic: gaStaff2, sent: daysAgo(3), delivered: daysAgo(2) },
+    { vendor: vendors[4], num: 'INV-2024-005', status: InvoiceStatus.SUBMITTED, total: 55000000, tax: 5500000, created: daysAgo(3), due: daysFromNow(1), confidence: 89, creator: 'gamanager', pic: gaStaff2, sent: daysAgo(3), delivered: daysAgo(2) },
     { vendor: vendors[5], num: 'INV-2024-006', status: InvoiceStatus.SUBMITTED, total: 33000000, tax: 3300000, created: daysAgo(2), due: daysFromNow(10), confidence: 92, creator: 'vendor', pic: null, sent: daysAgo(2), delivered: null },
     { vendor: vendors[0], num: 'INV-2024-007', status: InvoiceStatus.SUBMITTED, total: 88000000, tax: 8800000, created: daysAgo(45), due: daysAgo(15), confidence: 87, creator: 'vendor', pic: gaStaff, sent: daysAgo(45), delivered: daysAgo(44) },
     { vendor: vendors[1], num: 'INV-2024-008', status: InvoiceStatus.SUBMITTED, total: 57000000, tax: 5700000, created: daysAgo(40), due: daysAgo(10), confidence: 93, creator: 'gastaff', pic: gaStaff, sent: daysAgo(40), delivered: daysAgo(40) },
@@ -216,13 +190,13 @@ async function main() {
     { vendor: vendors[4], num: 'INV-2024-017', status: InvoiceStatus.CANCELLED, total: 25000000, tax: 2500000, created: daysAgo(30), due: daysAgo(2), confidence: 88, creator: 'vendor', pic: gaStaff, sent: daysAgo(30), delivered: daysAgo(29) },
     { vendor: vendors[5], num: 'INV-2024-018', status: InvoiceStatus.CANCELLED, total: 33500000, tax: 3350000, created: daysAgo(22), due: daysFromNow(8), confidence: 80, creator: 'vendor', pic: gaStaff2, sent: daysAgo(22), delivered: daysAgo(21) },
     // VOID (2)
-    { vendor: vendors[0], num: 'INV-2024-019', status: InvoiceStatus.VOID, total: 145000000, tax: 14500000, created: daysAgo(50), due: daysAgo(20), confidence: 85, creator: 'finance', pic: gaStaff, sent: daysAgo(50), delivered: daysAgo(49) },
+    { vendor: vendors[0], num: 'INV-2024-019', status: InvoiceStatus.VOID, total: 145000000, tax: 14500000, created: daysAgo(50), due: daysAgo(20), confidence: 85, creator: 'gamanager', pic: gaStaff, sent: daysAgo(50), delivered: daysAgo(49) },
     { vendor: vendors[1], num: 'INV-2024-020', status: InvoiceStatus.VOID, total: 130000000, tax: 13000000, created: daysAgo(38), due: daysAgo(8), confidence: 94, creator: 'vendor', pic: gaStaff2, sent: daysAgo(38), delivered: daysAgo(37) },
   ]
 
   const invoices = []
   for (const d of invoiceData) {
-    const creator = d.creator === 'gastaff' ? gaStaff : finance
+    const creator = d.creator === 'gastaff' ? gaStaff : gaManager
     const inv = await prisma.invoice.create({
       data: {
         vendorId: d.vendor.id,
@@ -267,7 +241,7 @@ async function main() {
   for (const inv of invoices.slice(0, 10)) {
     await prisma.auditLog.create({
       data: {
-        userId: finance.id,
+        userId: gaManager.id,
         action: 'invoice.created',
         entityType: 'invoice',
         entityId: inv.id,
@@ -278,7 +252,7 @@ async function main() {
   }
   console.log('Audit logs created')
 
-  // Create due-soon and overdue notifications for Finance + GA Staff
+  // Create due-soon and overdue notifications for GA Staff + GA Manager
   const overdueInvoices = invoices.filter((inv) =>
     ['INV-2024-007', 'INV-2024-008', 'INV-2024-009'].includes(inv.invoiceNumber),
   )
@@ -287,7 +261,7 @@ async function main() {
   )
 
   for (const inv of overdueInvoices) {
-    for (const userId of [finance.id, gaStaff.id]) {
+    for (const userId of [gaManager.id, gaStaff.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -301,7 +275,7 @@ async function main() {
   }
 
   for (const inv of dueSoonInvoices) {
-    for (const userId of [finance.id, gaStaff.id]) {
+    for (const userId of [gaManager.id, gaStaff.id]) {
       await prisma.notification.create({
         data: {
           userId,
@@ -319,12 +293,9 @@ async function main() {
   console.log(`
 Demo Accounts:
   admin@demo.com      / demo123  (Admin)
-  manager@demo.com    / demo123  (Manager - deprecated)
-  finance@demo.com    / demo123  (Finance - records final outcome)
-  viewer@demo.com     / demo123  (Viewer)
   gastaff@demo.com    / demo123  (GA Staff - receives hardcopies, PIC)
   gastaff2@demo.com   / demo123  (GA Staff - receives hardcopies, PIC)
-  gamanager@demo.com  / demo123  (GA Manager - deprecated)
+  gamanager@demo.com  / demo123  (GA Manager - supervisory: chat, audit log, tandai lunas)
   vendor1@demo.com    / demo123  (Vendor: PT Maju Jaya Abadi)
   vendor2@demo.com    / demo123  (Vendor: CV Teknologi Nusantara)
   `)

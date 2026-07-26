@@ -77,14 +77,12 @@ All demo accounts use password `demo123` (bcrypt-hashed, cost 12).
 
 | Email | Role | Notes |
 |---|---|---|
-| `admin@demo.com` | ADMIN | Full access, including audit log |
-| `gastaff@demo.com` | GA_STAFF | Read-only review of the approval queue |
-| `gamanager@demo.com` | GA_MANAGER | Step-1 approval |
-| `finance@demo.com` | FINANCE | Upload, OCR, review, step-2 (final) approval |
+| `admin@demo.com` | ADMIN | Full access, including audit log, chat, and role/company/reminder management |
+| `gastaff@demo.com` | GA_STAFF | Create/upload/status invoices, record delivery + PIC, mark paid |
+| `gastaff2@demo.com` | GA_STAFF | Second GA Staff account, for PIC-reassignment demos |
+| `gamanager@demo.com` | GA_MANAGER | Same operational permissions as GA_STAFF, plus audit log and AI chat access |
 | `vendor1@demo.com` | VENDOR | PT Maju Jaya Abadi — sees only own invoices |
 | `vendor2@demo.com` | VENDOR | CV Teknologi Nusantara — sees only own invoices |
-| `viewer@demo.com` | VIEWER | Read-only |
-| `manager@demo.com` | MANAGER | Deprecated role, retained for backward compatibility |
 
 ## Commands reference
 
