@@ -18,14 +18,14 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 | `items[]` | `invoice_items.*` where `invoice_id = invoices.id`, ordered by `sort_order` |
 
 ### `POST /api/invoices`
-Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is optional here — the upload wizard creates a placeholder-data draft first and collects `companyId` in its review step via `PATCH`, same pattern as `sendDate`/`picId`.
 
 Writes: `invoices` row (`status` = `'SUBMITTED'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -73,6 +73,22 @@ Auth: any authenticated user; `VENDOR` 403 if not their invoice. Returns 503 whe
 ### `GET /api/vendors`
 Auth: any authenticated user. Returns `vendors.{id,name,npwp,contactEmail,bankName}` where `is_active = true`, ordered by `name`.
 
+## Companies
+
+The invoice-receiving entity ("bill-to") a vendor submits against — distinct from `Vendor` (the sender). See `docs/PRODUCTION_PLAN.md` §6.3.
+
+### `GET /api/companies`
+Auth: any authenticated user (needed by the vendor upload wizard's company dropdown, not just admin pages). Returns `companies.*` where `is_active = true`, ordered by `name`. `?includeInactive=true` returns all rows regardless of `is_active` (used by the admin management page).
+
+### `POST /api/companies`
+Auth: `ADMIN`, `GA_STAFF` only. Body validated by `createCompanySchema`. Writes: `companies` row, `audit_logs` (`action: 'company.created'`).
+
+### `PATCH /api/companies/[id]`
+Auth: `ADMIN`, `GA_STAFF` only. Body validated by `updateCompanySchema` (partial). Writes: `companies` row (partial update), `audit_logs` (`action: 'company.updated'`, `metadata: { fields }`).
+
+### `DELETE /api/companies/[id]`
+Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` (no row is actually deleted — invoices already pointing at it keep a valid FK). Writes `audit_logs` (`action: 'company.deactivated'`).
+
 ## Dashboard
 
 ### `GET /api/dashboard`
@@ -92,7 +108,7 @@ Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.v
 Auth: any authenticated user, same `VENDOR` scoping as `GET /api/dashboard`. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
 - Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/**Paid Date/Paid Amount**/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `createdBy.name` + `pic.name`.
+- Sheet "Invoices": one row per invoice (unfiltered — the Dashboard page has no filter UI), columns Invoice Number/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 

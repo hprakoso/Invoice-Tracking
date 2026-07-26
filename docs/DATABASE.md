@@ -12,11 +12,14 @@ PostgreSQL 16. Schema managed by Prisma (`prisma/schema.prisma`), migrations in 
 User ──(vendorId, optional)──> Vendor
 User ──1:N──> Invoice (createdBy)
 User ──1:N──> Invoice (pic, optional — GA Staff who received the hardcopy)
+User ──1:N──> Invoice (paidBy, optional — who marked it PAID)
 User ──1:N──> AuditLog (optional)
 User ──1:N──> Notification
 
 Vendor ──1:N──> Invoice
 Vendor ──1:N──> User (vendor-portal users)
+
+Company ──1:N──> Invoice (optional — the bill-to entity, distinct from Vendor)
 
 Invoice ──1:N──> InvoiceItem (cascade delete)
 Invoice ──1:N──> AuditLog (optional)
@@ -48,11 +51,25 @@ Invoice ──1:N──> Notification (optional)
 | is_active | bool, default true | |
 | created_at | timestamp | |
 
+### `companies`
+The invoice-receiving entity ("bill-to") a vendor submits against — distinct from `vendors` (the sender). A vendor may bill several companies; a company may be billed by several vendors.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| name | text | e.g. "PT Sumber Makmur" |
+| npwp | text, nullable | Indonesian tax ID |
+| address / city | text, nullable | |
+| email | text, nullable | billing contact address |
+| is_active | bool, default true | soft-delete flag — `DELETE /api/companies/[id]` sets this rather than removing the row |
+| created_at / updated_at | timestamp | |
+
 ### `invoices`
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| vendor_id | uuid FK → `vendors.id` | |
+| vendor_id | uuid FK → `vendors.id` | the sender |
+| company_id | uuid FK → `companies.id`, nullable | the bill-to entity; nullable to avoid backfill churn on existing rows (see `docs/PRODUCTION_PLAN.md` §6.3). Required in practice for `VENDOR`-submitted invoices (enforced client-side in the upload wizard, not a DB `NOT NULL`) |
 | invoice_number | text | |
 | invoice_date / due_date | timestamp, nullable | |
 | currency | text, default `IDR` | |
@@ -118,7 +135,8 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260715171000_invoice_workflow_overhaul` | Drops `approval_workflows` table and `ApprovalStatus` enum; replaces `InvoiceStatus` enum values entirely (`SUBMITTED`/`CANCELLED`/`REJECTED`/`VOID`/`REVISION`, `PAID` removed); adds `invoices.send_date`, `delivered_date`, `pic_id` |
 | `20260726171012_simplify_roles` | Drops `MANAGER`, `FINANCE`, `VIEWER` from `Role` enum via type-swap (`UPDATE` remaps any existing rows to `GA_STAFF` first, then `CREATE TYPE ... AS ENUM` + `ALTER TABLE ... TYPE` + `DROP TYPE`); down to 4 roles: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, `VENDOR` |
 | `20260726173942_add_payment_tracking` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'PAID'` (additive — no type-swap needed, unlike removing enum values); adds `invoices.paid_date`/`paid_amount`/`paid_by` (FK → `users.id`) |
+| `20260726175202_add_companies` | New `companies` table (8th table); adds `invoices.company_id` (nullable FK → `companies.id`) |
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, and 20 demo invoices distributed across the 5 statuses with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts)) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, 2 demo companies (cycled across all 20 invoices by index — see the `company` field on `docs/API.md`'s invoice responses), and 20 demo invoices distributed across the 6 statuses (2 pre-seeded as `PAID`) with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.

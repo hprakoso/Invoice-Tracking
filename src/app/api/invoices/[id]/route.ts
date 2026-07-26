@@ -18,6 +18,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: { id },
     include: {
       vendor: true,
+      company: true,
       createdBy: { select: { id: true, name: true, role: true } },
       items: { orderBy: { sortOrder: 'asc' } },
       pic: { select: { id: true, name: true, role: true } },
@@ -48,6 +49,7 @@ const CREATE_TIME_FIELDS = [
   'taxAmount',
   'totalAmount',
   'notes',
+  'companyId',
 ] as const
 
 // Fields each role may write via PATCH, given the invoice's current status.
@@ -140,6 +142,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       taxAmount: filtered.taxAmount,
       totalAmount: filtered.totalAmount,
       notes: filtered.notes,
+      companyId: filtered.companyId,
       status: filtered.status,
       ocrConfidence: filtered.ocrConfidence,
       sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,

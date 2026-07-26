@@ -61,9 +61,28 @@ model Vendor {
   @@map("vendors")
 }
 
+// The receiving entity ("bill-to") an invoice is submitted against — distinct
+// from Vendor, which is the sender. A vendor may bill several companies.
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  npwp      String?
+  address   String?
+  city      String?
+  email     String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  invoices  Invoice[]
+
+  @@map("companies")
+}
+
 model Invoice {
   id             String        @id @default(uuid())
   vendorId       String        @map("vendor_id")
+  companyId      String?       @map("company_id")
   invoiceNumber  String        @map("invoice_number")
   invoiceDate    DateTime?     @map("invoice_date")
   dueDate        DateTime?     @map("due_date")
@@ -88,6 +107,7 @@ model Invoice {
   paidById       String?       @map("paid_by")
 
   vendor         Vendor         @relation(fields: [vendorId], references: [id])
+  company        Company?       @relation(fields: [companyId], references: [id])
   createdBy      User           @relation("CreatedBy", fields: [createdById], references: [id])
   pic            User?          @relation("Pic", fields: [picId], references: [id])
   paidBy         User?          @relation("PaidBy", fields: [paidById], references: [id])

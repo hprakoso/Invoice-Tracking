@@ -14,6 +14,7 @@ const itemSchema = z.object({
 
 export const createInvoiceSchema = z.object({
   vendorId: z.string().uuid('Invalid vendor ID'),
+  companyId: z.string().uuid('Invalid company ID').optional().nullable(),
   invoiceNumber: z.string().min(1, 'Invoice number required').max(100),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
@@ -45,7 +46,25 @@ export const updateInvoiceSchema = z.object({
   picId: z.string().uuid().optional().nullable(),
   paidDate: isoDateString.optional().nullable(),
   paidAmount: z.number().nonnegative().optional().nullable(),
+  companyId: z.string().uuid().optional().nullable(),
   comment: z.string().max(2000).optional(),
+})
+
+export const createCompanySchema = z.object({
+  name: z.string().min(1, 'Company name required').max(200),
+  npwp: z.string().max(50).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  email: z.string().email().optional().nullable(),
+})
+
+export const updateCompanySchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  npwp: z.string().max(50).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  email: z.string().email().optional().nullable(),
+  isActive: z.boolean().optional(),
 })
 
 export const createUserSchema = z

@@ -49,6 +49,7 @@ interface Invoice {
   paidDate: string | null
   paidAmount: string | null
   vendor: { id: string; name: string; npwp?: string | null }
+  company: { id: string; name: string } | null
   createdBy: { id: string; name: string }
   pic: { id: string; name: string } | null
   paidBy: { id: string; name: string } | null
@@ -344,6 +345,7 @@ export default function InvoiceDetailPage() {
               <div>
                 <p className="text-sm font-semibold text-gray-900">{invoice.vendor?.name}</p>
                 {invoice.vendor?.npwp && <p className="text-xs text-gray-500">NPWP: {invoice.vendor.npwp}</p>}
+                <p className="text-xs text-gray-500 mt-0.5">Bill to: {invoice.company?.name ?? '—'}</p>
               </div>
             </div>
             <Separator />

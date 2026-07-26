@@ -82,6 +82,7 @@ src/
 │   │   ├── page.tsx                 # Dashboard (KPIs, charts, Excel export link)
 │   │   ├── invoices/                # List, upload, [id] detail (status update, delivery/PIC)
 │   │   ├── admin/users/              # Admin-only user management (create, edit role)
+│   │   ├── admin/companies/          # ADMIN/GA_STAFF-only bill-to company management
 │   │   ├── chat/                    # AI chatbot
 │   │   ├── reminders/                # Notification feed
 │   │   └── audit/                   # Audit log
@@ -100,7 +101,7 @@ src/
 └── middleware.ts                    # NextAuth route protection (Edge runtime); excludes /api/cron/**
 
 prisma/
-├── schema.prisma                    # 7 models — see docs/DATABASE.md
+├── schema.prisma                    # 8 models — see docs/DATABASE.md
 ├── migrations/
 └── seed.ts                          # Demo data (guarded against NODE_ENV=production)
 

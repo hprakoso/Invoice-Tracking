@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
   const invoice = await prisma.invoice.create({
     data: {
       vendorId: effectiveVendorId as string,
+      companyId: data.companyId ?? null,
       invoiceNumber: data.invoiceNumber,
       invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,

@@ -24,7 +24,7 @@ const NAV_ITEMS = [
   { href: '/chat', label: 'AI Assistant', icon: MessageSquare, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
   { href: '/audit', label: 'Audit Log', icon: ClipboardList, roles: ['ADMIN', 'GA_MANAGER'], indent: false },
   { href: '/admin/users', label: 'User Management', icon: Users, roles: ['ADMIN'], indent: false },
-  { href: '/admin/companies', label: 'Companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF', 'GA_MANAGER'], indent: false },
+  { href: '/admin/companies', label: 'Companies', icon: Building2, roles: ['ADMIN', 'GA_STAFF'], indent: false },
   { href: '/admin/reminders', label: 'Reminder Settings', icon: Settings, roles: ['ADMIN'], indent: false },
 ]
 

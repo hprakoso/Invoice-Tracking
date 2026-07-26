@@ -27,6 +27,7 @@ async function main() {
   await prisma.invoiceItem.deleteMany()
   await prisma.invoice.deleteMany()
   await prisma.vendor.deleteMany()
+  await prisma.company.deleteMany()
   await prisma.user.deleteMany()
 
   const demoHash = await hashPassword('demo123')
@@ -159,6 +160,29 @@ async function main() {
   ])
   console.log('Vendor users created')
 
+  // Create companies (bill-to entities — invoice recipients, distinct from vendors)
+  const companies = await Promise.all([
+    prisma.company.create({
+      data: {
+        name: 'PT Sumber Makmur',
+        npwp: '11.111.111.1-111.000',
+        address: 'Jl. Sudirman No. 1',
+        city: 'Jakarta',
+        email: 'penagihan@sumbermakmur.co.id',
+      },
+    }),
+    prisma.company.create({
+      data: {
+        name: 'PT Cahaya Abadi Sentosa',
+        npwp: '22.222.222.2-222.000',
+        address: 'Jl. Gatot Subroto No. 45',
+        city: 'Jakarta',
+        email: 'ap@cahayaabadi.co.id',
+      },
+    }),
+  ])
+  console.log('Companies created')
+
   const now = new Date()
   const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000)
   const daysFromNow = (d: number) => new Date(now.getTime() + d * 24 * 60 * 60 * 1000)
@@ -195,11 +219,12 @@ async function main() {
   ]
 
   const invoices = []
-  for (const d of invoiceData) {
+  for (const [i, d] of invoiceData.entries()) {
     const creator = d.creator === 'gastaff' ? gaStaff : gaManager
     const inv = await prisma.invoice.create({
       data: {
         vendorId: d.vendor.id,
+        companyId: companies[i % companies.length].id,
         invoiceNumber: d.num,
         invoiceDate: d.created,
         dueDate: d.due,

@@ -17,7 +17,7 @@ export async function GET() {
     prisma.invoice.findMany({
       where: vendorFilter,
       orderBy: { createdAt: 'desc' },
-      include: { vendor: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
+      include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
     }),
   ])
 
@@ -41,6 +41,7 @@ export async function GET() {
   sheet.columns = [
     { header: 'Invoice Number', key: 'invoiceNumber', width: 20 },
     { header: 'Vendor', key: 'vendor', width: 24 },
+    { header: 'Company (Bill To)', key: 'company', width: 24 },
     { header: 'Invoice Date', key: 'invoiceDate', width: 14 },
     { header: 'Due Date', key: 'dueDate', width: 14 },
     { header: 'Send Date', key: 'sendDate', width: 14 },
@@ -61,6 +62,7 @@ export async function GET() {
     sheet.addRow({
       invoiceNumber: inv.invoiceNumber,
       vendor: inv.vendor.name,
+      company: inv.company?.name ?? '',
       invoiceDate: inv.invoiceDate?.toISOString().slice(0, 10) ?? '',
       dueDate: inv.dueDate?.toISOString().slice(0, 10) ?? '',
       sendDate: inv.sendDate?.toISOString().slice(0, 10) ?? '',
