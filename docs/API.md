@@ -114,8 +114,7 @@ Auth: any authenticated user. Marks all of the caller's unread notifications as 
 ### `PATCH /api/notifications/[id]/read`
 Auth: any authenticated user; scoped via `WHERE id = :id AND user_id = session.user.id` (prevents marking another user's notification as read). Sets `is_read=true`, `read_at=now()`.
 
-### `GET /api/notifications/stream` (SSE)
-Auth: any authenticated user. Polls `COUNT(notifications) WHERE user_id = session.user.id AND is_read=false` every 15s, pushes `{ unreadCount }` only when it changes. **Not Stored** as a field — computed on each poll.
+The notification bell's unread badge polls `GET /api/notifications?unread=true` client-side every 60s (`useNotificationStream` hook) and uses the array length as the count — no separate SSE endpoint. A dedicated `GET /api/notifications/stream` (SSE, held-open connection) previously did this server-side, but a long-lived connection doesn't fit a serverless function; removed in favor of client polling.
 
 ## Chat
 

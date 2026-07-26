@@ -2,26 +2,33 @@
 
 import { useEffect, useState } from 'react'
 
+const POLL_INTERVAL_MS = 60_000
+
 export function useNotificationStream(): number {
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    const es = new EventSource('/api/notifications/stream')
+    let cancelled = false
 
-    es.onmessage = (event) => {
+    const poll = async () => {
       try {
-        const data = JSON.parse(event.data)
-        if (typeof data.unreadCount === 'number') {
-          setUnreadCount(data.unreadCount)
+        const res = await fetch('/api/notifications?unread=true')
+        if (!res.ok) return
+        const data: unknown = await res.json()
+        if (!cancelled && Array.isArray(data)) {
+          setUnreadCount(data.length)
         }
-      } catch {}
+      } catch {
+        // Network error — keep the last known count, try again next tick.
+      }
     }
 
-    es.onerror = () => {
-      es.close()
+    poll()
+    const interval = setInterval(poll, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
     }
-
-    return () => es.close()
   }, [])
 
   return unreadCount

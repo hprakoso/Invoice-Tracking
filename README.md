@@ -231,7 +231,7 @@ Browser
 | ORM | Prisma 7 | Type-safe queries, fast schema iteration |
 | AI service | FastAPI + LangChain LCEL | Lightweight, async, provider-agnostic |
 | OCR | Tesseract + PyMuPDF | Open-source, offline, Indonesian support |
-| Realtime | Server-Sent Events (SSE) | Real-time OCR reveal + notification bell |
+| Realtime | Server-Sent Events (SSE) for OCR reveal; client polling (60s) for the notification bell | SSE doesn't fit a held-open serverless function for background polling |
 | Reminders | node-cron (hourly scan) | No external dependencies |
 
 ---
