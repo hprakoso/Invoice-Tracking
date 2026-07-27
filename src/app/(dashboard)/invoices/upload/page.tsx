@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
@@ -138,14 +138,16 @@ export default function UploadPage() {
     setStage('drop')
   }
 
-  const onDrop = useCallback(async (accepted: File[]) => {
+  // Not useCallback: react-dropzone re-subscribes fine on a new callback each
+  // render, and a memoized-with-[] version froze this closure's companyIdValue
+  // at its initial '' forever, so every drop sent companyId: '' regardless of
+  // what the user picked in the select stage.
+  async function onDrop(accepted: File[]) {
     const f = accepted[0]
     if (!f) return
     setFile(f)
-    // eslint-disable-next-line react-hooks/immutability -- runOCR is a hoisted function declaration, safe to call here
     await runOCR(f)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

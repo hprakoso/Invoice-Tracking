@@ -8,6 +8,16 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-07-27 — Fix: vendor upload sent `companyId: ""`, rejected with 400
+
+**What:** `onDrop` in `src/app/(dashboard)/invoices/upload/page.tsx` was wrapped in `useCallback(..., [])`. An empty dependency array freezes the callback's closure at the component's first render forever — react-dropzone kept calling that frozen version on every drop, so it always read `companyIdValue` from its **initial** state (`useState('')`), regardless of what the user selected in the `'select'` stage moments earlier. Every draft-creation `POST /api/invoices` therefore sent `companyId: ""`, which fails `createInvoiceSchema`'s `z.string().uuid().optional().nullable()` (`.optional()` tolerates `undefined`, not an empty string) — 400 `Validation failed: companyId: Invalid company ID` on every vendor upload. `continueFromSelect()`'s own guard against an empty `companyIdValue` never caught this because it read the (correct, live) state directly, not through the stale closure.
+
+Fix: `onDrop` is now a plain function (redefined every render like `runOCR` already was), so it always closes over the current `companyIdValue`/`effectiveVendorId`. `react-dropzone` doesn't require a memoized callback — it happily takes a new one each render. Removed the now-unused `useCallback` import and the two `eslint-disable` comments that were suppressing the (correct) exhaustive-deps warning on this line.
+
+**Why:** Reported by the user testing the deployed Vercel app as VENDOR — every PDF upload failed at the create-draft step.
+
+**Verified:** `npx tsc --noEmit` clean, `npm run lint` 0 errors (1 pre-existing unrelated warning), `npm test` 52/52. Not verified against a live browser session in this pass — no browser tooling available in this environment; traced the stale-closure mechanism by reading the render/closure chain (`onDrop` → `runOCR` → `companyIdValue`) and confirmed the state-init value (`''`) matches the exact string reported in the failing payload. Recommend the user re-run the VENDOR upload flow on the next deploy to confirm.
+
 ### 2026-07-27 — ID/EN language toggle (Stage 5 of 5, upload/UX overhaul)
 **What:** New `src/lib/i18n/{id,en}.ts` — two dictionaries with an identical key shape (grouped by page/section: `common`, `status`, `nav`, `topbar`, `login`, `dashboard`, `invoices`, `invoiceDetail`, `upload`, `vendorProfile`, `changePassword`, `reminders`, `audit`). `Dictionary` type is `typeof id` widened to `string` leaves via a `Widen<T>` mapped type — without that widening, TypeScript infers each Indonesian string as its own literal type and `en.ts`'s different literal values fail to structurally match. New test (`src/lib/i18n/__tests__/dictionaries.test.ts`) asserts `id`/`en` have exactly the same set of key paths and that no value is an empty string — catches a missing translation immediately instead of silently falling through to a key name or `undefined` in the UI.
 
