@@ -427,15 +427,21 @@ Full history of `main` (current branch — `feat/deploy-ready` was fast-forward 
 | `b3c79be` | 2026-07-15 | feat: add Fix & Resubmit form for REVISION invoices |
 | `e82d76a` | 2026-07-16 | fix: restrict revision-resubmit to vendor, hide PIC from vendor view |
 
-### Phase 11 — Upload bugfix (stale closure)
+### Phase 14 — Upload bugfix (stale closure)
+Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" tables above (added directly under Code Changes Made, ahead of the `## Commit Log` heading, by an earlier session — a pre-existing structural quirk in this file, left as-is rather than reorganized as part of an unrelated task).
 | Commit | Date | Message |
 |---|---|---|
 | `04750b3` | 2026-07-27 | fix: stale closure sent empty companyId on vendor invoice upload |
 
-### Phase 12 — Branded email template, status-change vendor notification
+### Phase 15 — Branded email template, status-change vendor notification
 | Commit | Date | Message |
 |---|---|---|
 | `4759ea6` | 2026-07-27 | feat: branded HTML email template + notify vendor on status change |
+
+### Phase 16 — Hide app shell during forced password change; lock chat scope
+| Commit | Date | Message |
+|---|---|---|
+| `de78935` | 2026-07-27 | fix: hide app shell during forced password change; lock chat to invoice scope |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
