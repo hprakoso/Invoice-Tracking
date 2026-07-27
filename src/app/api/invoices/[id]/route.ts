@@ -7,7 +7,7 @@ import {
   validateDeliveryDates,
   validationErrorResponse,
 } from '@/lib/validations'
-import { sendEmail } from '@/lib/services/email'
+import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
 import { notifyInvoiceSubmitted } from '@/app/api/invoices/route'
 
@@ -184,6 +184,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await notifyInvoiceSubmitted(id, invoice.invoiceNumber, invoice.vendor.name)
   }
 
+  // Any GA/Admin-initiated status change other than REVISION (its own richer
+  // notification above) tells the vendor what happened to their invoice.
+  if (
+    filtered.status &&
+    filtered.status !== current.status &&
+    filtered.status !== 'REVISION' &&
+    ['PAID', 'CANCELLED', 'REJECTED', 'VOID'].includes(filtered.status)
+  ) {
+    await notifyStatusChanged(id, invoice.invoiceNumber, current.vendorId, filtered.status)
+  }
+
   return NextResponse.json(invoice)
 }
 
@@ -204,7 +215,12 @@ async function notifyRevisionRequested(invoiceId: string, invoiceNumber: string,
     await sendEmail(
       to,
       `Invoice ${invoiceNumber} perlu direvisi`,
-      `<p>Invoice ${invoiceNumber} perlu diperbaiki. Silakan perbaiki dan ajukan ulang invoice ini.</p>`,
+      renderEmailLayout({
+        heading: `Invoice ${invoiceNumber} perlu direvisi`,
+        bodyHtml: `<p style="margin:0;">Invoice <strong>${invoiceNumber}</strong> perlu diperbaiki. Silakan perbaiki dan ajukan ulang invoice ini.</p>`,
+        ctaText: 'Perbaiki Invoice',
+        ctaPath: `/invoices/${invoiceId}`,
+      }),
     )
   }
 
@@ -217,6 +233,57 @@ async function notifyRevisionRequested(invoiceId: string, invoiceNumber: string,
       type: 'revision_requested',
       title: `Invoice ${invoiceNumber} perlu direvisi`,
       body: `Silakan perbaiki dan ajukan ulang invoice ini.`,
+    })),
+  })
+}
+
+// STATUS_LABELS_ID mirrors the label set every other page in the app already
+// hand-rolls locally (see invoices/[id]/page.tsx) rather than importing
+// src/lib/i18n — that module is written for client components and pulling it
+// into a server route isn't worth it for 4 strings.
+const STATUS_LABELS_ID: Record<string, string> = {
+  PAID: 'Lunas',
+  CANCELLED: 'Dibatalkan',
+  REJECTED: 'Ditolak',
+  VOID: 'Void',
+}
+
+async function notifyStatusChanged(invoiceId: string, invoiceNumber: string, vendorId: string, status: string) {
+  const setting = await prisma.reminderSetting.findUnique({ where: { type: 'status_changed' } })
+  if (!setting?.isActive || !(setting.inAppEnabled || setting.emailEnabled)) return
+
+  const vendorUsers = await prisma.user.findMany({
+    where: { vendorId, role: 'VENDOR', isActive: true },
+    select: { id: true, email: true },
+  })
+  if (vendorUsers.length === 0) return
+
+  const label = STATUS_LABELS_ID[status] ?? status
+  const title = `Invoice ${invoiceNumber}: ${label}`
+
+  if (setting.emailEnabled) {
+    const to = [...vendorUsers.map((u) => u.email), ...extraEmailsOf(setting.extraEmails)]
+    await sendEmail(
+      to,
+      title,
+      renderEmailLayout({
+        heading: title,
+        bodyHtml: `<p style="margin:0;">Status invoice <strong>${invoiceNumber}</strong> telah diubah menjadi <strong>${label}</strong>.</p>`,
+        ctaText: 'Lihat Invoice',
+        ctaPath: `/invoices/${invoiceId}`,
+      }),
+    )
+  }
+
+  if (!setting.inAppEnabled) return
+
+  await prisma.notification.createMany({
+    data: vendorUsers.map((u) => ({
+      userId: u.id,
+      invoiceId,
+      type: 'status_changed',
+      title,
+      body: `Status invoice diubah menjadi ${label}.`,
     })),
   })
 }

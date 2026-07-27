@@ -111,7 +111,7 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 })
 
-export const REMINDER_TYPES = ['due_soon', 'overdue', 'invoice_submitted', 'revision_requested'] as const
+export const REMINDER_TYPES = ['due_soon', 'overdue', 'invoice_submitted', 'revision_requested', 'status_changed'] as const
 const REMINDER_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR'] as const
 
 export const updateReminderSettingSchema = z.object({

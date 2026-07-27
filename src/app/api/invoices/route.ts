@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
-import { sendEmail } from '@/lib/services/email'
+import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
 
 export async function GET(req: NextRequest) {
@@ -140,7 +140,12 @@ export async function notifyInvoiceSubmitted(invoiceId: string, invoiceNumber: s
     await sendEmail(
       to,
       `Invoice baru dari ${vendorName}`,
-      `<p>Invoice ${invoiceNumber} dari ${vendorName} perlu diperiksa.</p>`,
+      renderEmailLayout({
+        heading: `Invoice baru dari ${vendorName}`,
+        bodyHtml: `<p style="margin:0;">Invoice <strong>${invoiceNumber}</strong> dari <strong>${vendorName}</strong> perlu diperiksa.</p>`,
+        ctaText: 'Lihat Invoice',
+        ctaPath: `/invoices/${invoiceId}`,
+      }),
     )
   }
 

@@ -42,6 +42,12 @@ const TYPE_LABELS: Record<string, { title: string; description: string; usesRole
     usesRoles: false,
     usesDays: false,
   },
+  status_changed: {
+    title: 'Perubahan Status Invoice',
+    description: 'Saat GA/Admin mengubah status invoice (Lunas, Dibatalkan, Ditolak, Void) — selalu dikirim ke vendor pemilik invoice',
+    usesRoles: false,
+    usesDays: false,
+  },
 }
 
 const ALL_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']

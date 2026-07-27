@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import type { InvoiceStatus, Role } from '@prisma/client'
-import { sendEmail } from '@/lib/services/email'
+import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 
 const OPEN_STATUSES: InvoiceStatus[] = ['SUBMITTED', 'REVISION']
 
@@ -37,7 +37,7 @@ export async function checkDueDates() {
       await sendEmail(
         to,
         `${dueSoon.length} invoice akan jatuh tempo dalam ${days} hari`,
-        renderInvoiceListEmail(`Invoice berikut akan jatuh tempo dalam ${days} hari:`, dueSoon),
+        renderInvoiceListEmail(`${dueSoon.length} invoice akan jatuh tempo dalam ${days} hari`, dueSoon),
       )
     }
 
@@ -70,7 +70,7 @@ export async function checkDueDates() {
       await sendEmail(
         to,
         `${overdue.length} invoice sudah jatuh tempo`,
-        renderInvoiceListEmail('Invoice berikut sudah melewati jatuh tempo:', overdue),
+        renderInvoiceListEmail(`${overdue.length} invoice sudah melewati jatuh tempo`, overdue),
       )
     }
 
@@ -108,16 +108,32 @@ export function extraEmailsOf(extraEmails: unknown): string[] {
 }
 
 export function renderInvoiceListEmail(
-  intro: string,
+  heading: string,
   invoices: { invoiceNumber: string; dueDate: Date | null; totalAmount: unknown; vendor: { name: string } }[],
 ): string {
   const rows = invoices
     .map(
-      (inv) =>
-        `<li>${inv.invoiceNumber} — ${inv.vendor.name} — jatuh tempo ${inv.dueDate?.toISOString().slice(0, 10) ?? '-'}</li>`,
+      (inv) => `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #e4e4e7;font-size:13px;color:#18181b;">${inv.invoiceNumber}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e4e4e7;font-size:13px;color:#3f3f46;">${inv.vendor.name}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e4e4e7;font-size:13px;color:#3f3f46;">${inv.dueDate?.toISOString().slice(0, 10) ?? '-'}</td>
+      </tr>`,
     )
     .join('')
-  return `<p>${intro}</p><ul>${rows}</ul>`
+  const table = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;border-collapse:collapse;">
+    <tr style="background:#fafafa;">
+      <th align="left" style="padding:8px 12px;font-size:11px;text-transform:uppercase;color:#71717a;">No. Invoice</th>
+      <th align="left" style="padding:8px 12px;font-size:11px;text-transform:uppercase;color:#71717a;">Vendor</th>
+      <th align="left" style="padding:8px 12px;font-size:11px;text-transform:uppercase;color:#71717a;">Jatuh Tempo</th>
+    </tr>
+    ${rows}
+  </table>`
+  return renderEmailLayout({
+    heading,
+    bodyHtml: table,
+    ctaText: 'Lihat Semua Invoice',
+    ctaPath: '/invoices?status=SUBMITTED',
+  })
 }
 
 async function alreadyNotifiedToday(userId: string, invoiceId: string, type: string) {

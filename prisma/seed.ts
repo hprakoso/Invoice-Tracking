@@ -235,6 +235,13 @@ async function main() {
         extraEmails: [],
       },
     }),
+    prisma.reminderSetting.create({
+      data: {
+        type: 'status_changed',
+        recipientRoles: [], // not used — always targets the invoice's own vendor
+        extraEmails: [],
+      },
+    }),
   ])
   console.log('Reminder settings created')
 
