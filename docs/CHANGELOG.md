@@ -403,5 +403,10 @@ Full history of `main` (current branch — `feat/deploy-ready` was fast-forward 
 | `b3c79be` | 2026-07-15 | feat: add Fix & Resubmit form for REVISION invoices |
 | `e82d76a` | 2026-07-16 | fix: restrict revision-resubmit to vendor, hide PIC from vendor view |
 
+### Phase 11 — Upload bugfix (stale closure)
+| Commit | Date | Message |
+|---|---|---|
+| `04750b3` | 2026-07-27 | fix: stale closure sent empty companyId on vendor invoice upload |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
