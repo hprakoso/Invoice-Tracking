@@ -420,5 +420,10 @@ Full history of `main` (current branch — `feat/deploy-ready` was fast-forward 
 |---|---|---|
 | `04750b3` | 2026-07-27 | fix: stale closure sent empty companyId on vendor invoice upload |
 
+### Phase 12 — Branded email template, status-change vendor notification
+| Commit | Date | Message |
+|---|---|---|
+| `4759ea6` | 2026-07-27 | feat: branded HTML email template + notify vendor on status change |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
