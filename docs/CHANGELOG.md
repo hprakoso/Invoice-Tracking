@@ -467,5 +467,10 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 |---|---|---|
 | `de78935` | 2026-07-27 | fix: hide app shell during forced password change; lock chat to invoice scope |
 
+### Phase 17 — Invoice status workflow overhaul (17-value enum)
+| Commit | Date | Message |
+|---|---|---|
+| `60635df` | 2026-09-01 | feat: invoice status workflow overhaul (17-value enum + VALID_TRANSITIONS) |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
