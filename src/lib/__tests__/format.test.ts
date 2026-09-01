@@ -11,19 +11,19 @@ describe('isOverdue', () => {
   })
 
   it('is true when due date passed and status is open', () => {
-    expect(isOverdue(past, 'SUBMITTED')).toBe(true)
-    expect(isOverdue(past, 'REVISION')).toBe(true)
+    expect(isOverdue(past, 'RECEIVED')).toBe(true)
+    expect(isOverdue(past, 'DOC_VERIFICATION')).toBe(true)
+    expect(isOverdue(past, 'TREASURY_PROCESS')).toBe(true)
     expect(isOverdue(past)).toBe(true) // no status = assume open
   })
 
   it('is false when due date is in the future', () => {
-    expect(isOverdue(future, 'SUBMITTED')).toBe(false)
+    expect(isOverdue(future, 'RECEIVED')).toBe(false)
   })
 
-  it.each(['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'DRAFT'])(
-    'is false for terminal status %s even with a past due date',
-    (status) => {
-      expect(isOverdue(past, status)).toBe(false)
-    },
-  )
+  it('is false for settled statuses (PAID, CLOSED, REJECTED) even with a past due date', () => {
+    expect(isOverdue(past, 'PAID')).toBe(false)
+    expect(isOverdue(past, 'CLOSED')).toBe(false)
+    expect(isOverdue(past, 'REJECTED')).toBe(false)
+  })
 })

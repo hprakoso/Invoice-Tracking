@@ -16,6 +16,7 @@ User ──1:N──> Invoice (paidBy, optional — who marked it PAID)
 User ──1:N──> AuditLog (optional)
 User ──1:N──> Notification
 User ──1:N──> ReminderSetting (updatedBy, optional)
+User ──1:N──> InvoiceStageHistory (changedBy, optional)
 
 Vendor ──1:N──> Invoice
 Vendor ──1:N──> User (vendor-portal users)
@@ -26,6 +27,7 @@ Company ──1:N──> Invoice (optional — the bill-to entity, distinct from
 Invoice ──1:N──> InvoiceItem (cascade delete)
 Invoice ──1:N──> AuditLog (optional)
 Invoice ──1:N──> Notification (optional)
+Invoice ──1:N──> InvoiceStageHistory (cascade delete)
 ```
 
 ## Tables
@@ -87,14 +89,16 @@ The invoice-receiving entity ("bill-to") a vendor submits against — distinct f
 | vendor_id | uuid FK → `vendors.id` | the sender |
 | company_id | uuid FK → `companies.id`, nullable | the bill-to entity; nullable to avoid backfill churn on existing rows (see `docs/PRODUCTION_PLAN.md` §6.3). Required in practice for `VENDOR`-submitted invoices (enforced client-side in the upload wizard, not a DB `NOT NULL`) |
 | invoice_number | text | |
+| po_number | text | required at creation (`createInvoiceSchema`); added in migration `20260901000000_status_and_stage_overhaul` alongside the status overhaul below. Existing rows backfilled to `'N/A'` — PR/PO/Advance tracking as a first-class concept is out of scope for this system in Phase 1 (PR/PO are assumed to already exist by the time an invoice reaches here), so this is a plain reference field, not validated against an external PR/PO system |
 | invoice_date / due_date | timestamp, nullable | |
 | currency | text, default `IDR` | |
 | subtotal / tax_amount | decimal(15,2), nullable | |
 | total_amount | decimal(15,2) | |
-| status | enum `InvoiceStatus` | `DRAFT` (set on create, invisible everywhere else — see below) → `SUBMITTED` (wizard confirmed) → one of `PAID`, `CANCELLED`, `REJECTED`, `VOID` (all terminal), or `REVISION` (loops back to `SUBMITTED`) — see [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/validations.ts::VALID_TRANSITIONS`. `DRAFT` added in migration `20260727000000_add_draft_invoice_status` so an incomplete upload-wizard session (file not yet uploaded, OCR not yet reviewed) never counts as a real invoice — excluded from `GET /api/invoices`, dashboard stats, Excel export, and the chat tool's `query_invoices`. `PAID` re-added in migration `20260726173942_add_payment_tracking` — this is a system record of an outcome decided outside the app (there's no payment gateway integration), not a live payment execution. |
+| status | enum `InvoiceStatus` | 17-value workflow, replacing the old `DRAFT/SUBMITTED/PAID/CANCELLED/REJECTED/VOID/REVISION` lifecycle in migration `20260901000000_status_and_stage_overhaul` (type-swap + data remap, same pattern as `20260726171012_simplify_roles`). Main flow: `RECEIVED → REGISTERED → DOC_VERIFICATION → FINANCE_VERIFICATION → READY_FOR_PAYMENT → TREASURY_PROCESS → PAYMENT_SCHEDULED → PAID → CLOSED`. Exception states branch off the main flow with a fixed entry/resolution point each (not "return to whatever it was before"): `DOC_INCOMPLETE`, `RETURNED_TO_VENDOR`, `WAITING_USER_CONFIRMATION`, `WAITING_APPROVAL`, `WAITING_TAX_DOCUMENT`, `REJECTED` (terminal), `PAYMENT_HOLD`, `VENDOR_BANK_ISSUE`. See [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) and `src/lib/invoiceStatus.ts::VALID_TRANSITIONS` for the full transition graph. PR/PO/Advance-related states from the source business requirement doc (Waiting PR, Waiting PO, PR/PO/Advance Check) are deliberately omitted — product decision, see the approved plan dated 2026-09-01. `PAID` records an outcome decided outside the app (no payment gateway integration) |
 | send_date | timestamp, nullable | date the vendor sent the physical hardcopy to the office; set by `VENDOR` (own invoice) or `GA_STAFF`/`ADMIN` |
 | delivered_date | timestamp, nullable | date GA Staff physically received the hardcopy; set by `GA_STAFF`/`ADMIN`; must not be earlier than `send_date` (`validateDeliveryDates()`) |
-| pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF`/`GA_MANAGER` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable |
+| pic_id | uuid FK → `users.id`, nullable | person in charge — the `GA_STAFF`/`GA_MANAGER` user handling this invoice's intake; defaults to the creating `GA_STAFF` user, reassignable. Independent of `pic_stage` below — this is *which person*, `pic_stage` is *which team/stage* |
+| pic_stage | enum `PICStage`, default `GA` | `GA \| BUDGET \| PROC_LEGAL \| SSU \| TREASURY` — which team currently holds the invoice, orthogonal to `status` (which tracks *where in the workflow*, not *who*). Changed via `PATCH /api/invoices/[id]/stage`, independent of the main status control |
 | ocr_confidence | float, nullable | overall confidence score written by the OCR route (0–100), sourced from the AI service's `overall_confidence` |
 | file_path / file_type | text, nullable | local disk path under `uploads/invoices/`; never returned raw to VENDOR-role users from other vendors (IDOR check in `/api/invoices/[id]/file`) |
 | notes | text, nullable | |
@@ -114,6 +118,19 @@ The invoice-receiving entity ("bill-to") a vendor submits against — distinct f
 | unit_price | decimal(15,2), nullable | |
 | total | decimal(15,2) | |
 | sort_order | int, default 0 | display order; set from array index on write |
+
+### `invoice_stage_history`
+One row per `pic_stage` change — the SLA/lead-time source. There are no target/SLA-threshold columns anywhere in the DB; durations are computed purely from these recorded timestamps (client-side, in the invoice detail page's "SLA timeline" section).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| invoice_id | uuid FK → `invoices.id`, `onDelete: Cascade` | |
+| stage | enum `PICStage` | the stage this row records entering |
+| changed_at | timestamp, default `now()` | |
+| changed_by_id | uuid FK → `users.id`, nullable, `onDelete: SetNull` | who moved it here — via `POST /api/invoices` (initial `GA` row) or `PATCH /api/invoices/[id]/stage` |
+
+Every invoice gets an initial `GA` row at creation time (`POST /api/invoices`). Pre-existing rows (from before this table existed) were backfilled with one `GA` row each, dated at `created_at` and attributed to `created_by`, in migration `20260901000000_status_and_stage_overhaul`.
 
 ### `audit_logs`
 | Column | Type | Notes |
@@ -171,8 +188,11 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726180556_extend_vendor_profile` | Adds `vendors.address`/`city`/`phone`/`bank_account_holder`/`bank_branch`; new `vendor_contacts` table (9th table) |
 | `20260726181558_add_must_change_password` | Adds `users.must_change_password` (`NOT NULL DEFAULT true`) |
 | `20260726182449_add_reminder_settings` | New `reminder_settings` table (unique `type`, FK `updated_by` → `users.id`) |
-| `20260727000000_add_draft_invoice_status` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'DRAFT'` (additive) — upload wizard's in-progress state, invisible to lists/dashboard/chat/reminders until submitted |
+| `20260727000000_add_draft_invoice_status` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'DRAFT'` (additive) — upload wizard's in-progress state, invisible to lists/dashboard/chat/reminders until submitted. **Superseded** by the migration below — `DRAFT` no longer exists |
+| `20260901000000_status_and_stage_overhaul` | Adds `invoices.po_number` (backfilled `'N/A'`), `PICStage` enum + `invoices.pic_stage` (default `GA`), new `invoice_stage_history` table (backfilled one `GA` row per existing invoice); replaces `InvoiceStatus` entirely with the 17-value workflow enum (type-swap, old rows remapped: `DRAFT→RECEIVED`, `SUBMITTED→REGISTERED`, `PAID→PAID`, `CANCELLED/VOID→REJECTED`, `REJECTED→REJECTED`, `REVISION→RETURNED_TO_VENDOR`) |
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Creates 6 demo users (see [SETUP.md](./SETUP.md#demo-accounts), all with `mustChangePassword: false` so the shared `demo123` quick-login isn't gated) with bcrypt-hashed `demo123` passwords (incl. a second `GA_STAFF` account for PIC-reassignment demos), demo vendors, 2 demo companies (cycled across all 20 invoices by index — see the `company` field on `docs/API.md`'s invoice responses), the 4 default `reminder_settings` rows, and 20 demo invoices distributed across the 6 statuses (2 pre-seeded as `PAID`) with `sendDate`/`deliveredDate`/`picId` populated. Destructive — deletes all rows in dependency order before reseeding.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Destructive — deletes all rows in dependency order before reseeding. Creates a bootstrap `ADMIN` user, demo companies/vendors, and 100 demo invoices (weighted across all 17 `InvoiceStatus` values per the mix in `prisma/seed.ts`, per-invoice `stageHistory` backfilled) with `sendDate`/`deliveredDate`/`picId` populated.
+
+> **Doc-drift note:** this paragraph previously described "6 demo users" and "4 default `reminder_settings` rows" — neither matches the current `seed.ts` (one bootstrap admin; `reminder_settings` is only ever `deleteMany()`'d, never recreated, so `due_soon`/`overdue`/`status_changed` are dead on a fresh seed). Corrected the invoice-related claims as part of the 2026-09-01 status overhaul; the user/reminder-settings seeding gap is pre-existing and unrelated — see the approved plan's Item D4 for the reminder-settings fix.

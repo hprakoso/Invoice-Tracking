@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { NextResponse } from 'next/server'
+import { INVOICE_STATUSES } from './invoiceStatus'
 
 const isoDateString = z.string().refine((v) => !isNaN(Date.parse(v)), {
   message: 'Invalid date format',
@@ -12,10 +13,21 @@ const itemSchema = z.object({
   total: z.number().min(0, 'Item total must be non-negative'),
 })
 
+// Pure constants/logic live in invoiceStatus.ts (no next/server import) so
+// client components can import them directly without pulling in server-only
+// code. Re-exported here so existing server-side importers of this module
+// are unaffected.
+export { INVOICE_STATUSES, TERMINAL_STATUSES, VALID_TRANSITIONS, isValidStatusTransition } from './invoiceStatus'
+
+// PIC workflow stages, in display order — GA is the first stage after a
+// vendor uploads an invoice.
+export const PIC_STAGES = ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY'] as const
+
 export const createInvoiceSchema = z.object({
   vendorId: z.string().uuid('Invalid vendor ID'),
   companyId: z.string().uuid('Invalid company ID').optional().nullable(),
   invoiceNumber: z.string().min(1, 'Invoice number required').max(100),
+  poNumber: z.string().min(1, 'PO number required').max(100),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
   currency: z.string().length(3).default('IDR'),
@@ -26,12 +38,12 @@ export const createInvoiceSchema = z.object({
   items: z.array(itemSchema).default([]),
   sendDate: isoDateString.optional().nullable(),
   picId: z.string().uuid().optional().nullable(),
+  picStage: z.enum(PIC_STAGES).optional(),
 })
-
-export const INVOICE_STATUSES = ['DRAFT', 'SUBMITTED', 'PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'] as const
 
 export const updateInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(100).optional(),
+  poNumber: z.string().min(1).max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
   currency: z.string().length(3).optional(),
@@ -48,6 +60,10 @@ export const updateInvoiceSchema = z.object({
   paidAmount: z.number().nonnegative().optional().nullable(),
   companyId: z.string().uuid().optional().nullable(),
   comment: z.string().max(2000).optional(),
+})
+
+export const updateInvoiceStageSchema = z.object({
+  stage: z.enum(PIC_STAGES),
 })
 
 export const createCompanySchema = z.object({
@@ -136,16 +152,6 @@ export const createUserSchema = z
     path: ['vendorId'],
   })
 
-export const VALID_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ['SUBMITTED', 'CANCELLED'],
-  SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
-  REVISION: ['SUBMITTED'],
-  PAID: [],
-  CANCELLED: [],
-  REJECTED: [],
-  VOID: [],
-}
-
 // deliveredDate (GA Staff received the hardcopy) can never predate sendDate (vendor sent it)
 export function validateDeliveryDates(
   sendDate: string | Date | null | undefined,
@@ -154,23 +160,6 @@ export function validateDeliveryDates(
   if (!sendDate || !deliveredDate) return { valid: true }
   if (new Date(deliveredDate) < new Date(sendDate)) {
     return { valid: false, message: 'deliveredDate cannot be earlier than sendDate' }
-  }
-  return { valid: true }
-}
-
-export function isValidStatusTransition(
-  from: string,
-  to: string,
-): { valid: boolean; message?: string } {
-  const allowed = VALID_TRANSITIONS[from]
-  if (!allowed) {
-    return { valid: false, message: `Unknown status: ${from}` }
-  }
-  if (!allowed.includes(to)) {
-    return {
-      valid: false,
-      message: `Cannot transition from ${from} to ${to}. Allowed: ${allowed.join(', ')}`,
-    }
   }
   return { valid: true }
 }

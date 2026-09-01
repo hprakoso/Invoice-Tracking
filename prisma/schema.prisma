@@ -14,13 +14,34 @@ enum Role {
 }
 
 enum InvoiceStatus {
-  DRAFT
-  SUBMITTED
+  // Main flow (linear)
+  RECEIVED
+  REGISTERED
+  DOC_VERIFICATION
+  FINANCE_VERIFICATION
+  READY_FOR_PAYMENT
+  TREASURY_PROCESS
+  PAYMENT_SCHEDULED
   PAID
-  CANCELLED
+  CLOSED
+  // Exception states (branch off the main flow — see VALID_TRANSITIONS in
+  // src/lib/validations.ts for entry/resolution rules)
+  DOC_INCOMPLETE
+  RETURNED_TO_VENDOR
+  WAITING_USER_CONFIRMATION
+  WAITING_APPROVAL
+  WAITING_TAX_DOCUMENT
   REJECTED
-  VOID
-  REVISION
+  PAYMENT_HOLD
+  VENDOR_BANK_ISSUE
+}
+
+enum PICStage {
+  GA
+  BUDGET
+  PROC_LEGAL
+  SSU
+  TREASURY
 }
 
 model User {
@@ -43,6 +64,7 @@ model User {
   auditLogs         AuditLog[]
   notifications     Notification[]
   updatedReminderSettings ReminderSetting[] @relation("ReminderUpdatedBy")
+  stageChanges      InvoiceStageHistory[] @relation("StageChangedBy")
 
   @@map("users")
 }
@@ -108,13 +130,15 @@ model Invoice {
   vendorId       String        @map("vendor_id")
   companyId      String?       @map("company_id")
   invoiceNumber  String        @map("invoice_number")
+  poNumber       String        @map("po_number")
   invoiceDate    DateTime?     @map("invoice_date")
   dueDate        DateTime?     @map("due_date")
   currency       String        @default("IDR")
   subtotal       Decimal?      @db.Decimal(15, 2)
   taxAmount      Decimal?      @map("tax_amount") @db.Decimal(15, 2)
   totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
-  status         InvoiceStatus @default(SUBMITTED)
+  status         InvoiceStatus @default(RECEIVED)
+  picStage       PICStage      @default(GA) @map("pic_stage")
   sendDate       DateTime?     @map("send_date")
   deliveredDate  DateTime?     @map("delivered_date")
   picId          String?       @map("pic_id")
@@ -136,10 +160,26 @@ model Invoice {
   pic            User?          @relation("Pic", fields: [picId], references: [id])
   paidBy         User?          @relation("PaidBy", fields: [paidById], references: [id])
   items          InvoiceItem[]
+  stageHistory   InvoiceStageHistory[]
   auditLogs      AuditLog[]
   notifications  Notification[]
 
   @@map("invoices")
+}
+
+// SLA source — stage durations are computed purely from these recorded
+// timestamps; there are no target/SLA thresholds stored in the DB.
+model InvoiceStageHistory {
+  id          String    @id @default(uuid())
+  invoiceId   String    @map("invoice_id")
+  stage       PICStage
+  changedAt   DateTime  @default(now()) @map("changed_at")
+  changedById String?   @map("changed_by_id")
+
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  changedBy User?   @relation("StageChangedBy", fields: [changedById], references: [id])
+
+  @@map("invoice_stage_history")
 }
 
 model InvoiceItem {

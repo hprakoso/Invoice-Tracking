@@ -48,9 +48,11 @@ export function timeAgo(dateStr: string): string {
   return `${days} hari lalu`
 }
 
+const NON_OPEN_STATUSES = new Set(['PAID', 'CLOSED', 'REJECTED'])
+
 /** Return true when an invoice's due date has passed and its status is still active. */
 export function isOverdue(dueDate: string | null | undefined, status?: string): boolean {
   if (!dueDate) return false
-  if (status && ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'DRAFT'].includes(status)) return false
+  if (status && NON_OPEN_STATUSES.has(status)) return false
   return new Date(dueDate) < new Date()
 }

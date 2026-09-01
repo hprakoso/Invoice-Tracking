@@ -7,9 +7,11 @@ import {
 } from '@google/genai'
 import { prisma } from '@/lib/db/prisma'
 import type { Prisma, InvoiceStatus } from '@prisma/client'
+import { NON_OPEN_STATUSES } from '@/lib/services/dashboardStats'
+import { INVOICE_STATUSES } from '@/lib/validations'
 
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
-const STATUS_VALUES: InvoiceStatus[] = ['SUBMITTED', 'PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION']
+const STATUS_VALUES: InvoiceStatus[] = [...INVOICE_STATUSES]
 
 const queryInvoicesDeclaration: FunctionDeclaration = {
   name: 'query_invoices',
@@ -27,7 +29,7 @@ const queryInvoicesDeclaration: FunctionDeclaration = {
       companyName: { type: 'string', description: 'Partial, case-insensitive match on the bill-to company name.' },
       overdueOnly: {
         type: 'boolean',
-        description: 'If true, only invoices whose dueDate has passed and are still unresolved (status SUBMITTED or REVISION).',
+        description: 'If true, only invoices whose dueDate has passed and are still open (status not in PAID, CLOSED, or REJECTED).',
       },
       dueBefore: { type: 'string', description: 'ISO date YYYY-MM-DD. Only invoices due on or before this date.' },
       dueAfter: { type: 'string', description: 'ISO date YYYY-MM-DD. Only invoices due on or after this date.' },
@@ -47,16 +49,13 @@ interface QueryInvoicesArgs {
 }
 
 async function executeQueryInvoices(args: QueryInvoicesArgs) {
-  // DRAFT invoices (upload wizard in progress, not yet submitted) are never
-  // queryable — not a real invoice yet, and STATUS_VALUES has no DRAFT option
-  // for the model to explicitly ask for anyway.
-  const where: Prisma.InvoiceWhereInput = { status: { not: 'DRAFT' } }
+  const where: Prisma.InvoiceWhereInput = {}
 
   if (args.status && STATUS_VALUES.includes(args.status)) where.status = args.status
   if (args.vendorName) where.vendor = { name: { contains: args.vendorName, mode: 'insensitive' } }
   if (args.companyName) where.company = { name: { contains: args.companyName, mode: 'insensitive' } }
   if (args.overdueOnly) {
-    where.status = { in: ['SUBMITTED', 'REVISION'] }
+    where.status = { notIn: NON_OPEN_STATUSES }
     where.dueDate = { lt: new Date() }
   }
   if (args.dueBefore || args.dueAfter) {
@@ -102,7 +101,7 @@ function systemInstruction() {
   const today = new Date().toISOString().slice(0, 10)
   return `You are the AI assistant embedded in an Invoice Tracking system, used by Admin and GA Manager staff. Answer in the same language the user writes in (Indonesian or English). Today's date is ${today}. Amounts default to IDR (Indonesian Rupiah) unless an invoice's own currency says otherwise.
 
-Invoice status meanings: SUBMITTED = received, outcome not yet recorded; PAID/CANCELLED/REJECTED/VOID = terminal outcomes; REVISION = sent back to the vendor to fix and resubmit. There is no in-app approval workflow — GA Staff/GA Manager/Admin record a status outcome after the real-world payment decision happens outside the app.
+Invoice status meanings (workflow, in order): RECEIVED = just entered the system; REGISTERED = logged for processing; DOC_VERIFICATION = documents being checked; FINANCE_VERIFICATION = internal finance/SSU verification; READY_FOR_PAYMENT = cleared, awaiting treasury; TREASURY_PROCESS = treasury handling it; PAYMENT_SCHEDULED = payment date set; PAID = payment made; CLOSED = fully done, archived. Exception states branch off this flow when something needs attention: DOC_INCOMPLETE, RETURNED_TO_VENDOR, WAITING_USER_CONFIRMATION, WAITING_APPROVAL, WAITING_TAX_DOCUMENT, REJECTED (dead end, incl. auto-rejected duplicates), PAYMENT_HOLD, VENDOR_BANK_ISSUE. "Open"/still-payable means anything except PAID, CLOSED, or REJECTED. Only ADMIN/GA_STAFF/GA_MANAGER record status or stage changes; vendors are read-only.
 
 Always call query_invoices for anything involving real invoice data (specific invoices, totals, counts, overdue lists, vendor/company breakdowns) rather than guessing. You may answer general questions about how the app itself works directly, without calling the tool.
 

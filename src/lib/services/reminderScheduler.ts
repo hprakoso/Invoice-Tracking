@@ -1,8 +1,13 @@
 import { prisma } from '@/lib/db/prisma'
 import type { InvoiceStatus, Role } from '@prisma/client'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
+import { NON_OPEN_STATUSES } from '@/lib/services/dashboardStats'
+import { INVOICE_STATUSES } from '@/lib/validations'
 
-const OPEN_STATUSES: InvoiceStatus[] = ['SUBMITTED', 'REVISION']
+// Invoices still "in play" — everything except the settled/dead statuses.
+const OPEN_STATUSES: InvoiceStatus[] = INVOICE_STATUSES.filter(
+  (s) => !(NON_OPEN_STATUSES as readonly string[]).includes(s),
+) as InvoiceStatus[]
 
 export async function checkDueDates() {
   const [dueSoonSetting, overdueSetting] = await Promise.all([
@@ -132,7 +137,7 @@ export function renderInvoiceListEmail(
     heading,
     bodyHtml: table,
     ctaText: 'Lihat Semua Invoice',
-    ctaPath: '/invoices?status=SUBMITTED',
+    ctaPath: '/invoices', // due-soon/overdue spans multiple open statuses, not one
   })
 }
 

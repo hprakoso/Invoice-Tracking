@@ -3,13 +3,13 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import {
   updateInvoiceSchema,
-  isValidStatusTransition,
   validateDeliveryDates,
   validationErrorResponse,
+  isValidStatusTransition,
+  TERMINAL_STATUSES,
 } from '@/lib/validations'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
-import { notifyInvoiceSubmitted } from '@/app/api/invoices/route'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await requireAuth()
@@ -26,6 +26,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       items: { orderBy: { sortOrder: 'asc' } },
       pic: { select: { id: true, name: true, role: true } },
       paidBy: { select: { id: true, name: true, role: true } },
+      stageHistory: { orderBy: { changedAt: 'asc' } },
     },
   })
 
@@ -46,6 +47,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 const CREATE_TIME_FIELDS = [
   'invoiceNumber',
+  'poNumber',
   'invoiceDate',
   'dueDate',
   'subtotal',
@@ -55,24 +57,17 @@ const CREATE_TIME_FIELDS = [
   'companyId',
 ] as const
 
-// Fields each role may write via PATCH, given the invoice's current status.
-// ADMIN bypasses this (and the VALID_TRANSITIONS table) for corrections.
-// isEditor: VENDOR owns the invoice's vendor, or GA_STAFF created it — either
-// way, the field is still being finalized (SUBMITTED/REVISION) post-upload.
-// paidDate/paidAmount are available to GA_STAFF/GA_MANAGER regardless of
-// isEditor — marking an invoice paid isn't tied to who created it.
+// Fields each role may write via PATCH. ADMIN bypasses this for corrections.
+// Status is a separate control from PIC stage, and both are ADMIN/GA-only —
+// VENDOR edits its own invoice data (when not yet accepted) but never the
+// status or stage.
 function allowedFields(role: string, currentStatus: string, isOwner: boolean, isEditor: boolean): string[] {
-  const editable = currentStatus === 'DRAFT' || currentStatus === 'SUBMITTED' || currentStatus === 'REVISION'
-  // DRAFT needs 'status' available too — that's how the wizard's final Submit
-  // step transitions DRAFT -> SUBMITTED, same as REVISION -> SUBMITTED on resubmit.
-  const needsStatusField = currentStatus === 'DRAFT' || currentStatus === 'REVISION'
+  const editable = !(TERMINAL_STATUSES as readonly string[]).includes(currentStatus)
   switch (role) {
     case 'VENDOR':
       if (!isOwner) return []
-      if (!editable) return ['sendDate']
-      return needsStatusField
-        ? [...CREATE_TIME_FIELDS, 'sendDate', 'status']
-        : [...CREATE_TIME_FIELDS, 'sendDate']
+      if (!editable) return []
+      return [...CREATE_TIME_FIELDS, 'sendDate']
     case 'GA_STAFF':
     case 'GA_MANAGER':
       return isEditor && editable
@@ -114,15 +109,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  if (filtered.status && role !== 'ADMIN') {
-    const transition = isValidStatusTransition(current.status, filtered.status)
-    if (!transition.valid) {
-      return NextResponse.json({ error: transition.message }, { status: 400 })
-    }
-    // Fixing & resubmitting a revision is the vendor's job, not GA_STAFF's
-    if (current.status === 'REVISION' && filtered.status === 'SUBMITTED' && role !== 'VENDOR') {
-      return NextResponse.json({ error: 'Only the vendor can resubmit a revision' }, { status: 403 })
-    }
+  // ADMIN bypasses the transition graph, same as it bypasses allowedFields above.
+  if (filtered.status && role !== 'ADMIN' && !isValidStatusTransition(current.status, filtered.status)) {
+    return NextResponse.json(
+      { error: 'Invalid status transition', from: current.status, to: filtered.status },
+      { status: 400 },
+    )
   }
 
   const effectiveSendDate = filtered.sendDate ?? current.sendDate
@@ -134,14 +126,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // Marking PAID: paidById is server-assigned (never client-supplied), and
-  // paidDate/paidAmount default to now/totalAmount when the caller omits them.
-  const markingPaid = filtered.status === 'PAID'
+  // Transitioning to PAID is when payment is recorded: paidById is
+  // server-assigned (never client-supplied), paidDate/paidAmount default to
+  // now/totalAmount. CLOSED (which always follows PAID) doesn't re-trigger
+  // this — those fields are already set from the PAID transition.
+  const markingAccepted = filtered.status === 'PAID'
 
   const invoice = await prisma.invoice.update({
     where: { id },
     data: {
       invoiceNumber: filtered.invoiceNumber,
+      poNumber: filtered.poNumber,
       invoiceDate: filtered.invoiceDate ? new Date(filtered.invoiceDate) : undefined,
       dueDate: filtered.dueDate ? new Date(filtered.dueDate) : undefined,
       subtotal: filtered.subtotal,
@@ -154,11 +149,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,
       deliveredDate: filtered.deliveredDate ? new Date(filtered.deliveredDate) : undefined,
       picId: filtered.picId,
-      paidDate: markingPaid ? new Date(filtered.paidDate ?? Date.now()) : undefined,
-      paidAmount: markingPaid ? (filtered.paidAmount ?? current.totalAmount) : undefined,
-      paidById: markingPaid ? session.user.id : undefined,
+      paidDate: markingAccepted ? new Date(filtered.paidDate ?? Date.now()) : undefined,
+      paidAmount: markingAccepted ? (filtered.paidAmount ?? current.totalAmount) : undefined,
+      paidById: markingAccepted ? session.user.id : undefined,
     },
-    include: { vendor: { select: { name: true } } },
+    include: { vendor: { select: { name: true } }, stageHistory: { orderBy: { changedAt: 'asc' } } },
   })
 
   await prisma.auditLog.create({
@@ -173,79 +168,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     },
   })
 
-  if (filtered.status === 'REVISION') {
-    await notifyRevisionRequested(id, invoice.invoiceNumber, current.vendorId)
-  }
-
-  // Fires the same "new invoice" notification the old flow sent at creation
-  // time — moved here since invoices are now created as DRAFT and only
-  // become real (SUBMITTED) once the wizard's final step confirms them.
-  if (current.status === 'DRAFT' && filtered.status === 'SUBMITTED' && role === 'VENDOR') {
-    await notifyInvoiceSubmitted(id, invoice.invoiceNumber, invoice.vendor.name)
-  }
-
-  // Any GA/Admin-initiated status change other than REVISION (its own richer
-  // notification above) tells the vendor what happened to their invoice.
-  if (
-    filtered.status &&
-    filtered.status !== current.status &&
-    filtered.status !== 'REVISION' &&
-    ['PAID', 'CANCELLED', 'REJECTED', 'VOID'].includes(filtered.status)
-  ) {
+  // Any GA/Admin-initiated status change tells the vendor what happened.
+  if (filtered.status && filtered.status !== current.status) {
     await notifyStatusChanged(id, invoice.invoiceNumber, current.vendorId, filtered.status)
   }
 
   return NextResponse.json(invoice)
 }
 
-// Recipient is always the invoice's own vendor — not configurable via
-// ReminderSetting.recipientRoles, unlike due_soon/overdue/invoice_submitted.
-async function notifyRevisionRequested(invoiceId: string, invoiceNumber: string, vendorId: string) {
-  const setting = await prisma.reminderSetting.findUnique({ where: { type: 'revision_requested' } })
-  if (!setting?.isActive || !(setting.inAppEnabled || setting.emailEnabled)) return
-
-  const vendorUsers = await prisma.user.findMany({
-    where: { vendorId, role: 'VENDOR', isActive: true },
-    select: { id: true, email: true },
-  })
-  if (vendorUsers.length === 0) return
-
-  if (setting.emailEnabled) {
-    const to = [...vendorUsers.map((u) => u.email), ...extraEmailsOf(setting.extraEmails)]
-    await sendEmail(
-      to,
-      `Invoice ${invoiceNumber} perlu direvisi`,
-      renderEmailLayout({
-        heading: `Invoice ${invoiceNumber} perlu direvisi`,
-        bodyHtml: `<p style="margin:0;">Invoice <strong>${invoiceNumber}</strong> perlu diperbaiki. Silakan perbaiki dan ajukan ulang invoice ini.</p>`,
-        ctaText: 'Perbaiki Invoice',
-        ctaPath: `/invoices/${invoiceId}`,
-      }),
-    )
-  }
-
-  if (!setting.inAppEnabled) return
-
-  await prisma.notification.createMany({
-    data: vendorUsers.map((u) => ({
-      userId: u.id,
-      invoiceId,
-      type: 'revision_requested',
-      title: `Invoice ${invoiceNumber} perlu direvisi`,
-      body: `Silakan perbaiki dan ajukan ulang invoice ini.`,
-    })),
-  })
-}
-
-// STATUS_LABELS_ID mirrors the label set every other page in the app already
-// hand-rolls locally (see invoices/[id]/page.tsx) rather than importing
-// src/lib/i18n — that module is written for client components and pulling it
-// into a server route isn't worth it for 4 strings.
+// STATUS_LABELS_ID mirrors the label set other pages hand-roll locally rather
+// than importing src/lib/i18n — that module is for client components.
 const STATUS_LABELS_ID: Record<string, string> = {
-  PAID: 'Lunas',
-  CANCELLED: 'Dibatalkan',
+  RECEIVED: 'Invoice Diterima',
+  REGISTERED: 'Terdaftar',
+  DOC_VERIFICATION: 'Verifikasi Dokumen',
+  FINANCE_VERIFICATION: 'Verifikasi Finance/SSU',
+  READY_FOR_PAYMENT: 'Siap Dibayar',
+  TREASURY_PROCESS: 'Proses Treasury',
+  PAYMENT_SCHEDULED: 'Pembayaran Terjadwal',
+  PAID: 'Sudah Dibayar',
+  CLOSED: 'Selesai',
+  DOC_INCOMPLETE: 'Dokumen Tidak Lengkap',
+  RETURNED_TO_VENDOR: 'Dikembalikan ke Vendor',
+  WAITING_USER_CONFIRMATION: 'Menunggu Konfirmasi User',
+  WAITING_APPROVAL: 'Menunggu Approval',
+  WAITING_TAX_DOCUMENT: 'Menunggu Faktur Pajak',
   REJECTED: 'Ditolak',
-  VOID: 'Void',
+  PAYMENT_HOLD: 'Pembayaran Ditahan',
+  VENDOR_BANK_ISSUE: 'Kendala Rekening Vendor',
 }
 
 async function notifyStatusChanged(invoiceId: string, invoiceNumber: string, vendorId: string, status: string) {
@@ -288,17 +238,19 @@ async function notifyStatusChanged(invoiceId: string, invoiceNumber: string, ven
   })
 }
 
+// Admin-only hard delete — there is no CANCELLED status in the new
+// verification-workflow enum, so soft-cancelling is no longer possible.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await requireRole(['ADMIN'])
   if (error || !session) return error
 
   const { id } = await params
 
-  await prisma.invoice.update({ where: { id }, data: { status: 'CANCELLED' } })
+  await prisma.invoice.delete({ where: { id } })
   await prisma.auditLog.create({
     data: {
       userId: session.user.id,
-      action: 'invoice.cancelled',
+      action: 'invoice.deleted',
       entityType: 'invoice',
       entityId: id,
     },

@@ -5,55 +5,60 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ## Invoices
 
 ### `GET /api/invoices`
-Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR). `status = 'DRAFT'` invoices are always excluded, regardless of the `status` query param — an in-progress upload-wizard session isn't a real invoice yet (see § Invoice status lifecycle in ARCHITECTURE.md).
+Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
 
 Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only).
 
 | Response field | Source |
 |---|---|
-| `id`, `vendorId`, `invoiceNumber`, `invoiceDate`, `dueDate`, `sendDate`, `deliveredDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount`, `status`, `ocrConfidence`, `filePath`, `fileType`, `notes`, `createdById`, `createdAt`, `updatedAt` | `invoices.*` (1:1 column mapping, camelCase via Prisma `@map`) |
+| `id`, `vendorId`, `invoiceNumber`, `poNumber`, `invoiceDate`, `dueDate`, `sendDate`, `deliveredDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount`, `status`, `picStage`, `ocrConfidence`, `filePath`, `fileType`, `notes`, `createdById`, `createdAt`, `updatedAt` | `invoices.*` (1:1 column mapping, camelCase via Prisma `@map`) |
 | `vendor.id`, `vendor.name` | `vendors.id`, `vendors.name` |
 | `createdBy.id`, `createdBy.name` | `users.id`, `users.name` |
-| `pic.id`, `pic.name` | `users.id`, `users.name` via `invoices.pic_id` |
+| `pic.id`, `pic.name` | `users.id`, `users.name` via `invoices.pic_id` — this is *who*, distinct from `picStage` (*which team*) |
 | `items[]` | `invoice_items.*` where `invoice_id = invoices.id`, ordered by `sort_order` |
 
 ### `POST /api/invoices`
-Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value; other roles pick the vendor explicitly from a dropdown in the wizard's first step — there is deliberately no "default to the first vendor" fallback (that was a real bug: an invoice could get attributed to the wrong vendor). `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is schema-optional but the upload wizard always collects it upfront, before the file is even chosen — it's sent in this same `POST` call, not deferred to the later `PATCH` review step.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`) — `poNumber` is required. `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value; other roles pick the vendor explicitly from a dropdown in the wizard's first step — there is deliberately no "default to the first vendor" fallback (that was a real bug: an invoice could get attributed to the wrong vendor). `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is schema-optional but the upload wizard always collects it upfront, before the file is even chosen — it's sent in this same `POST` call, not deferred to the later `PATCH` review step.
 
-Writes: `invoices` row (`status` = `'DRAFT'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`). No reminder notification fires here — `invoice_submitted` fires later, from `PATCH`, when the wizard actually confirms the invoice (`DRAFT → SUBMITTED`), not at this placeholder-creation step. See § Invoice-event notifications.
+Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default `'GA'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, one `invoice_stage_history` row (`stage = picStage`, `changed_by_id` = session user id), `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
+
+> **Known gap** (see the approved plan's Item B, not yet implemented): the row created here is immediately live and visible everywhere — there's no "invisible until confirmed" draft state — so a user abandoning the upload wizard mid-flow leaves a real `RECEIVED` invoice behind, and retrying after a failed upload step can create an orphaned duplicate row.
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
 
 | Role | Writable fields | When |
 |---|---|---|
-| `VENDOR` (own invoice only) | `sendDate` | any status |
-| | + `invoiceNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `companyId`, `status→SUBMITTED` | while `status ∈ {DRAFT, REVISION}` (finishing the wizard, or fixing and resubmitting) |
-| | + same core fields (no `status`) | while `status = SUBMITTED` **and** this VENDOR created the invoice — finishes the post-OCR review step from the upload wizard |
-| `GA_STAFF`, `GA_MANAGER` | `deliveredDate`, `picId`, `sendDate`, `status` (`DRAFT→SUBMITTED`, `SUBMITTED→*`, and `REVISION→SUBMITTED`), `paidDate`, `paidAmount` | always |
-| | + core fields above | while `status ∈ {DRAFT, SUBMITTED, REVISION}` **and** this GA_STAFF/GA_MANAGER created the invoice |
-| `ADMIN` | all fields, bypasses the `VALID_TRANSITIONS` table | — |
+| `VENDOR` (own invoice only) | `invoiceNumber`, `poNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `companyId`, `sendDate` | while `status` is not terminal (`CLOSED`/`REJECTED`) |
+| `GA_STAFF`, `GA_MANAGER` (any invoice) | `deliveredDate`, `picId`, `sendDate`, `status`, `paidDate`, `paidAmount` | always |
+| `GA_STAFF`, `GA_MANAGER` (invoice they created) | + the same core fields as `VENDOR` above | while `status` is not terminal |
+| `ADMIN` | all fields, bypasses both `allowedFields()` and the `VALID_TRANSITIONS` table | — |
 
-Any `status` change is checked against `isValidStatusTransition()` (`src/lib/validations.ts::VALID_TRANSITIONS`, skipped for `ADMIN`). The one exception `VALID_TRANSITIONS` itself doesn't encode: `REVISION → SUBMITTED` (resubmit) is further restricted to `VENDOR`/`ADMIN` only — `GA_STAFF` can request every other transition but not this one, since fixing a revision is the vendor's responsibility. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+`VENDOR` cannot change `status` at all — there is no self-service resubmit flow (unlike the old `REVISION → SUBMITTED` model, removed with the 2026-09-01 status overhaul).
 
-**`DRAFT → SUBMITTED`** is the wizard's final confirm step. When the caller is `VENDOR`, this is also what fires the `invoice_submitted` reminder trigger (moved here from `POST /api/invoices` — see § Invoice-event notifications) — a `GA_STAFF`/`GA_MANAGER`/`ADMIN` submitting on a vendor's behalf does not, same as before.
+Any `status` change is checked against `isValidStatusTransition()` (`src/lib/invoiceStatus.ts::VALID_TRANSITIONS`, skipped for `ADMIN`) — 400 with `{ error: 'Invalid status transition', from, to }` if not a valid edge. See [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) for the full graph. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
 
-**Marking an invoice `PAID`** (`SUBMITTED → PAID`, `GA_STAFF`/`GA_MANAGER`/`ADMIN` only — never reachable by `VENDOR`, structurally: `status` isn't in `VENDOR`'s allowed-field list while `status = SUBMITTED`): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID` is terminal (`VALID_TRANSITIONS.PAID = []`) — marking an already-paid invoice paid again returns 400.
+**Marking an invoice `PAID`** (`PAYMENT_SCHEDULED → PAID` is the only valid entry — see `VALID_TRANSITIONS`; `GA_STAFF`/`GA_MANAGER`/`ADMIN` only, never reachable by `VENDOR` since `status` isn't in its writable-fields list at all): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID`'s only outbound edge is `→ CLOSED`.
 
-Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`. A transition to `REVISION` also fires the `revision_requested` reminder trigger — see § Invoice-event notifications.
+Writes: `invoices` row (partial update, only the filtered/allowed fields). `audit_logs` — `action: 'invoice.status_changed'` with `metadata: { from, to, comment }` (the optional `comment` field is **Not Stored** on the invoice itself, only in this audit metadata) when `status` changes, else `action: 'invoice.updated'` with `metadata: { fields: [...changed keys] }`. Any status change also fires the `status_changed` reminder trigger, notifying the invoice's own vendor — see § Invoice-event notifications.
+
+### `PATCH /api/invoices/[id]/stage`
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (vendors are read-only on `picStage`). Body validated by `updateInvoiceStageSchema` (`{ stage: PICStage }`) — no transition restriction, any of the 5 stages is reachable from any other (unlike `status`, this is a free control).
+
+Writes: `invoices.pic_stage`, a new `invoice_stage_history` row (`stage`, `changed_by_id` = session user id, `changed_at` = `now()`), `audit_logs` (`action: 'invoice.stage_changed'`, `metadata: { stage }`). No reminder notification fires here yet — see the approved plan's Item D4 (not yet implemented).
 
 ### `DELETE /api/invoices/[id]`
-Auth: `ADMIN` only. Soft-delete: sets `invoices.status = 'CANCELLED'` (no row is actually deleted). Writes `audit_logs` (`action: 'invoice.cancelled'`).
+Auth: `ADMIN` only. **Hard delete** — the row is actually removed (there is no `CANCELLED` status in the current `InvoiceStatus` enum to soft-cancel into). Writes `audit_logs` (`action: 'invoice.deleted'`) before the delete.
 
 ### `POST /api/invoices/[id]/upload`
 Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
 
-Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched — stays `DRAFT`), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`).
+Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`). One file per invoice — re-uploading overwrites the previous file at the same derived path (`{invoiceId}.{ext}`); see the approved plan's Item C for the planned multi-file model (not yet implemented).
 
 ### `GET /api/invoices/[id]/ocr` (SSE stream)
 Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Streams `status`, `field`, `line_items`, `done`/`error` events.
@@ -65,7 +70,7 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
 
-OCR no longer changes `invoices.status` on success or error — the invoice stays `DRAFT` throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data and transitions to `SUBMITTED`.
+OCR never changes `invoices.status` on success or error — the invoice stays `RECEIVED` (its status at creation) throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data. Advancing `status` from there is a separate GA/ADMIN-only action (`VENDOR` cannot write `status` at all).
 
 ### `GET /api/invoices/[id]/file`
 Auth: any authenticated user; `VENDOR` 403 if not their invoice. Reads via `getFileBuffer()` (`src/lib/services/fileService.ts`) — Supabase Storage if configured, else local disk (`uploads/invoices/`, which doesn't survive Vercel's serverless filesystem). `filePath` is always server-derived (`{invoiceId}.{ext}`), never taken from user input, so there's no path-traversal surface. **Not Stored as an API field** — streams the raw file bytes referenced by `invoices.file_path`.
@@ -128,19 +133,21 @@ Query params (all optional, all combine with AND): `search` (matches `invoice_nu
 
 | Response field | Source |
 |---|---|
-| `totalInvoices` | `formula`: `COUNT(invoices)` matching the request's filters, `status != 'DRAFT'` unless `?status=` was explicitly given (an explicit status inherently excludes DRAFT already) |
-| `totalPayable` | `formula`: `SUM(invoices.total_amount)` over the filtered set, additionally narrowed to `status IN ('SUBMITTED','REVISION')` **only when `?status=` wasn't given** — an explicit status filter reflects that status's total instead of always meaning "open" |
+| `totalInvoices` | `formula`: `COUNT(invoices)` matching the request's filters — no status exclusion of its own |
+| `totalPayable` | `formula`: `SUM(invoices.total_amount)` over the filtered set, additionally narrowed to `status NOT IN ('PAID','CLOSED','REJECTED')` (`NON_OPEN_STATUSES`, `dashboardStats.ts`) **only when `?status=` wasn't given** — an explicit status filter reflects that status's total instead of always meaning "open" |
 | `overdueCount` | `formula`: `COUNT(invoices)` where `due_date < now()`, same open/explicit-status logic as `totalPayable` |
-| `openCount` | `formula`: `COUNT(invoices)` matching the filtered set, same open/explicit-status logic as `totalPayable` (replaces the old `pendingApprovalCount`, no more approval concept) |
-| `statusBreakdown[]` | `formula`: `GROUP BY invoices.status` over the filtered set, count per group |
+| `openCount` | `formula`: `COUNT(invoices)` matching the filtered set, same open/explicit-status logic as `totalPayable` |
+| `statusBreakdown[]` | `formula`: `GROUP BY invoices.status` over the filtered set, count per group — all 17 statuses, not just the main-flow ones |
 | `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), same status scoping as `totalPayable` |
+| `monthlyTrend[]` | `formula`: trailing 12 UTC months — `{month, totalAmount, count}` per month, from invoices `WHERE created_at` in that month, no status filter |
+| `statusByMonth[]` | `formula`: trailing 12 UTC months — `{month, entered, accepted}`, counting invoices created that month currently in `status = 'RECEIVED'` (entered) vs `status = 'PAID'` (accepted). A pipeline-health proxy, not a true historical flow rate — see `StatusFlowChart.tsx` |
 | `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
 
 ### `GET /api/dashboard/export`
 Auth: any authenticated user, same `VENDOR` scoping and query params as `GET /api/dashboard` (same `buildDashboardFilter()`). **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
 - Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above, computed over the same filtered set (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice matching the active filters (unfiltered = every non-`DRAFT` invoice, same as the dashboard's default view), columns Invoice Number/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
+- Sheet "Invoices": one row per invoice matching the active filters (unfiltered = every invoice, same as the dashboard's default view), columns Invoice Number/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 
@@ -169,7 +176,7 @@ The notification bell's unread badge polls `GET /api/notifications?unread=true` 
 ## Chat
 
 ### `POST /api/chat`
-Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{ message, history }` passed to `runChat()` (`src/lib/services/geminiChat.ts`). Gemini is given a `query_invoices` function declaration and instructed to call it for anything involving real invoice data; when it does, the route runs an actual Prisma query (see [ARCHITECTURE.md](./ARCHITECTURE.md) for the two-turn function-calling flow) — deliberately **not** scoped to any invoice status the model can explicitly ask for, since the requirement is that chat can answer about any invoice, not just `PAID` ones — the one exception is `DRAFT`, always excluded, since an in-progress upload-wizard session isn't a real invoice yet. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request. If `GOOGLE_API_KEY` isn't configured, or the Gemini call throws, returns `{ answer: "Maaf, layanan AI sedang tidak tersedia..." }` with a 200 (never surfaces a raw error to the chat UI).
+Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{ message, history }` passed to `runChat()` (`src/lib/services/geminiChat.ts`). Gemini is given a `query_invoices` function declaration and instructed to call it for anything involving real invoice data; when it does, the route runs an actual Prisma query (see [ARCHITECTURE.md](./ARCHITECTURE.md) for the two-turn function-calling flow) — deliberately **not** scoped to any invoice status the model can explicitly ask for, since the requirement is that chat can answer about any invoice regardless of status. `answer` field is **Not Stored** — no chat history table exists; conversation history is client-held and replayed per request. If `GOOGLE_API_KEY` isn't configured, or the Gemini call throws, returns `{ answer: "Maaf, layanan AI sedang tidak tersedia..." }` with a 200 (never surfaces a raw error to the chat UI).
 
 ## Users
 
@@ -202,16 +209,17 @@ Auth: `ADMIN` only. 404 if `type` isn't one of the four known values. Body valid
 ### `GET /api/cron/reminders`
 Auth: `Authorization: Bearer <CRON_SECRET>` header — checked inside the route (not `requireAuth`/`requireRole`, since there's no NextAuth session). `src/middleware.ts` explicitly excludes `/api/cron/**` from its session-required gate so the request reaches the route at all. Registered in `vercel.json` → `crons` (`0 1 * * *`, daily — Vercel Hobby plan caps cron at once/day; see `docs/PRODUCTION_PLAN.md` §4.2). Runs `checkDueDates()` (`src/lib/services/reminderScheduler.ts`), same logic previously invoked hourly by `node-cron` from `src/instrumentation.ts` (removed — doesn't survive serverless scale-to-zero).
 
-Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for `SUBMITTED`/`REVISION` invoices due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window — written only when `in_app_enabled` is true. Also sends one summary email (via Resend) to the same recipients plus `extra_emails` when `email_enabled` is true — not deduplicated beyond the cron's own once-daily schedule. The whole type is skipped when `is_active` is false, or when neither channel is enabled. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for open invoices (`status NOT IN ('PAID','CLOSED','REJECTED')`, `OPEN_STATUSES` in `reminderScheduler.ts`) due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window — written only when `in_app_enabled` is true. Also sends one summary email (via Resend) to the same recipients plus `extra_emails` when `email_enabled` is true — not deduplicated beyond the cron's own once-daily schedule. The whole type is skipped when `is_active` is false, or when neither channel is enabled. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
 
 ## Invoice-event notifications
 
-Two more `reminder_settings`-gated triggers, fired inline from the invoice routes (not the cron job):
+One `reminder_settings`-gated trigger, fired inline from `PATCH /api/invoices/[id]` (not the cron job):
 
-- **`invoice_submitted`** — `PATCH /api/invoices/[id]`, when `status` transitions `DRAFT → SUBMITTED` and the confirming user's role is `VENDOR`. Notifies active users in `recipientRoles` (default `GA_STAFF`). Fires at the wizard's actual confirm step, not at the earlier `POST /api/invoices` placeholder-creation step (that just creates the `DRAFT` row the wizard attaches the upload/OCR to) — a vendor closing the browser mid-upload never triggers a false "new invoice" notification.
-- **`revision_requested`** — `PATCH /api/invoices/[id]`, when `status` transitions to `REVISION`. Always notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type.
+- **`status_changed`** — whenever `status` actually changes value. Notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type (the recipient is always the invoice's own vendor). Gated by the `status_changed` `reminder_settings` row like every other type: `isActive`, `inAppEnabled`/`emailEnabled` independently.
 
-Both channels are gated independently: `inAppEnabled` controls whether `notifications` rows are written, `emailEnabled` controls whether a Resend email is sent to the same recipients (plus `extraEmails`) — either, both, or neither can be on. If `RESEND_API_KEY` isn't configured, the email call no-ops silently (`src/lib/services/email.ts`) rather than failing the request.
+If `RESEND_API_KEY` isn't configured, the email call no-ops silently (`src/lib/services/email.ts`) rather than failing the request.
+
+> **Dead config, not yet wired up:** `invoice_submitted` and `revision_requested` exist as configurable rows/types (`REMINDER_TYPES` in `src/lib/validations.ts`, editable at `/admin/reminders`) but **nothing in the codebase fires them** — they're leftover from a removed `DRAFT`/`SUBMITTED`/`REVISION` status model that predates both the 4-value verification-workflow enum and this 17-value overhaul. An admin can toggle these settings with no effect. Left as-is per the approved plan (out of scope for the current batch of work) — flagged here so it isn't mistaken for working.
 
 ## System
 
