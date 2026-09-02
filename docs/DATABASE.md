@@ -88,7 +88,7 @@ The invoice-receiving entity ("bill-to") a vendor submits against — distinct f
 | id | uuid PK | |
 | vendor_id | uuid FK → `vendors.id` | the sender |
 | company_id | uuid FK → `companies.id`, nullable | the bill-to entity; nullable to avoid backfill churn on existing rows (see `docs/PRODUCTION_PLAN.md` §6.3). Required in practice for `VENDOR`-submitted invoices (enforced client-side in the upload wizard, not a DB `NOT NULL`) |
-| invoice_number | text | |
+| invoice_number | text | not unique at the column level, but `(vendor_id, lower(invoice_number))` is unique among non-`REJECTED` rows via the partial index added in migration `20260902000000_invoice_duplicate_guard` — see the duplicate auto-rejection rules in [API.md](./API.md#patch-apiinvoicesid). During an in-progress upload-wizard session this holds a `DRAFT-<timestamp>` placeholder, replaced when the user confirms |
 | po_number | text | required at creation (`createInvoiceSchema`); added in migration `20260901000000_status_and_stage_overhaul` alongside the status overhaul below. Existing rows backfilled to `'N/A'` — PR/PO/Advance tracking as a first-class concept is out of scope for this system in Phase 1 (PR/PO are assumed to already exist by the time an invoice reaches here), so this is a plain reference field, not validated against an external PR/PO system |
 | invoice_date / due_date | timestamp, nullable | |
 | currency | text, default `IDR` | |
@@ -189,6 +189,7 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260726181558_add_must_change_password` | Adds `users.must_change_password` (`NOT NULL DEFAULT true`) |
 | `20260726182449_add_reminder_settings` | New `reminder_settings` table (unique `type`, FK `updated_by` → `users.id`) |
 | `20260727000000_add_draft_invoice_status` | `ALTER TYPE "InvoiceStatus" ADD VALUE 'DRAFT'` (additive) — upload wizard's in-progress state, invisible to lists/dashboard/chat/reminders until submitted. **Superseded** by the migration below — `DRAFT` no longer exists |
+| `20260902000000_invoice_duplicate_guard` | Partial unique index `invoices_vendor_invoice_number_active_uidx` on `(vendor_id, lower(invoice_number)) WHERE status <> 'REJECTED'` — race-condition backstop for the duplicate check in `PATCH /api/invoices/[id]`. Raw SQL, **not** modeled as `@@unique` in `schema.prisma` (Prisma's DSL can't express `lower()` + a `WHERE` clause), so it exists only via this migration — `prisma db push` on a fresh DB would skip it |
 | `20260901000000_status_and_stage_overhaul` | Adds `invoices.po_number` (backfilled `'N/A'`), `PICStage` enum + `invoices.pic_stage` (default `GA`), new `invoice_stage_history` table (backfilled one `GA` row per existing invoice); replaces `InvoiceStatus` entirely with the 17-value workflow enum (type-swap, old rows remapped: `DRAFT→RECEIVED`, `SUBMITTED→REGISTERED`, `PAID→PAID`, `CANCELLED/VOID→REJECTED`, `REJECTED→REJECTED`, `REVISION→RETURNED_TO_VENDOR`) |
 
 ## Seed data (`prisma/seed.ts`)

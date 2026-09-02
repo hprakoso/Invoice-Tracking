@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import {
@@ -93,7 +94,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const current = await prisma.invoice.findUnique({
     where: { id },
-    select: { status: true, sendDate: true, deliveredDate: true, vendorId: true, createdById: true, totalAmount: true },
+    select: {
+      status: true, sendDate: true, deliveredDate: true, vendorId: true,
+      createdById: true, totalAmount: true, invoiceNumber: true, notes: true,
+    },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -126,54 +130,125 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // Transitioning to PAID is when payment is recorded: paidById is
-  // server-assigned (never client-supplied), paidDate/paidAmount default to
-  // now/totalAmount. CLOSED (which always follows PAID) doesn't re-trigger
-  // this — those fields are already set from the PAID transition.
-  const markingAccepted = filtered.status === 'PAID'
+  // Duplicate check — the invoice number is only really known once the user
+  // has reviewed OCR output, so this is the first point it can run (not at
+  // POST, where it's still a `DRAFT-<timestamp>` placeholder). A failed
+  // upload retried against the same row never reaches here, so retrying is
+  // never mistaken for a duplicate.
+  //
+  // Match key is vendor + invoiceNumber (case-insensitive), ignoring already
+  // rejected rows. Deliberately NOT scoped by company: one vendor reusing an
+  // invoice number across different bill-to companies still counts.
+  let duplicateOf: { id: string; invoiceNumber: string } | null = null
+  if (filtered.invoiceNumber && filtered.invoiceNumber !== current.invoiceNumber) {
+    duplicateOf = await prisma.invoice.findFirst({
+      where: {
+        id: { not: id },
+        vendorId: current.vendorId,
+        invoiceNumber: { equals: filtered.invoiceNumber, mode: 'insensitive' },
+        status: { not: 'REJECTED' },
+      },
+      select: { id: true, invoiceNumber: true },
+    })
+  }
 
-  const invoice = await prisma.invoice.update({
-    where: { id },
-    data: {
-      invoiceNumber: filtered.invoiceNumber,
-      poNumber: filtered.poNumber,
-      invoiceDate: filtered.invoiceDate ? new Date(filtered.invoiceDate) : undefined,
-      dueDate: filtered.dueDate ? new Date(filtered.dueDate) : undefined,
-      subtotal: filtered.subtotal,
-      taxAmount: filtered.taxAmount,
-      totalAmount: filtered.totalAmount,
-      notes: filtered.notes,
-      companyId: filtered.companyId,
-      status: filtered.status,
-      ocrConfidence: filtered.ocrConfidence,
-      sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,
-      deliveredDate: filtered.deliveredDate ? new Date(filtered.deliveredDate) : undefined,
-      picId: filtered.picId,
-      paidDate: markingAccepted ? new Date(filtered.paidDate ?? Date.now()) : undefined,
-      paidAmount: markingAccepted ? (filtered.paidAmount ?? current.totalAmount) : undefined,
-      paidById: markingAccepted ? session.user.id : undefined,
-    },
-    include: { vendor: { select: { name: true } }, stageHistory: { orderBy: { changedAt: 'asc' } } },
-  })
+  // A duplicate is auto-rejected rather than blocked: the row is still saved
+  // (so it isn't stranded with a placeholder number and no way back to it),
+  // but forced to REJECTED regardless of the status the caller asked for.
+  const applyUpdate = (dup: typeof duplicateOf) =>
+    prisma.invoice.update({
+      where: { id },
+      data: {
+        invoiceNumber: filtered.invoiceNumber,
+        poNumber: filtered.poNumber,
+        invoiceDate: filtered.invoiceDate ? new Date(filtered.invoiceDate) : undefined,
+        dueDate: filtered.dueDate ? new Date(filtered.dueDate) : undefined,
+        subtotal: filtered.subtotal,
+        taxAmount: filtered.taxAmount,
+        totalAmount: filtered.totalAmount,
+        notes: dup
+          ? [filtered.notes ?? current.notes, `Auto-rejected: duplikat dari invoice ${dup.invoiceNumber} (id ${dup.id})`]
+              .filter(Boolean)
+              .join('\n')
+          : filtered.notes,
+        companyId: filtered.companyId,
+        status: dup ? 'REJECTED' : filtered.status,
+        ocrConfidence: filtered.ocrConfidence,
+        sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,
+        deliveredDate: filtered.deliveredDate ? new Date(filtered.deliveredDate) : undefined,
+        picId: filtered.picId,
+        // Transitioning to PAID is when payment is recorded: paidById is
+        // server-assigned (never client-supplied), paidDate/paidAmount
+        // default to now/totalAmount. CLOSED (which always follows PAID)
+        // doesn't re-trigger this — already set from the PAID transition.
+        ...(!dup && filtered.status === 'PAID'
+          ? {
+              paidDate: new Date(filtered.paidDate ?? Date.now()),
+              paidAmount: filtered.paidAmount ?? current.totalAmount,
+              paidById: session.user.id,
+            }
+          : {}),
+      },
+      include: { vendor: { select: { name: true } }, stageHistory: { orderBy: { changedAt: 'asc' } } },
+    })
+
+  let invoice
+  try {
+    invoice = await applyUpdate(duplicateOf)
+  } catch (e) {
+    // The findFirst above and this write aren't atomic — a concurrent
+    // submission can claim the same number in between. The partial unique
+    // index (migration 20260902000000_invoice_duplicate_guard) turns that
+    // race into a P2002 here, which lands in the same auto-reject path.
+    const isDuplicateKey =
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === 'P2002' &&
+      !duplicateOf
+    if (!isDuplicateKey) throw e
+
+    duplicateOf =
+      (await prisma.invoice.findFirst({
+        where: {
+          id: { not: id },
+          vendorId: current.vendorId,
+          invoiceNumber: { equals: filtered.invoiceNumber!, mode: 'insensitive' },
+          status: { not: 'REJECTED' },
+        },
+        select: { id: true, invoiceNumber: true },
+      })) ?? { id: 'unknown', invoiceNumber: filtered.invoiceNumber! }
+    invoice = await applyUpdate(duplicateOf)
+  }
+
+  const effectiveStatus = duplicateOf ? 'REJECTED' : filtered.status
 
   await prisma.auditLog.create({
     data: {
       userId: session.user.id,
-      action: filtered.status ? 'invoice.status_changed' : 'invoice.updated',
+      action: duplicateOf
+        ? 'invoice.auto_rejected'
+        : filtered.status
+          ? 'invoice.status_changed'
+          : 'invoice.updated',
       entityType: 'invoice',
       entityId: id,
-      metadata: filtered.status
-        ? { from: current.status, to: filtered.status, comment }
-        : { fields: Object.keys(filtered) },
+      metadata: duplicateOf
+        ? { from: current.status, to: 'REJECTED', reason: 'duplicate', duplicateOfId: duplicateOf.id, duplicateOfNumber: duplicateOf.invoiceNumber }
+        : filtered.status
+          ? { from: current.status, to: filtered.status, comment }
+          : { fields: Object.keys(filtered) },
     },
   })
 
-  // Any GA/Admin-initiated status change tells the vendor what happened.
-  if (filtered.status && filtered.status !== current.status) {
-    await notifyStatusChanged(id, invoice.invoiceNumber, current.vendorId, filtered.status)
+  // Any GA/Admin-initiated status change tells the vendor what happened —
+  // including an auto-rejection, which the vendor needs to know about most.
+  if (effectiveStatus && effectiveStatus !== current.status) {
+    await notifyStatusChanged(id, invoice.invoiceNumber, current.vendorId, effectiveStatus)
   }
 
-  return NextResponse.json(invoice)
+  // `duplicateOf` is Not Stored on the invoice — it's surfaced here (and in
+  // the audit log above) so the client can explain *why* this came back
+  // rejected instead of showing a generic success toast.
+  return NextResponse.json(duplicateOf ? { ...invoice, duplicateOf } : invoice)
 }
 
 // STATUS_LABELS_ID mirrors the label set other pages hand-roll locally rather

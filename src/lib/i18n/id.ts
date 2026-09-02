@@ -266,6 +266,7 @@ const id = {
     connectionLost: 'Koneksi ke layanan AI terputus. Silakan isi data secara manual.',
     submitFailed: 'Gagal mengirim invoice',
     submitted: 'Invoice berhasil diajukan!',
+    duplicateRejected: 'Nomor invoice {number} sudah terdaftar untuk vendor ini — invoice ditandai ditolak.',
     vendorNotSelected: 'Vendor belum dipilih',
     createFailed: 'Gagal membuat data invoice',
     uploadFailed: 'Gagal mengunggah file',

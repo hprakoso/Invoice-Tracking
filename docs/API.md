@@ -22,7 +22,7 @@ Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvo
 
 Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default `'GA'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, one `invoice_stage_history` row (`stage = picStage`, `changed_by_id` = session user id), `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
 
-> **Known gap** (see the approved plan's Item B, not yet implemented): the row created here is immediately live and visible everywhere — there's no "invisible until confirmed" draft state — so a user abandoning the upload wizard mid-flow leaves a real `RECEIVED` invoice behind, and retrying after a failed upload step can create an orphaned duplicate row.
+> **Known gap:** the row created here is immediately live and visible everywhere — there's no "invisible until confirmed" draft state — so a user abandoning the upload wizard mid-flow leaves a real `RECEIVED` invoice behind carrying a `DRAFT-<timestamp>` placeholder number. The related *orphaned duplicate on retry* bug is fixed (the wizard now reuses the existing row instead of re-POSTing), but a genuinely abandoned session still leaves one row behind.
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
@@ -42,6 +42,14 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 `VENDOR` cannot change `status` at all — there is no self-service resubmit flow (unlike the old `REVISION → SUBMITTED` model, removed with the 2026-09-01 status overhaul).
 
 Any `status` change is checked against `isValidStatusTransition()` (`src/lib/invoiceStatus.ts::VALID_TRANSITIONS`, skipped for `ADMIN`) — 400 with `{ error: 'Invalid status transition', from, to }` if not a valid edge. See [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) for the full graph. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+
+**Duplicate auto-rejection.** When this `PATCH` changes `invoiceNumber`, the server first looks for another invoice with the same `vendorId` + `invoiceNumber` (case-insensitive, excluding `status = 'REJECTED'`). This is the only point a duplicate can be detected — at `POST /api/invoices` the number is still a `DRAFT-<timestamp>` placeholder, so a failed upload retried against the same row is never mistaken for a duplicate.
+
+On a match, the update is **still saved** (so the row isn't stranded with a placeholder number and no way to reach it) but `status` is **forced to `REJECTED`** regardless of what the caller asked for, `paidDate`/`paidAmount`/`paidById` are not applied, and a line is appended to `invoices.notes`: `Auto-rejected: duplikat dari invoice {number} (id {id})`. Writes `audit_logs` with `action: 'invoice.auto_rejected'` and `metadata: { from, to: 'REJECTED', reason: 'duplicate', duplicateOfId, duplicateOfNumber }`. The response body gains a `duplicateOf: { id, invoiceNumber }` field — **Not Stored** on the invoice, present only so the client can explain the rejection instead of showing a generic success toast (a duplicate returns **200, not 4xx**, so clients must check this field rather than relying on the status code).
+
+Match key is deliberately vendor-scoped, **not** company-scoped: the same vendor reusing an invoice number across different bill-to companies still counts as a duplicate. `REJECTED` rows are excluded so a rejected duplicate doesn't permanently burn the number.
+
+The application check and the write aren't atomic, so a concurrent submission can claim the number in between; the partial unique index `invoices_vendor_invoice_number_active_uidx` (migration `20260902000000_invoice_duplicate_guard`) turns that race into a Prisma `P2002`, which the route catches and funnels into the same auto-reject path.
 
 **Marking an invoice `PAID`** (`PAYMENT_SCHEDULED → PAID` is the only valid entry — see `VALID_TRANSITIONS`; `GA_STAFF`/`GA_MANAGER`/`ADMIN` only, never reachable by `VENDOR` since `status` isn't in its writable-fields list at all): `invoices.paid_by` is **always server-assigned** to `session.user.id`, never client-supplied. `paidDate` defaults to `now()` and `paidAmount` defaults to `invoices.total_amount` when the caller omits them (partial-payment amounts can still be supplied explicitly). `PAID`'s only outbound edge is `→ CLOSED`.
 

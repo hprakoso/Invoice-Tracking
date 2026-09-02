@@ -34,6 +34,7 @@ interface LineItem {
 const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
   { key: 'vendor_name', labelKey: 'fieldVendorName' },
   { key: 'invoice_number', labelKey: 'fieldInvoiceNumber' },
+  { key: 'po_number', labelKey: 'fieldPoNumber' },
   { key: 'invoice_date', labelKey: 'fieldInvoiceDate' },
   { key: 'due_date', labelKey: 'fieldDueDate' },
   { key: 'currency', labelKey: 'fieldCurrency' },
@@ -97,6 +98,7 @@ export default function UploadPage() {
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
   const [companyIdValue, setCompanyIdValue] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState('')
+  const [poNumberValue, setPoNumberValue] = useState('')
 
   const [file, setFile] = useState<File | null>(null)
   const [statusMsg, setStatusMsg] = useState('')
@@ -133,6 +135,10 @@ export default function UploadPage() {
     }
     if (!isVendor && !selectedVendorId) {
       toast.error(t.upload.vendorRequired)
+      return
+    }
+    if (!poNumberValue.trim()) {
+      toast.error(t.upload.poRequired)
       return
     }
     setStage('drop')
@@ -177,21 +183,29 @@ export default function UploadPage() {
     try {
       if (!effectiveVendorId) throw new Error(t.upload.vendorNotSelected)
 
-      // 1. Create invoice record (DRAFT — invisible everywhere until Submit)
-      const createRes = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vendorId: effectiveVendorId,
-          companyId: companyIdValue,
-          invoiceNumber: `DRAFT-${Date.now()}`,
-          totalAmount: 0,
-        }),
-      })
-      if (!createRes.ok) throw new Error(t.upload.createFailed)
-      const invoice = await createRes.json()
-      const id: string = invoice.id
-      setInvoiceId(id)
+      // 1. Create the invoice record — but only once. Retrying after a failed
+      // upload/OCR reuses the row created by the previous attempt instead of
+      // orphaning it: this catch block leaves `invoiceId` set on purpose, and
+      // re-POSTing here would leave a stray placeholder invoice behind on
+      // every retry. Cleared only by resetWizard().
+      let id = invoiceId
+      if (!id) {
+        const createRes = await fetch('/api/invoices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vendorId: effectiveVendorId,
+            companyId: companyIdValue,
+            invoiceNumber: `DRAFT-${Date.now()}`,
+            poNumber: poNumberValue.trim(),
+            totalAmount: 0,
+          }),
+        })
+        if (!createRes.ok) throw new Error(t.upload.createFailed)
+        const invoice = await createRes.json()
+        id = invoice.id as string
+        setInvoiceId(id)
+      }
 
       // 2. Upload file
       setStatusMsg(t.upload.uploadingFile)
@@ -239,9 +253,9 @@ export default function UploadPage() {
       es.addEventListener('error', (e) => {
         try {
           const d = JSON.parse((e as MessageEvent).data ?? '{}')
-          setStatusMsg(d.message ?? 'OCR failed')
+          setStatusMsg(d.message ?? t.upload.ocrFailedStatus)
         } catch {
-          setStatusMsg('OCR failed')
+          setStatusMsg(t.upload.ocrFailedStatus)
         }
         setStage('review')
         fallbackToManualFields()
@@ -256,7 +270,7 @@ export default function UploadPage() {
         toast.error(t.upload.connectionLost)
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
+      const msg = err instanceof Error ? err.message : t.common.unknownError
       toast.error(msg)
       setStage('drop')
     }
@@ -271,8 +285,8 @@ export default function UploadPage() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        status: 'SUBMITTED',
         invoiceNumber: editableValues['invoice_number'] || `INV-${Date.now()}`,
+        poNumber: editableValues['po_number'] || poNumberValue.trim() || undefined,
         invoiceDate: editableValues['invoice_date'] || null,
         dueDate: editableValues['due_date'] || null,
         totalAmount:
@@ -293,6 +307,15 @@ export default function UploadPage() {
       return
     }
 
+    // The server saves duplicates rather than rejecting the request, so a 200
+    // isn't automatically a success — it may have come back force-REJECTED.
+    const saved = await res.json().catch(() => ({}))
+    if (saved.duplicateOf) {
+      toast.error(t.upload.duplicateRejected.replace('{number}', saved.duplicateOf.invoiceNumber))
+      router.push(`/invoices/${invoiceId}`) // detail page shows the rejection reason
+      return
+    }
+
     setStage('done')
     toast.success(t.upload.submitted)
     setTimeout(() => router.push('/invoices'), 1500)
@@ -309,6 +332,7 @@ export default function UploadPage() {
     setOverallConfidence(0)
     setCompanyIdValue('')
     setSelectedVendorId('')
+    setPoNumberValue('')
   }
 
   const selectedCompanyName = companies.find((c) => c.id === companyIdValue)?.name
@@ -366,6 +390,15 @@ export default function UploadPage() {
               </select>
             </div>
           )}
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.poLabel}</label>
+            <Input
+              value={poNumberValue}
+              onChange={(e) => setPoNumberValue(e.target.value)}
+              placeholder={t.upload.poPlaceholder}
+              className="h-10 text-sm"
+            />
+          </div>
           <Button onClick={continueFromSelect} className="w-full gap-2">
             {t.upload.continue} <ArrowRight className="h-4 w-4" />
           </Button>
@@ -378,7 +411,16 @@ export default function UploadPage() {
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3 py-2">
             <span>{t.upload.billTo}: <strong className="text-gray-700 dark:text-gray-200">{selectedCompanyName}</strong></span>
             {selectedVendorName && <span>· {t.upload.vendorTag}: <strong className="text-gray-700 dark:text-gray-200">{selectedVendorName}</strong></span>}
-            <button onClick={() => setStage('select')} className="ml-auto text-blue-600 hover:underline">{t.upload.change}</button>
+            {/* Going back to change company/vendor/PO invalidates any invoice
+                row a previous failed attempt already created — vendorId isn't
+                PATCH-writable, so it can't be corrected in place; drop the
+                reference and let the next attempt create a fresh one. */}
+            <button
+              onClick={() => { setInvoiceId(null); setStage('select') }}
+              className="ml-auto text-blue-600 hover:underline"
+            >
+              {t.upload.change}
+            </button>
           </div>
           <div
             {...getRootProps()}

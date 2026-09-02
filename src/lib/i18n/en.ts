@@ -268,6 +268,7 @@ const en: Dictionary = {
     connectionLost: 'Connection to the AI service was lost. Please enter the data manually.',
     submitFailed: 'Failed to submit invoice',
     submitted: 'Invoice submitted successfully!',
+    duplicateRejected: 'Invoice number {number} already exists for this vendor — marked as rejected.',
     vendorNotSelected: 'Vendor not selected',
     createFailed: 'Failed to create invoice record',
     uploadFailed: 'Failed to upload file',
