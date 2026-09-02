@@ -99,11 +99,24 @@ export async function GET(
           controller.enqueue(emit('line_items', { items: extracted.line_items }))
         }
 
-        // Save extracted data to DB
+        // Save extracted data to DB.
+        //
+        // `invoiceNumber` is deliberately NOT written here. It's the one field
+        // the duplicate check in PATCH /api/invoices/[id] keys on, and that
+        // check is the only place it runs — writing the extracted number here
+        // would slip past it. Two things went wrong when this route did write
+        // it (both seen in a real browser run, 2026-09-03):
+        //   1. Abandoning the wizard after OCR parked a real invoice number on
+        //      a live RECEIVED invoice, so re-uploading the same document was
+        //      auto-rejected as a duplicate of the user's own abandoned draft.
+        //   2. A second OCR of the same document tripped the partial unique
+        //      index, and this route's catch turned the whole extraction into
+        //      an SSE error — silently discarding every other extracted field.
+        // The client still receives the number via the `field` events above and
+        // submits it through PATCH, which duplicate-checks it properly.
         await prisma.invoice.update({
           where: { id },
           data: {
-            invoiceNumber: extracted.invoice_number?.value ?? invoice.invoiceNumber,
             invoiceDate: extracted.invoice_date?.value ? new Date(extracted.invoice_date.value) : null,
             dueDate: extracted.due_date?.value ? new Date(extracted.due_date.value) : null,
             currency: extracted.currency?.value ?? 'IDR',

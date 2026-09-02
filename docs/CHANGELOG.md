@@ -8,6 +8,21 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-03 — Fix: OCR wrote invoiceNumber past the duplicate check
+
+**Found by running the app in a browser**, not by tests — `tsc`, lint and the suite were all green with this bug present.
+
+**What went wrong.** `GET /api/invoices/[id]/ocr` persisted the extracted `invoice_number` straight onto the invoice. That field is the one the duplicate check in `PATCH /api/invoices/[id]` keys on, and `PATCH` is the only place that check runs — so OCR was writing it through a path with no check at all. Two observed failures:
+
+1. **False-positive duplicate — the exact case the feature was asked to prevent.** Reaching the wizard's review step runs OCR, which parked a real invoice number on a live `RECEIVED` invoice. Abandoning the wizard there (closing the tab) left that number occupied, so re-uploading *the same document* was auto-rejected as a duplicate — of the user's own abandoned draft.
+2. **Silent loss of extracted data.** With the number already taken, OCR's write tripped the partial unique index from `20260902000000_invoice_duplicate_guard`. The route's `catch` turned that into a generic SSE `error`, discarding every other extracted field and leaking a raw Prisma constraint message.
+
+**Fix.** OCR no longer writes `invoiceNumber` — `PATCH` is now its single writer, which is what the duplicate check already assumed. The extracted number still reaches the UI through the existing `field` SSE event and is submitted normally, so nothing changes for the user except that it now gets checked. An abandoned session keeps its `DRAFT-<timestamp>` placeholder instead of burning a real number.
+
+**Verified in the browser, both directions** (the failure mode and the feature it protects): abandoning after OCR now leaves 0 invoices holding the extracted number and the subsequent legitimate submission succeeds; submitting the same number twice still auto-rejects the second, with the first left `RECEIVED` and the duplicates `REJECTED`.
+
+**Why tests missed it:** the bug lived in the interaction between two routes and a DB constraint, reachable only by actually walking the wizard. The unit suite covers pure functions, and no route-level or end-to-end test harness exists in this repo.
+
 ### 2026-09-03 — Stage lead-time + by-company dashboard widgets, extra filters, stage notification
 
 Four independent items (Item D of the approved plan), plus one blocking bug they surfaced.

@@ -91,7 +91,8 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 | Streamed field | Source |
 |---|---|
 | `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
-| Persisted after stream: `invoiceNumber`, `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
+| Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
+| `invoiceNumber` | **Streamed but deliberately NOT persisted here.** It's the field the duplicate check keys on, and that check lives only in `PATCH /api/invoices/[id]` — writing it here would slip past it. The client receives it via the `field` event and submits it through `PATCH`, which duplicate-checks it properly. See the note in the route for the two failures this caused when OCR did write it |
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
 | `document_type` SSE event, and persisted | `invoice_documents.type` / `.classification_confidence` for the document this OCR ran against, matched by `file_path`. The extraction call classifies the document in the same request it already makes, so the primary document costs no extra Gemini call — the standalone `classifyDocument()` is only for supporting files |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
