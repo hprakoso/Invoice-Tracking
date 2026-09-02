@@ -51,6 +51,23 @@ export async function GET(
 
         const extracted = await extractInvoiceFields(buffer, mimeType)
 
+        // The extraction call classifies the document as a side effect, so
+        // the primary document's type comes from here rather than a second
+        // Gemini request. Matched by file_path — that's what this route read.
+        await prisma.invoiceDocument.updateMany({
+          where: { invoiceId: id, filePath: invoice.filePath },
+          data: {
+            type: extracted.document_type,
+            classificationConfidence: extracted.classification_confidence,
+          },
+        })
+        controller.enqueue(
+          emit('document_type', {
+            type: extracted.document_type,
+            confidence: extracted.classification_confidence,
+          }),
+        )
+
         // Emit each field one by one for the animated reveal
         const fieldOrder = [
           { key: 'vendor_name', label: 'Nama Vendor' },

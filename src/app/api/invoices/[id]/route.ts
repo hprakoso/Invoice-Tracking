@@ -27,6 +27,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       items: { orderBy: { sortOrder: 'asc' } },
       pic: { select: { id: true, name: true, role: true } },
       paidBy: { select: { id: true, name: true, role: true } },
+      documents: { orderBy: { createdAt: 'asc' } },
       stageHistory: { orderBy: { changedAt: 'asc' } },
     },
   })

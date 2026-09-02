@@ -27,7 +27,7 @@ Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -66,7 +66,22 @@ Auth: `ADMIN` only. **Hard delete** — the row is actually removed (there is no
 ### `POST /api/invoices/[id]/upload`
 Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
 
-Writes: file to `uploads/invoices/` via `saveUploadedFile()` (`src/lib/services/fileService.ts`), `invoices.file_path`, `invoices.file_type` (status is untouched), `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { fileName, fileType }`). One file per invoice — re-uploading overwrites the previous file at the same derived path (`{invoiceId}.{ext}`); see the approved plan's Item C for the planned multi-file model (not yet implemented).
+Optional form field `primary=true` marks the file the upload wizard drives OCR from. It changes two things: the file is **not** sent through the standalone classifier (the OCR extraction call classifies it anyway, so a second Gemini request would be wasted), and the legacy `invoices.file_path`/`file_type` columns are pointed at it. Everything else defaults to a supporting document.
+
+Writes: file to storage via `saveUploadedFile()` (`src/lib/services/fileService.ts`) at `{invoiceId}/{documentId}.{ext}`, one `invoice_documents` row (`type`/`classification_confidence` from `classifyDocument()` for non-primary files, `OTHER`/null for primary until OCR runs), `invoices.file_path`/`file_type` when `primary=true`, and `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { documentId, fileName, fileType, type, classificationConfidence }`). Returns the created `invoice_documents` row (**not** the invoice, unlike before this became multi-file).
+
+**Multiple files per invoice** — each call creates a new document rather than overwriting, so the client posts once per file. Classification failure (Gemini down, no API key) is caught and falls back to `OTHER`: a classification problem must never lose a user's upload.
+
+### `PATCH /api/invoices/[id]/documents/[documentId]`
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`. Body `{ type }` validated by `updateDocumentTypeSchema` (one of `INVOICE`/`TAX_INVOICE`/`BAST`/`OTHER`). 404 if the document doesn't belong to this invoice.
+
+This is the manual override that actually guarantees a misclassified document gets corrected — the AI label is a starting point, not the final word, and the control is offered on every document, not only low-confidence ones. Writes: `invoice_documents.type`, and **clears `classification_confidence` to null** (it described certainty in a label that no longer applies; leaving it would make a human-assigned type render as a machine guess). Writes `audit_logs` (`action: 'invoice.document_reclassified'`, `metadata: { documentId, from, to }`).
+
+### `DELETE /api/invoices/[id]/documents/[documentId]`
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`. Removes a document attached by mistake. Hard-deletes the row; the **storage object is deliberately left in place** (orphaned but harmless) so an accidental click stays recoverable — every read path goes through the row, not the blob. Writes `audit_logs` (`action: 'invoice.document_removed'`, `metadata: { documentId, originalName, type }`).
+
+### `GET /api/invoices/[id]/documents/[documentId]/file`
+Auth: any authenticated user; `VENDOR` gets 403 unless the document's invoice belongs to their vendor. The lookup is scoped by `invoiceId` **and** `documentId`, so a document id from another invoice can't be read by pairing it with an invoice the caller is allowed to see. **Not Stored** — streams the raw bytes at `invoice_documents.file_path`. The older `GET /api/invoices/[id]/file` still serves the legacy single `invoices.file_path` and is unchanged.
 
 ### `GET /api/invoices/[id]/ocr` (SSE stream)
 Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Streams `status`, `field`, `line_items`, `done`/`error` events.
@@ -76,6 +91,7 @@ Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rat
 | `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
 | Persisted after stream: `invoiceNumber`, `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
+| `document_type` SSE event, and persisted | `invoice_documents.type` / `.classification_confidence` for the document this OCR ran against, matched by `file_path`. The extraction call classifies the document in the same request it already makes, so the primary document costs no extra Gemini call — the standalone `classifyDocument()` is only for supporting files |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
 
 OCR never changes `invoices.status` on success or error — the invoice stays `RECEIVED` (its status at creation) throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data. Advancing `status` from there is a separate GA/ADMIN-only action (`VENDOR` cannot write `status` at all).

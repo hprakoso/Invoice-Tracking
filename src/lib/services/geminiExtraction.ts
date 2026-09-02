@@ -22,9 +22,25 @@ const LINE_ITEM_SCHEMA = {
   required: ['description', 'total'],
 }
 
+// Shared by the full extraction call and the standalone classifier below.
+// Kept identical in both so a document classified one way by the cheap call
+// can't be classified differently by the expensive one.
+const DOCUMENT_TYPES = ['INVOICE', 'TAX_INVOICE', 'BAST', 'OTHER'] as const
+export type DocumentTypeKey = (typeof DOCUMENT_TYPES)[number]
+
+const DOCUMENT_TYPE_GUIDE = `Document types:
+- INVOICE: a commercial invoice / tagihan / faktur billing for goods or services. Has an invoice number, amounts, and payment terms.
+- TAX_INVOICE: an Indonesian Faktur Pajak — a government tax document. Identified by a "Faktur Pajak" heading, a 16-digit Nomor Seri Faktur Pajak (NSFP), and DJP/Direktorat Jenderal Pajak references. NOT the same as a commercial invoice even though it also lists amounts and PPN.
+- BAST: Berita Acara Serah Terima — a handover/acceptance record confirming goods or services were delivered and received. Has signature blocks for both parties and usually no payment amount.
+- OTHER: anything else (purchase order, delivery note, bank details, contract, correspondence, or a document you cannot confidently place).`
+
+const CLASSIFICATION_RULE = `Set document_type to the best match, and classification_confidence to your certainty 0-100. If two types are plausible or the document is unclear, prefer OTHER with a low confidence rather than guessing a specific type — a wrong specific label is worse than an honest OTHER.`
+
 const EXTRACTION_SCHEMA = {
   type: Type.OBJECT,
   properties: {
+    document_type: { type: Type.STRING, enum: [...DOCUMENT_TYPES] },
+    classification_confidence: { type: Type.NUMBER, description: 'Document-type certainty, 0-100' },
     vendor_name: FIELD_SCHEMA,
     invoice_number: FIELD_SCHEMA,
     invoice_date: FIELD_SCHEMA,
@@ -36,12 +52,28 @@ const EXTRACTION_SCHEMA = {
     line_items: { type: Type.ARRAY, items: LINE_ITEM_SCHEMA },
   },
   required: [
+    'document_type', 'classification_confidence',
     'vendor_name', 'invoice_number', 'invoice_date', 'due_date',
     'currency', 'subtotal', 'tax_amount', 'total_amount', 'line_items',
   ],
 }
 
-const PROMPT = `You are an expert invoice data extractor. The attached document is an invoice, which may be in Indonesian, English, or mixed language. Read it directly (it may be a scanned image or a PDF) and extract the fields defined by the response schema.
+const CLASSIFICATION_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    document_type: { type: Type.STRING, enum: [...DOCUMENT_TYPES] },
+    classification_confidence: { type: Type.NUMBER, description: 'Document-type certainty, 0-100' },
+  },
+  required: ['document_type', 'classification_confidence'],
+}
+
+const PROMPT = `You are an expert document processor for an invoice system. Read the attached document directly (it may be a scanned image or a PDF), in Indonesian, English, or mixed language.
+
+First classify it, then extract the invoice fields defined by the response schema.
+
+${DOCUMENT_TYPE_GUIDE}
+
+${CLASSIFICATION_RULE}
 
 For Indonesian invoices: "Tanggal" = invoice date, "Jatuh Tempo" = due date, "Subtotal" = subtotal, "PPN" = tax (usually 11%), "Total"/"Total Bayar" = total amount.
 
@@ -49,7 +81,14 @@ Rules:
 - Dates must be formatted YYYY-MM-DD, or null if not present/legible.
 - All amounts are plain numeric strings with no currency symbol or thousand separators (Indonesian invoices often write 1.000.000 for one million — strip the dots).
 - confidence is your own certainty in the extracted value, 0-100. Use a low confidence (not null) for values you had to infer, and set value to null with confidence near 0 for fields genuinely absent from the document.
-- line_items should list every billable line on the invoice; if none are itemized, return an empty array.`
+- line_items should list every billable line on the invoice; if none are itemized, return an empty array.
+- If the document is not an INVOICE, still fill in whatever fields it genuinely contains and set the rest to null with confidence 0 — do not invent invoice data for a document that has none.`
+
+const CLASSIFY_PROMPT = `Identify what kind of document this is. Read it directly (it may be a scanned image or a PDF), in Indonesian, English, or mixed language.
+
+${DOCUMENT_TYPE_GUIDE}
+
+${CLASSIFICATION_RULE}`
 
 export interface ExtractedField {
   value: string | null
@@ -57,6 +96,8 @@ export interface ExtractedField {
 }
 
 export interface ExtractionResult {
+  document_type: DocumentTypeKey
+  classification_confidence: number
   vendor_name: ExtractedField
   invoice_number: ExtractedField
   invoice_date: ExtractedField
@@ -105,5 +146,60 @@ export async function extractInvoiceFields(buffer: Buffer, mimeType: string): Pr
     .map((field) => field.confidence)
   const overall = confidences.length > 0 ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0
 
-  return { ...parsed, overall_confidence: Math.round(overall * 10) / 10 }
+  const { type, confidence } = normalizeClassification(parsed.document_type, parsed.classification_confidence)
+
+  return {
+    ...parsed,
+    document_type: type,
+    classification_confidence: confidence,
+    overall_confidence: Math.round(overall * 10) / 10,
+  }
+}
+
+// Below this the model's own label isn't trusted enough to stand as a
+// specific type — it falls back to OTHER so a wrong specific label never
+// silently sticks. The real guarantee against misclassification is the
+// manual override in the UI, not this threshold; 70 matches the
+// medium-confidence cutoff ConfidenceBar already uses elsewhere.
+export const CLASSIFICATION_CONFIDENCE_FLOOR = 70
+
+export function normalizeClassification(
+  rawType: string | null | undefined,
+  rawConfidence: number | null | undefined,
+): { type: DocumentTypeKey; confidence: number } {
+  const confidence = Math.max(0, Math.min(100, Number(rawConfidence) || 0))
+  const known = (DOCUMENT_TYPES as readonly string[]).includes(rawType ?? '')
+  if (!known || confidence < CLASSIFICATION_CONFIDENCE_FLOOR) {
+    return { type: 'OTHER', confidence }
+  }
+  return { type: rawType as DocumentTypeKey, confidence }
+}
+
+// Cheap classify-only call for the supporting documents uploaded alongside
+// the invoice. Running the full extraction schema against a BAST would spend
+// tokens extracting invoice fields that aren't there; this asks one question.
+export async function classifyDocument(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ type: DocumentTypeKey; confidence: number }> {
+  const apiKey = process.env.GOOGLE_API_KEY
+  if (!apiKey) throw new Error('GOOGLE_API_KEY is not configured')
+
+  const ai = new GoogleGenAI({ apiKey })
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: CLASSIFY_PROMPT }, { inlineData: { mimeType, data: buffer.toString('base64') } }],
+      },
+    ],
+    config: { responseMimeType: 'application/json', responseSchema: CLASSIFICATION_SCHEMA },
+  })
+
+  const text = response.text
+  if (!text) throw new Error('Gemini returned an empty classification response')
+
+  const parsed = JSON.parse(text) as { document_type?: string; classification_confidence?: number }
+  return normalizeClassification(parsed.document_type, parsed.classification_confidence)
 }

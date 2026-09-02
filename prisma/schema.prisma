@@ -44,6 +44,16 @@ enum PICStage {
   TREASURY
 }
 
+// Document kinds a vendor submits alongside the invoice itself. OTHER is both
+// a real category and the safe fallback when AI classification isn't confident
+// enough — see classifyDocument() in src/lib/services/geminiExtraction.ts.
+enum InvoiceDocumentType {
+  INVOICE
+  TAX_INVOICE
+  BAST
+  OTHER
+}
+
 model User {
   id            String   @id @default(uuid())
   email         String   @unique
@@ -65,6 +75,7 @@ model User {
   notifications     Notification[]
   updatedReminderSettings ReminderSetting[] @relation("ReminderUpdatedBy")
   stageChanges      InvoiceStageHistory[] @relation("StageChangedBy")
+  uploadedDocuments InvoiceDocument[]     @relation("DocumentUploadedBy")
 
   @@map("users")
 }
@@ -160,11 +171,34 @@ model Invoice {
   pic            User?          @relation("Pic", fields: [picId], references: [id])
   paidBy         User?          @relation("PaidBy", fields: [paidById], references: [id])
   items          InvoiceItem[]
+  documents      InvoiceDocument[]
   stageHistory   InvoiceStageHistory[]
   auditLogs      AuditLog[]
   notifications  Notification[]
 
   @@map("invoices")
+}
+
+// One row per uploaded file. Replaces the single Invoice.filePath/fileType
+// pair (kept as legacy columns during the transition) — a real submission
+// carries several documents: the invoice, its tax invoice (faktur pajak), a
+// BAST, and so on.
+model InvoiceDocument {
+  id                       String              @id @default(uuid())
+  invoiceId                String              @map("invoice_id")
+  type                     InvoiceDocumentType @default(OTHER)
+  filePath                 String              @map("file_path")
+  fileType                 String              @map("file_type")
+  originalName             String              @map("original_name")
+  // AI classification confidence 0-100, null when a human set the type.
+  classificationConfidence Float?              @map("classification_confidence")
+  uploadedById             String?             @map("uploaded_by")
+  createdAt                DateTime            @default(now()) @map("created_at")
+
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  uploadedBy User?   @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+
+  @@map("invoice_documents")
 }
 
 // SLA source — stage durations are computed purely from these recorded

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
+import type { InvoiceDocumentType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/helpers'
 import { saveUploadedFile } from '@/lib/services/fileService'
+import { classifyDocument } from '@/lib/services/geminiExtraction'
 
 export async function POST(
   req: NextRequest,
@@ -59,12 +62,48 @@ export async function POST(
     return NextResponse.json({ error: 'File too large. Maximum 10MB.' }, { status: 400 })
   }
 
-  const { filePath, fileType } = await saveUploadedFile(file, id, buffer)
+  // One document row per uploaded file, keyed by its own id so several files
+  // can coexist under one invoice (the old "{invoiceId}.{ext}" key had exactly
+  // one slot and silently overwrote).
+  const documentId = randomUUID()
+  const { filePath, fileType } = await saveUploadedFile(file, id, documentId, buffer)
 
-  const invoice = await prisma.invoice.update({
-    where: { id },
-    data: { filePath, fileType },
+  // `primary` marks the file the wizard drives OCR from; it's classified by
+  // the full extraction call later, so classifying it again here would be a
+  // wasted request. Everything else gets the cheap classify-only call.
+  const isPrimary = formData.get('primary') === 'true'
+  let type: InvoiceDocumentType = 'OTHER'
+  let classificationConfidence: number | null = null
+  if (!isPrimary) {
+    try {
+      const result = await classifyDocument(buffer, file.type)
+      type = result.type
+      classificationConfidence = result.confidence
+    } catch {
+      // Classification is best-effort — a Gemini outage or missing API key
+      // must not lose the user's file. It stays OTHER and can be set by hand.
+      type = 'OTHER'
+    }
+  }
+
+  const document = await prisma.invoiceDocument.create({
+    data: {
+      id: documentId,
+      invoiceId: id,
+      type,
+      filePath,
+      fileType,
+      originalName: file.name,
+      classificationConfidence,
+      uploadedById: session.user.id,
+    },
   })
+
+  // Legacy single-file columns still point at the primary document so the
+  // pre-multi-file read paths keep working until they're removed.
+  if (isPrimary) {
+    await prisma.invoice.update({ where: { id }, data: { filePath, fileType } })
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -72,9 +111,9 @@ export async function POST(
       action: 'invoice.file_uploaded',
       entityType: 'invoice',
       entityId: id,
-      metadata: { fileName: file.name, fileType },
+      metadata: { documentId, fileName: file.name, fileType, type, classificationConfidence },
     },
   })
 
-  return NextResponse.json(invoice)
+  return NextResponse.json(document)
 }

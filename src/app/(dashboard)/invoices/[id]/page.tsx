@@ -58,6 +58,14 @@ interface Invoice {
   pic: { id: string; name: string } | null
   paidBy: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string; sortOrder: number }[]
+  documents?: {
+    id: string
+    type: string
+    filePath: string
+    fileType: string
+    originalName: string
+    classificationConfidence: number | null
+  }[]
   stageHistory: {
     id: string
     stage: string
@@ -89,27 +97,19 @@ function ConfidenceBar({ value }: { value: number }) {
   )
 }
 
-function DocumentViewer({ invoice }: { invoice: Invoice }) {
+// Renders one file. Split out of DocumentViewer so each tab gets its own
+// page-number state — sharing one counter across documents left tab 2 opening
+// on tab 1's page number.
+function DocumentPreview({ fileUrl, fileType, alt }: { fileUrl: string; fileType: string; alt: string }) {
   const [numPages, setNumPages] = useState<number>(1)
   const [pageNumber, setPageNumber] = useState(1)
   const { t } = useI18n()
 
-  if (!invoice.filePath || !invoice.fileType) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border-2 border-dashed text-gray-400">
-        <FileText className="h-10 w-10 mb-2" />
-        <p className="text-sm">{t.invoiceDetail.noDocument}</p>
-      </div>
-    )
-  }
-
-  const fileUrl = `/api/invoices/${invoice.id}/file`
-
-  if (['jpg', 'jpeg', 'png'].includes(invoice.fileType)) {
+  if (['jpg', 'jpeg', 'png'].includes(fileType)) {
     return (
       <div className="rounded-xl overflow-hidden border bg-gray-50">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={fileUrl} alt={invoice.invoiceNumber} className="w-full h-auto object-contain max-h-[700px]" />
+        <img src={fileUrl} alt={alt} className="w-full h-auto object-contain max-h-[700px]" />
       </div>
     )
   }
@@ -142,6 +142,104 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
           </Button>
         </div>
       )}
+    </div>
+  )
+}
+
+function DocumentViewer({ invoice, canEdit, onChanged }: { invoice: Invoice; canEdit: boolean; onChanged: () => void }) {
+  const [active, setActive] = useState(0)
+  const { t } = useI18n()
+
+  const documents = invoice.documents ?? []
+
+  // Falls back to the legacy single Invoice.filePath for rows predating
+  // invoice_documents that somehow weren't backfilled.
+  if (documents.length === 0) {
+    if (!invoice.filePath || !invoice.fileType) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border-2 border-dashed text-gray-400">
+          <FileText className="h-10 w-10 mb-2" />
+          <p className="text-sm">{t.invoiceDetail.noDocument}</p>
+        </div>
+      )
+    }
+    return (
+      <DocumentPreview
+        fileUrl={`/api/invoices/${invoice.id}/file`}
+        fileType={invoice.fileType}
+        alt={invoice.invoiceNumber}
+      />
+    )
+  }
+
+  const current = documents[Math.min(active, documents.length - 1)]
+
+  async function reclassify(documentId: string, type: string) {
+    const res = await fetch(`/api/invoices/${invoice.id}/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    })
+    if (!res.ok) {
+      toast.error(t.upload.docTypeUpdateFailed)
+      return
+    }
+    onChanged()
+  }
+
+  return (
+    <div className="space-y-3">
+      {documents.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="tablist">
+          {documents.map((doc, i) => (
+            <button
+              key={doc.id}
+              role="tab"
+              aria-selected={i === active}
+              onClick={() => setActive(i)}
+              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                i === active
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+              }`}
+            >
+              {(t.documentType as Record<string, string>)[doc.type] ?? doc.type}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+        <span className="min-w-0 truncate" title={current.originalName}>{current.originalName}</span>
+        {canEdit ? (
+          <select
+            value={current.type}
+            onChange={(e) => reclassify(current.id, e.target.value)}
+            aria-label={t.upload.docTypeLabel}
+            className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            {['INVOICE', 'TAX_INVOICE', 'BAST', 'OTHER'].map((k) => (
+              <option key={k} value={k}>{(t.documentType as Record<string, string>)[k] ?? k}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-800">
+            {(t.documentType as Record<string, string>)[current.type] ?? current.type}
+          </span>
+        )}
+        {current.classificationConfidence !== null && current.classificationConfidence !== undefined && (
+          <span className="tabular-nums text-[10px] text-gray-400" title={t.upload.docTypeAiHint}>
+            AI {Math.round(current.classificationConfidence)}%
+          </span>
+        )}
+      </div>
+
+      <DocumentPreview
+        key={current.id}
+        fileUrl={`/api/invoices/${invoice.id}/documents/${current.id}/file`}
+        fileType={current.fileType}
+        alt={current.originalName}
+      />
     </div>
   )
 }
@@ -324,7 +422,7 @@ export default function InvoiceDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         {/* Left: Document (sticky on desktop) */}
         <div className="lg:sticky lg:top-4">
-          <DocumentViewer invoice={invoice} />
+          <DocumentViewer invoice={invoice} canEdit={canManageStage} onChanged={fetchInvoice} />
         </div>
 
         {/* Right: Fields (scrollable) */}

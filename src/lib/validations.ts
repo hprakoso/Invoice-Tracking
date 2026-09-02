@@ -66,6 +66,12 @@ export const updateInvoiceStageSchema = z.object({
   stage: z.enum(PIC_STAGES),
 })
 
+export const DOCUMENT_TYPES = ['INVOICE', 'TAX_INVOICE', 'BAST', 'OTHER'] as const
+
+export const updateDocumentTypeSchema = z.object({
+  type: z.enum(DOCUMENT_TYPES),
+})
+
 export const createCompanySchema = z.object({
   name: z.string().min(1, 'Company name required').max(200),
   npwp: z.string().max(50).optional().nullable(),

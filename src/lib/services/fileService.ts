@@ -15,15 +15,22 @@ const supabase =
     ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
     : null
 
-// filePath is always just "{invoiceId}.{ext}" — server-derived, never taken from
-// user input — so there's no path-traversal surface to defend against on read.
+// filePath is "{invoiceId}/{documentId}.{ext}" — every component is
+// server-derived (both ids are uuids we generated), never taken from user
+// input, so there's no path-traversal surface to defend against on read.
+//
+// Pre-2026-09-03 rows use the older flat "{invoiceId}.{ext}" key, which is
+// still read back correctly: getFileBuffer() takes the stored path verbatim
+// rather than re-deriving it, so both layouts coexist and the backfilled
+// legacy documents needed no storage migration.
 export async function saveUploadedFile(
   file: File,
   invoiceId: string,
+  documentId: string,
   buffer: Buffer,
 ): Promise<{ filePath: string; fileType: string }> {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? 'pdf'
-  const objectPath = `${invoiceId}.${ext}`
+  const objectPath = `${invoiceId}/${documentId}.${ext}`
 
   if (supabase) {
     const { error } = await supabase.storage
@@ -34,11 +41,10 @@ export async function saveUploadedFile(
   }
 
   const { writeFile, mkdir } = await import('fs/promises')
-  const { existsSync } = await import('fs')
-  if (!existsSync(UPLOAD_DIR)) {
-    await mkdir(UPLOAD_DIR, { recursive: true })
-  }
-  await writeFile(join(UPLOAD_DIR, objectPath), buffer)
+  const { dirname } = await import('path')
+  const target = join(UPLOAD_DIR, objectPath)
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, buffer)
   return { filePath: objectPath, fileType: ext }
 }
 

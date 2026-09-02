@@ -8,6 +8,27 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-03 — Multi-file attachments per invoice + AI document-type classification
+
+**What.** An invoice submission carries more than the invoice: a tax invoice (faktur pajak), a BAST, supporting files. The schema could hold exactly one — `invoices.file_path`/`file_type`, with a storage key literally `{invoiceId}.{ext}`, silently overwritten on re-upload. New `invoice_documents` table (migration `20260903000000_invoice_documents`) holds one row per file; storage keys become `{invoiceId}/{documentId}.{ext}`.
+
+**Expand/contract, deliberately.** `invoices.file_path`/`file_type` are kept and still written for the primary document, and the migration backfills one `INVOICE`-typed row per invoice that already had a file — **reusing the old flat storage key**, so no stored blob had to move. `getFileBuffer()` reads the stored path verbatim rather than re-deriving it, which is what lets both layouts coexist. Dropping the legacy columns is a later migration once every read path has moved over.
+
+**Classification, in three layers** (the requirement was explicit that misclassification is unacceptable):
+1. `document_type` + `classification_confidence` added to the existing OCR extraction schema, so the primary document is classified **for free** in a call that was already happening. Supporting documents use a new `classifyDocument()` with a minimal 2-field schema — running the full invoice-extraction schema against a BAST would spend tokens extracting fields that don't exist. One shared prompt describes all four types, including how a Faktur Pajak (NSFP, DJP references) differs from a commercial invoice.
+2. `normalizeClassification()` forces `OTHER` below 70% confidence or for any value outside the enum, and clamps out-of-range scores. A wrong specific label is worse than an honest "Other" — the prompt says the same.
+3. **The manual override is the actual guarantee**, not layers 1–2. Every document at any confidence gets a type dropdown, in both the wizard and the detail page (`PATCH …/documents/[documentId]`). Setting it by hand nulls `classification_confidence` so a human decision stops rendering as an AI guess.
+
+Classification errors are caught and fall back to `OTHER` — a Gemini outage or missing API key must not lose a user's file.
+
+**Routes:** `POST …/upload` now creates an `InvoiceDocument` and returns it (previously returned the invoice); takes an optional `primary=true` marking the OCR-driving file, which skips the redundant classify call and updates the legacy columns. New `PATCH`/`DELETE …/documents/[documentId]` (reclassify / remove) and `GET …/documents/[documentId]/file`. The per-document file route scopes its lookup by **both** invoice id and document id, so a document id from another invoice can't be read by pairing it with an invoice the caller may see. Delete removes the row but deliberately leaves the storage object — an accidental click stays recoverable, and every read path goes through the row.
+
+**UI:** the wizard's review step gained a supporting-documents list (add / retype / remove, with the AI confidence shown when present); the detail page's `DocumentViewer` became tabbed. `DocumentPreview` was split out so each tab owns its page-number state — one shared counter meant opening tab 2 on tab 1's page.
+
+**Verification.** `tsc`, `lint`, and **50/50 tests** (5 new, covering `normalizeClassification` — the one genuinely pure piece of this work, and the one worth pinning: the confidence floor, unknown-enum rejection, garbage/NaN input, and clamping). Behavioral checks against local Postgres confirmed two files coexist under one invoice with distinct paths and both read back byte-identical. The migration's backfill reported **0 rows on this database, which is correct rather than broken** — no seeded invoice carries a file; the SQL was separately exercised inside a transaction against a row given a `file_path`, produced the expected `INVOICE`-typed row with null confidence, and was rolled back.
+
+**Why:** Item C of the approved 2026-09-01 plan.
+
 ### 2026-09-02 — Liquid Glass dark-first redesign, rebrand to "VISTA"
 
 **What:** Full visual reskin of `feat/prod-adjustment`, independent of and unrelated to the "Architectural Glass" redesign already shipped on `feat/new-design` (2026-08-14, see `memory.md`) — these are two separate design explorations on two separate branches, not a reversion of that decision. App renamed "Invoice Intelligence" → **VISTA** ("Vendor Invoice Submission & Tracking Assistant", `src/app/layout.tsx` metadata). Dark is now the brand default (`<html class="dark">`, `useTheme()`'s initial state and no-`localStorage` fallback changed from reading `prefers-color-scheme` to a hardcoded `'dark'`); `/login` and `/change-password` are force-light instead (new `src/components/auth/AuthThemeReset.tsx` strips the `dark` class on mount and restores the stored theme on unmount, since an inline pre-paint script can't rerun on a client-side soft navigation the way it does on a hard load).

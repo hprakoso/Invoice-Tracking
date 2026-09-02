@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft, ArrowRight, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
@@ -44,6 +44,17 @@ const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
 ]
 
 type UploadStage = 'select' | 'drop' | 'uploading' | 'ocr' | 'review' | 'done'
+
+const DOC_TYPE_KEYS = ['INVOICE', 'TAX_INVOICE', 'BAST', 'OTHER'] as const
+
+// One row of the supporting-documents list on the review step. Mirrors the
+// InvoiceDocument the upload route returns.
+interface UploadedDoc {
+  id: string
+  type: string
+  originalName: string
+  classificationConfidence: number | null
+}
 
 function ConfidenceBar({ confidence }: { confidence: number }) {
   const color =
@@ -101,6 +112,11 @@ export default function UploadPage() {
   const [poNumberValue, setPoNumberValue] = useState('')
 
   const [file, setFile] = useState<File | null>(null)
+  // Supporting documents (tax invoice, BAST, ...) uploaded alongside the
+  // invoice. The invoice file itself stays in `file` — it's the one that
+  // drives OCR and the review form.
+  const [extraDocs, setExtraDocs] = useState<UploadedDoc[]>([])
+  const [uploadingExtra, setUploadingExtra] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [fields, setFields] = useState<ExtractedField[]>([])
   const [ocrFailed, setOcrFailed] = useState(false)
@@ -211,6 +227,9 @@ export default function UploadPage() {
       setStatusMsg(t.upload.uploadingFile)
       const formData = new FormData()
       formData.append('file', uploadFile)
+      // The invoice file itself: skip the standalone classify call, the OCR
+      // extraction below classifies it in the same request it already makes.
+      formData.append('primary', 'true')
       const uploadRes = await fetch(`/api/invoices/${id}/upload`, {
         method: 'POST',
         body: formData,
@@ -276,6 +295,53 @@ export default function UploadPage() {
     }
   }
 
+  // Supporting documents are uploaded one request each — the existing route
+  // already validates and classifies a single file, and for the handful of
+  // documents a submission carries, N requests beats a new batch endpoint.
+  async function uploadExtraDocs(files: File[]) {
+    if (!invoiceId || files.length === 0) return
+    setUploadingExtra(true)
+    for (const f of files) {
+      const fd = new FormData()
+      fd.append('file', f)
+      const res = await fetch(`/api/invoices/${invoiceId}/upload`, { method: 'POST', body: fd })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(`${f.name}: ${data.error ?? t.upload.uploadFailed}`)
+        continue
+      }
+      const doc: UploadedDoc = await res.json()
+      setExtraDocs((prev) => [...prev, doc])
+    }
+    setUploadingExtra(false)
+  }
+
+  async function changeDocType(documentId: string, type: string) {
+    const res = await fetch(`/api/invoices/${invoiceId}/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    })
+    if (!res.ok) {
+      toast.error(t.upload.docTypeUpdateFailed)
+      return
+    }
+    // Confidence is cleared server-side once a human sets the type, so the
+    // row stops rendering as an AI guess.
+    setExtraDocs((prev) =>
+      prev.map((d) => (d.id === documentId ? { ...d, type, classificationConfidence: null } : d)),
+    )
+  }
+
+  async function removeDoc(documentId: string) {
+    const res = await fetch(`/api/invoices/${invoiceId}/documents/${documentId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      toast.error(t.upload.docRemoveFailed)
+      return
+    }
+    setExtraDocs((prev) => prev.filter((d) => d.id !== documentId))
+  }
+
   async function confirmAndSubmit() {
     if (!invoiceId) return
     const vendorNameField = editableValues['vendor_name']
@@ -333,6 +399,7 @@ export default function UploadPage() {
     setCompanyIdValue('')
     setSelectedVendorId('')
     setPoNumberValue('')
+    setExtraDocs([])
   }
 
   const selectedCompanyName = companies.find((c) => c.id === companyIdValue)?.name
@@ -612,9 +679,69 @@ export default function UploadPage() {
             )}
           </div>
 
+          {/* Supporting documents — tax invoice, BAST, etc. Type is
+              AI-detected but always correctable, since a wrong label is worse
+              than no label. */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t.upload.supportingDocsTitle}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.supportingDocsHint}</p>
+            </div>
+
+            {extraDocs.length > 0 && (
+              <ul className="space-y-2">
+                {extraDocs.map((doc) => (
+                  <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-lg border dark:border-gray-700 px-3 py-2">
+                    <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{doc.originalName}</span>
+                    <select
+                      value={doc.type}
+                      onChange={(e) => changeDocType(doc.id, e.target.value)}
+                      aria-label={t.upload.docTypeLabel}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {DOC_TYPE_KEYS.map((k) => (
+                        <option key={k} value={k}>{t.documentType[k]}</option>
+                      ))}
+                    </select>
+                    {doc.classificationConfidence !== null && (
+                      <span className="text-[10px] text-gray-400 tabular-nums" title={t.upload.docTypeAiHint}>
+                        AI {Math.round(doc.classificationConfidence)}%
+                      </span>
+                    )}
+                    <button
+                      onClick={() => removeDoc(doc.id)}
+                      aria-label={t.upload.docRemove}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      {t.common.delete}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed dark:border-gray-600 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+              <Plus className="h-3.5 w-3.5" />
+              {uploadingExtra ? t.upload.docUploading : t.upload.addSupportingDoc}
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.jpg,.jpeg,.png"
+                disabled={uploadingExtra}
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  e.target.value = '' // let the same file be re-picked after a failure
+                  void uploadExtraDocs(files)
+                }}
+              />
+            </label>
+          </div>
+
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-2">
-            <Button onClick={confirmAndSubmit} className="flex-1 gap-2">
+            <Button onClick={confirmAndSubmit} disabled={uploadingExtra} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
               {t.upload.confirmAndSubmit}
             </Button>
