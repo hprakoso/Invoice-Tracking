@@ -488,5 +488,10 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 |---|---|---|
 | `60635df` | 2026-09-01 | feat: invoice status workflow overhaul (17-value enum + VALID_TRANSITIONS) |
 
+### Phase 18 — Duplicate-invoice auto-rejection, upload-retry orphan fix
+| Commit | Date | Message |
+|---|---|---|
+| `eb2ee04` | 2026-09-02 | feat: duplicate-invoice auto-rejection + fix orphan row on upload retry |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
