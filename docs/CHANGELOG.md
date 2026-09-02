@@ -570,5 +570,10 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 | `a4b4bc2` | 2026-09-02 | refactor: replace dashboard donut/aging charts with trend + flow charts |
 | `73b7f24` | 2026-09-02 | feat: apply Liquid Glass dark-first redesign, rebrand app to VISTA |
 
+### Phase 20 — Multi-file attachments + AI document classification
+| Commit | Date | Message |
+|---|---|---|
+| `0bfd116` | 2026-09-03 | feat: multi-file attachments per invoice with AI document classification |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
