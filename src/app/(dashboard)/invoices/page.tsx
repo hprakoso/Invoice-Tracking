@@ -54,6 +54,15 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [vendorId, setVendorId] = useState('')
+  const [poNumber, setPoNumber] = useState('')
+  const [picId, setPicId] = useState('')
+  const [amountMin, setAmountMin] = useState('')
+  const [amountMax, setAmountMax] = useState('')
+  const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
+
+  // PIC is internal-only (scrubbed from vendor-facing invoice responses), so
+  // vendors don't get a filter for it either.
+  const canFilterByPic = ['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(session?.user?.role ?? '')
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -61,14 +70,24 @@ export default function InvoicesPage() {
     if (search) params.set('search', search)
     if (status) params.set('status', status)
     if (vendorId) params.set('vendorId', vendorId)
+    if (poNumber) params.set('poNumber', poNumber)
+    if (picId) params.set('picId', picId)
+    if (amountMin) params.set('amountMin', amountMin)
+    if (amountMax) params.set('amountMax', amountMax)
     const res = await fetch(`/api/invoices?${params}`)
     const data = await res.json()
     setInvoices(Array.isArray(data) ? data : [])
     setLoading(false)
-  }, [search, status, vendorId])
+  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax])
 
   useEffect(() => {
     fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
+    // PIC filter lists GA staff — the same source the upload wizard's PIC
+    // dropdown uses. VENDOR callers get 403 here and simply see no filter.
+    if (canFilterByPic) {
+      fetch('/api/users?role=GA_STAFF').then(r => r.json()).then((d: unknown) => setGaStaff(Array.isArray(d) ? d : []))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -138,6 +157,49 @@ export default function InvoicesPage() {
             <option value="">{t.dashboard.allVendors}</option>
             {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
+        </div>
+
+        <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
+          <Input
+            placeholder={t.invoices.poFilterPlaceholder}
+            value={poNumber}
+            onChange={e => setPoNumber(e.target.value)}
+            className="sm:max-w-[180px]"
+          />
+          {canFilterByPic && (
+            <select
+              value={picId}
+              onChange={e => setPicId(e.target.value)}
+              aria-label={t.invoices.picFilterLabel}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">{t.invoices.allPics}</option>
+              {gaStaff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          )}
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              placeholder={t.invoices.amountMinPlaceholder}
+              value={amountMin}
+              onChange={e => setAmountMin(e.target.value)}
+              aria-label={t.invoices.amountMinPlaceholder}
+              className="w-full sm:w-[140px]"
+            />
+            <span className="text-sm text-gray-400">–</span>
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              placeholder={t.invoices.amountMaxPlaceholder}
+              value={amountMax}
+              onChange={e => setAmountMax(e.target.value)}
+              aria-label={t.invoices.amountMaxPlaceholder}
+              className="w-full sm:w-[140px]"
+            />
+          </div>
         </div>
       </div>
 

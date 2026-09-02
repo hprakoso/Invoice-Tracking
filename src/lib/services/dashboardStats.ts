@@ -6,6 +6,67 @@ import type { Prisma, InvoiceStatus } from '@prisma/client'
 // than a PAID/CLOSED one is, so it's excluded the same way.
 export const NON_OPEN_STATUSES: InvoiceStatus[] = ['PAID', 'CLOSED', 'REJECTED']
 
+// Display order for the per-stage lead-time widget — every stage appears even
+// when no invoice has reached it yet, so the pipeline reads as a fixed shape
+// rather than a list that grows as data arrives.
+const STAGE_ORDER = ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY'] as const
+
+export interface StageLeadTimeRow {
+  stage: string
+  avgDays: number | null
+  completed: number
+  currentCount: number
+}
+
+/**
+ * Average time spent in each stage. A stage's duration is the gap to the NEXT
+ * recorded stage **for the same invoice**; the last row per invoice is still
+ * open, so it counts toward `currentCount` (invoices sitting there now) but
+ * not toward the average — folding in-progress time into a "how long does
+ * this stage take" figure would understate it.
+ *
+ * `rows` must be ordered by (invoiceId, changedAt): the invoice grouping is
+ * detected by comparing adjacent rows, and ordering by time is what keeps
+ * every gap non-negative even if stages were recorded out of workflow order
+ * (a correction moving an invoice backwards is still elapsed time somewhere).
+ */
+export function foldStageLeadTimes(
+  rows: { invoiceId: string; stage: string; changedAt: Date }[],
+): StageLeadTimeRow[] {
+  const totals = new Map<string, { totalMs: number; completed: number; currentCount: number }>()
+  const entryFor = (stage: string) => {
+    let entry = totals.get(stage)
+    if (!entry) {
+      entry = { totalMs: 0, completed: 0, currentCount: 0 }
+      totals.set(stage, entry)
+    }
+    return entry
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const next = rows[i + 1]
+    const entry = entryFor(row.stage)
+    if (!next || next.invoiceId !== row.invoiceId) {
+      entry.currentCount += 1
+    } else {
+      entry.totalMs += next.changedAt.getTime() - row.changedAt.getTime()
+      entry.completed += 1
+    }
+  }
+
+  return STAGE_ORDER.map((stage) => {
+    const entry = totals.get(stage)
+    const avg = entry && entry.completed > 0 ? entry.totalMs / entry.completed / 86400000 : null
+    return {
+      stage,
+      avgDays: avg === null ? null : Math.round(avg * 10) / 10,
+      completed: entry?.completed ?? 0,
+      currentCount: entry?.currentCount ?? 0,
+    }
+  })
+}
+
 // UTC month key — matches the codebase's ISO/UTC date handling elsewhere.
 const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 
@@ -51,6 +112,35 @@ export function buildDashboardFilter(
     if (to) where.dueDate.lte = new Date(to)
   }
 
+  applyInvoiceSearchFilters(searchParams, where)
+
+  return where
+}
+
+// Shared by buildDashboardFilter() and GET /api/invoices so both surfaces
+// accept the same filters and can't drift apart.
+export function applyInvoiceSearchFilters(
+  searchParams: URLSearchParams,
+  where: Prisma.InvoiceWhereInput,
+): Prisma.InvoiceWhereInput {
+  const poNumber = searchParams.get('poNumber')
+  if (poNumber) where.poNumber = { contains: poNumber, mode: 'insensitive' }
+
+  const picId = searchParams.get('picId')
+  if (picId) where.picId = picId
+
+  // Non-numeric input is ignored rather than turned into NaN, which Prisma
+  // would reject at the driver with an opaque error.
+  const amountMin = Number(searchParams.get('amountMin'))
+  const amountMax = Number(searchParams.get('amountMax'))
+  const hasMin = searchParams.get('amountMin') !== null && Number.isFinite(amountMin)
+  const hasMax = searchParams.get('amountMax') !== null && Number.isFinite(amountMax)
+  if (hasMin || hasMax) {
+    where.totalAmount = {}
+    if (hasMin) where.totalAmount.gte = amountMin
+    if (hasMax) where.totalAmount.lte = amountMax
+  }
+
   return where
 }
 
@@ -74,7 +164,10 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
   const monthKeys = trailingMonthKeys(now, 12)
   const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1))
 
-  const [totalInvoices, statusCounts, totalPayable, overdueCount, openCount, agingBuckets, trendRows] =
+  const [
+    totalInvoices, statusCounts, totalPayable, overdueCount, openCount, agingBuckets, trendRows,
+    companyCounts, stageRows,
+  ] =
     await Promise.all([
       prisma.invoice.count({ where: filter }),
       prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: filter }),
@@ -90,6 +183,22 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
       prisma.invoice.findMany({
         where: { ...filter, createdAt: { gte: windowStart } },
         select: { createdAt: true, status: true, totalAmount: true },
+      }),
+      prisma.invoice.groupBy({
+        by: ['companyId'],
+        _count: { id: true },
+        _sum: { totalAmount: true },
+        where: filter,
+      }),
+      // Stage durations can't be expressed as a Prisma aggregate (they need
+      // the gap between consecutive rows), so the rows are folded in JS below.
+      // ponytail: loads every stage row for the filtered set — fine at this
+      // scale (a few rows per invoice); move to a SQL window function (LEAD)
+      // if the invoice count ever makes this the slow query on the page.
+      prisma.invoiceStageHistory.findMany({
+        where: { invoice: filter },
+        select: { invoiceId: true, stage: true, changedAt: true },
+        orderBy: [{ invoiceId: 'asc' }, { changedAt: 'asc' }],
       }),
     ])
 
@@ -110,8 +219,33 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
     else if (inv.status === 'PAID') statusByMonth[i].accepted += 1
   }
 
+  // Company names come from a second query — groupBy can't include a relation.
+  const companyIds = companyCounts.map((c) => c.companyId).filter((id): id is string => id !== null)
+  const companyNames = new Map(
+    companyIds.length > 0
+      ? (await prisma.company.findMany({
+          where: { id: { in: companyIds } },
+          select: { id: true, name: true },
+        })).map((c) => [c.id, c.name])
+      : [],
+  )
+  const companyBreakdown = companyCounts
+    .map((c) => ({
+      companyId: c.companyId,
+      // Invoices with no company still count — they're shown as "unassigned"
+      // rather than silently dropped, since a missing bill-to is worth seeing.
+      companyName: c.companyId ? (companyNames.get(c.companyId) ?? null) : null,
+      count: c._count.id,
+      totalAmount: Number(c._sum?.totalAmount ?? 0),
+    }))
+    .sort((a, b) => b.totalAmount - a.totalAmount)
+
+  const stageLeadTimes = foldStageLeadTimes(stageRows)
+
   return {
     totalInvoices,
+    companyBreakdown,
+    stageLeadTimes,
     totalPayable: Number(totalPayable._sum?.totalAmount ?? 0),
     overdueCount,
     openCount,

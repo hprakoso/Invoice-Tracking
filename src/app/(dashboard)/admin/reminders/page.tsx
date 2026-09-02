@@ -52,6 +52,15 @@ const TYPE_LABELS: Record<string, { titleKey: ReminderTypeKey; descKey: Reminder
     usesRoles: false,
     usesDays: false,
   },
+  // Unlike status_changed (which targets the invoice's own vendor), this one
+  // notifies an internal role group — pic_stage is internal routing, never
+  // shown to vendors.
+  stage_assigned: {
+    titleKey: 'typeStageAssignedTitle',
+    descKey: 'typeStageAssignedDesc',
+    usesRoles: true,
+    usesDays: false,
+  },
 }
 
 const ALL_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']

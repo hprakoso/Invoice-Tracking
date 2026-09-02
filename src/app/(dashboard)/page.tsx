@@ -7,6 +7,8 @@ import { KPICard } from '@/components/dashboard/KPICard'
 import { MonthlyTrendChart } from '@/components/dashboard/MonthlyTrendChart'
 import { StatusFlowChart } from '@/components/dashboard/StatusFlowChart'
 import { AgingList } from '@/components/dashboard/AgingList'
+import { StageLeadTimeList, type StageLeadTime } from '@/components/dashboard/StageLeadTimeList'
+import { CompanyList, type CompanyBreakdownItem } from '@/components/dashboard/CompanyList'
 import { ChartEmpty } from '@/components/dashboard/ChartEmpty'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -27,6 +29,8 @@ interface DashboardData {  totalInvoices: number
   agingBuckets: { label: string; amount: number }[]
   monthlyTrend: { month: string; totalAmount: number; count: number }[]
   statusByMonth: { month: string; entered: number; accepted: number }[]
+  stageLeadTimes: StageLeadTime[]
+  companyBreakdown: CompanyBreakdownItem[]
   recentInvoices: {
     id: string
     invoiceNumber: string
@@ -237,6 +241,24 @@ export default function DashboardPage() {
                 <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.agingSubtitle}</p>
               </div>
               <AgingList data={translatedAgingBuckets ?? []} openCount={data.openCount} />
+            </section>
+          </div>
+
+          {/* Per-stage lead time + per-company totals */}
+          <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+            <section className="glass-panel rounded-2xl p-4 sm:p-6">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-foreground">{t.dashboard.stageLeadTimeTitle}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.stageLeadTimeSubtitle}</p>
+              </div>
+              <StageLeadTimeList data={data.stageLeadTimes ?? []} />
+            </section>
+            <section className="glass-panel rounded-2xl p-4 sm:p-6">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-foreground">{t.dashboard.byCompanyTitle}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.byCompanySubtitle}</p>
+              </div>
+              <CompanyList data={data.companyBreakdown ?? []} />
             </section>
           </div>
 

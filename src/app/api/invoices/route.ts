@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
+import { applyInvoiceSearchFilters } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
@@ -22,6 +23,9 @@ export async function GET(req: NextRequest) {
     if (from) where.dueDate.gte = new Date(from)
     if (to) where.dueDate.lte = new Date(to)
   }
+  // poNumber / picId / amountMin / amountMax — shared with the dashboard's
+  // filter builder so the two surfaces accept the same params.
+  applyInvoiceSearchFilters(searchParams, where)
 
   // VENDOR can only see their own invoices — server-enforced, never client-supplied
   if (session.user.role === 'VENDOR') {

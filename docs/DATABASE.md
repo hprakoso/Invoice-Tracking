@@ -171,7 +171,7 @@ Admin-editable config, one row per notification type — replaces what used to b
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| type | text, unique | `due_soon`, `overdue`, `invoice_submitted`, `revision_requested` — the 4 rows `prisma/seed.ts` creates by default |
+| type | text, unique | One of `REMINDER_TYPES` (`src/lib/validations.ts`): `due_soon`, `overdue`, `status_changed`, `stage_assigned`, plus the two never-fired leftovers `invoice_submitted`/`revision_requested`. All 6 rows are created by `prisma/seed.ts` |
 | is_active | bool, default true | turns the whole trigger off, no deploy needed |
 | days_before | int, nullable | only meaningful for `due_soon`; default 3 |
 | recipient_roles | jsonb | array of `Role` strings, e.g. `["GA_STAFF","GA_MANAGER"]`. Ignored by `revision_requested`, which always targets the invoice's own vendor |
@@ -187,7 +187,7 @@ Admin-editable config, one row per notification type — replaces what used to b
 | id | uuid PK | |
 | user_id | uuid FK → `users.id` | recipient |
 | invoice_id | uuid FK → `invoices.id`, nullable | |
-| type | text | `due_soon`/`overdue` (cron, `SUBMITTED`/`REVISION` invoices, recipients from `reminder_settings.recipient_roles`), `invoice_submitted` (on `VENDOR`-created invoices, recipients from settings), `revision_requested` (on `status → REVISION`, always the invoice's own `VENDOR` users) |
+| type | text | Matches the `reminder_settings.type` that produced it: `due_soon`/`overdue` (daily cron over open invoices, recipients from `recipient_roles`), `status_changed` (always the invoice's own `VENDOR` users), `stage_assigned` (recipients from `recipient_roles`, never vendors). `invoice_submitted`/`revision_requested` are never written — nothing fires them |
 | title / body | text | Indonesian copy, generated server-side |
 | is_read | bool, default false | |
 | created_at / read_at | timestamp | |
@@ -214,6 +214,6 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 
 ## Seed data (`prisma/seed.ts`)
 
-Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Destructive — deletes all rows in dependency order before reseeding. Creates a bootstrap `ADMIN` user, demo companies/vendors, and 100 demo invoices (weighted across all 17 `InvoiceStatus` values per the mix in `prisma/seed.ts`, per-invoice `stageHistory` backfilled) with `sendDate`/`deliveredDate`/`picId` populated.
+Blocked from running when `NODE_ENV=production` (commit `7b55a52`). Destructive — deletes all rows in dependency order before reseeding. Creates a bootstrap `ADMIN` user, demo companies/vendors, 100 demo invoices (weighted across all 17 `InvoiceStatus` values per the mix in `prisma/seed.ts`, per-invoice `stageHistory` populated) with `sendDate`/`deliveredDate`/`picId`, and the **6 `reminder_settings` rows** — one per `REMINDER_TYPES` entry.
 
-> **Doc-drift note:** this paragraph previously described "6 demo users" and "4 default `reminder_settings` rows" — neither matches the current `seed.ts` (one bootstrap admin; `reminder_settings` is only ever `deleteMany()`'d, never recreated, so `due_soon`/`overdue`/`status_changed` are dead on a fresh seed). Corrected the invoice-related claims as part of the 2026-09-01 status overhaul; the user/reminder-settings seeding gap is pre-existing and unrelated — see the approved plan's Item D4 for the reminder-settings fix.
+Those reminder rows matter more than they look: every notification trigger looks its row up by `type` and silently no-ops when it's missing, so **without them the entire notification system is dead on a fresh database**. It was, until 2026-09-03 — the wipe removed them and nothing recreated them, despite this doc having claimed otherwise. Defaults are conservative: in-app on, **email off** (delivery needs `RESEND_API_KEY` plus a verified domain), and the two never-fired types (`invoice_submitted`, `revision_requested`) are seeded `isActive: false` so the admin page doesn't present them as working triggers.

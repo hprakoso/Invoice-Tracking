@@ -56,6 +56,7 @@ async function main() {
   await prisma.notification.deleteMany()
   await prisma.auditLog.deleteMany()
   await prisma.invoiceStageHistory.deleteMany()
+  await prisma.invoiceDocument.deleteMany()
   await prisma.invoiceItem.deleteMany()
   await prisma.invoice.deleteMany()
   await prisma.reminderSetting.deleteMany()
@@ -79,6 +80,27 @@ async function main() {
     },
   })
   console.log(`Bootstrap admin ready: ${adminEmail}`)
+
+  // Reminder settings — every notification trigger looks its row up by type
+  // and silently no-ops when it's missing, so without these rows the whole
+  // notification system is dead on a fresh database (it was, until
+  // 2026-09-03: the wipe above removed them and nothing recreated them).
+  // Defaults are conservative: in-app on, email off, since email delivery
+  // needs RESEND_API_KEY and a verified domain.
+  await prisma.reminderSetting.createMany({
+    data: [
+      { type: 'due_soon', daysBefore: 3, recipientRoles: ['GA_STAFF', 'GA_MANAGER'], extraEmails: [], emailEnabled: false },
+      { type: 'overdue', daysBefore: null, recipientRoles: ['GA_STAFF', 'GA_MANAGER'], extraEmails: [], emailEnabled: false },
+      // Targets the invoice's own vendor; recipientRoles is ignored for this type.
+      { type: 'status_changed', daysBefore: null, recipientRoles: [], extraEmails: [], emailEnabled: false },
+      { type: 'stage_assigned', daysBefore: null, recipientRoles: ['GA_STAFF', 'GA_MANAGER'], extraEmails: [], emailEnabled: false },
+      // Configurable but never fired — see the note on REMINDER_TYPES in
+      // src/lib/validations.ts. Seeded inactive so the admin page doesn't
+      // present them as working triggers.
+      { type: 'invoice_submitted', daysBefore: null, recipientRoles: ['GA_STAFF'], extraEmails: [], emailEnabled: false, isActive: false },
+      { type: 'revision_requested', daysBefore: null, recipientRoles: [], extraEmails: [], emailEnabled: false, isActive: false },
+    ],
+  })
 
   // --- Dummy data for dashboard charts (invoices + their required parents) ---
   const rand = mulberry32(20260818)

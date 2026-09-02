@@ -95,7 +95,20 @@ No in-app approval workflow — that used to be a 2-step GA_MANAGER→FINANCE si
 ### Reminders
 `checkDueDates()` in `src/lib/services/reminderScheduler.ts`, invoked by `GET /api/cron/reminders` on a schedule declared in `vercel.json` (daily — Vercel Hobby caps cron at once/day, see `docs/PRODUCTION_PLAN.md` §4.2). Previously ran hourly in-process via `node-cron` (`src/instrumentation.ts`) — removed because a long-lived scheduler doesn't survive Vercel's serverless scale-to-zero. Scans invoices with status `SUBMITTED`/`REVISION` (the two "open" statuses) due within N days (`due_soon`) or already past due (`overdue`); creates `Notification` rows (deduplicated per 24h window) when `inAppEnabled`, and sends one summary email via Resend when `emailEnabled` — the two channels are gated independently, not tied together.
 
-Thresholds, recipients, and per-channel toggles for all four notification types (`due_soon`, `overdue`, `invoice_submitted`, `revision_requested`) are **admin-editable**, not hardcoded — `ReminderSetting` rows, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). `invoice_submitted` (vendor creates an invoice) and `revision_requested` (status → `REVISION`, always to the invoice's own vendor) fire inline from the invoice routes rather than the cron scan — see `docs/API.md#invoice-event-notifications`. Email delivery no-ops silently everywhere if `RESEND_API_KEY` isn't set.
+Thresholds, recipients, and per-channel toggles are **admin-editable**, not hardcoded — one `ReminderSetting` row per type, managed at `/admin/reminders` (`docs/API.md#reminder-settings`). Six types exist:
+
+| Type | Fires from | Recipients |
+|---|---|---|
+| `due_soon` | daily cron scan | configured role group |
+| `overdue` | daily cron scan | configured role group |
+| `status_changed` | `PATCH /api/invoices/[id]` | the invoice's own vendor (role group ignored) |
+| `stage_assigned` | `PATCH /api/invoices/[id]/stage` | configured role group — **never** the vendor, since `pic_stage` is internal routing |
+| `invoice_submitted` | ⚠️ nothing | — |
+| `revision_requested` | ⚠️ nothing | — |
+
+The last two are leftovers from the removed `DRAFT`/`SUBMITTED`/`REVISION` status model: still configurable, but no code path fires them. They're seeded `isActive: false` so the admin page doesn't present them as working. Left in place rather than dropped, so an admin's existing edits aren't silently discarded.
+
+Every trigger looks its row up by `type` and no-ops when it's missing, which makes `prisma/seed.ts` creating these rows load-bearing — see [DATABASE.md](./DATABASE.md#seed-data-prismaseedts). Email delivery no-ops silently everywhere if `RESEND_API_KEY` isn't set.
 
 ### Dashboard filters and Excel export
 `GET /api/dashboard` and `GET /api/dashboard/export` share `buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`) — both read the same query params (`search`, `status`, `vendorId`, `companyId`, `from`/`to`) into one `Prisma.InvoiceWhereInput`, so the dashboard's KPI cards/charts/table and the Excel export always reflect the identical filtered view, never two different numbers for "the same" filter. The Dashboard page (`src/app/(dashboard)/page.tsx`) is a client component with its own filter bar, matching `/invoices`'s pattern — this also removed the page's previous server-side self-fetch to its own `/api/dashboard` (built from `process.env.NEXTAUTH_URL`), which was the root cause of a real `ECONNREFUSED` bug on first Vercel deploy when that env var was misconfigured.

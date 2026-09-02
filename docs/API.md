@@ -7,7 +7,7 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ### `GET /api/invoices`
 Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
 
-Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only).
+Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`). The last four are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
 
 | Response field | Source |
 |---|---|
@@ -58,7 +58,9 @@ Writes: `invoices` row (partial update, only the filtered/allowed fields). `audi
 ### `PATCH /api/invoices/[id]/stage`
 Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (vendors are read-only on `picStage`). Body validated by `updateInvoiceStageSchema` (`{ stage: PICStage }`) — no transition restriction, any of the 5 stages is reachable from any other (unlike `status`, this is a free control).
 
-Writes: `invoices.pic_stage`, a new `invoice_stage_history` row (`stage`, `changed_by_id` = session user id, `changed_at` = `now()`), `audit_logs` (`action: 'invoice.stage_changed'`, `metadata: { stage }`). No reminder notification fires here yet — see the approved plan's Item D4 (not yet implemented).
+Writes: `invoices.pic_stage`, a new `invoice_stage_history` row (`stage`, `changed_by_id` = session user id, `changed_at` = `now()`), `audit_logs` (`action: 'invoice.stage_changed'`, `metadata: { from, to }`).
+
+Fires the **`stage_assigned`** reminder trigger when the stage actually changes value — re-selecting the current stage still appends a history row (an explicit "still here" record) but doesn't re-notify. Unlike `status_changed`, recipients are the **role group** on the setting, never the invoice's vendor: `pic_stage` is internal routing and is scrubbed from vendor-facing responses entirely, so telling a vendor their invoice moved to SSU would leak process detail they can't act on. Gated by `isActive` and the two channel flags like every other type.
 
 ### `DELETE /api/invoices/[id]`
 Auth: `ADMIN` only. **Hard delete** — the row is actually removed (there is no `CANCELLED` status in the current `InvoiceStatus` enum to soft-cancel into). Writes `audit_logs` (`action: 'invoice.deleted'`) before the delete.
@@ -153,7 +155,7 @@ Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` 
 ### `GET /api/dashboard`
 Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below, server-forced (query-param `vendorId` is ignored for vendors, same IDOR protection as `GET /api/invoices`). Aggregation logic and the filter-building are shared with the export route via `getDashboardStats()`/`buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
 
-Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`). Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
+Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`. Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
 
 | Response field | Source |
 |---|---|
@@ -165,6 +167,8 @@ Query params (all optional, all combine with AND): `search` (matches `invoice_nu
 | `agingBuckets[]` | `formula`: `SUM(invoices.total_amount)` bucketed by `due_date` relative to now (0–30 / 31–60 / 61–90 / >90 days), same status scoping as `totalPayable` |
 | `monthlyTrend[]` | `formula`: trailing 12 UTC months — `{month, totalAmount, count}` per month, from invoices `WHERE created_at` in that month, no status filter |
 | `statusByMonth[]` | `formula`: trailing 12 UTC months — `{month, entered, accepted}`, counting invoices created that month currently in `status = 'RECEIVED'` (entered) vs `status = 'PAID'` (accepted). A pipeline-health proxy, not a true historical flow rate — see `StatusFlowChart.tsx` |
+| `companyBreakdown[]` | `formula`: `GROUP BY invoices.company_id` over the filtered set → `{companyId, companyName, count, totalAmount}`, sorted by `totalAmount` descending. Company names come from a second `companies` query (Prisma `groupBy` can't include a relation). Invoices with no company are kept as a `companyId: null` row rather than dropped — a missing bill-to is worth seeing |
+| `stageLeadTimes[]` | `formula`: `foldStageLeadTimes()` over `invoice_stage_history` rows for the filtered invoices → `{stage, avgDays, completed, currentCount}` for all 5 stages in workflow order. A stage's duration is the gap to the **next** history row of the same invoice; the last row per invoice is still open, so it counts toward `currentCount` (invoices sitting there now) but **not** the average. Rows are ordered by `(invoice_id, changed_at)`, which is what keeps every gap non-negative even when a stage was recorded out of workflow order. `avgDays` is null when no invoice has completed that stage — rendered as "—", not 0 |
 | `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
 
 ### `GET /api/dashboard/export`
@@ -237,9 +241,12 @@ Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for open invoices (`
 
 ## Invoice-event notifications
 
-One `reminder_settings`-gated trigger, fired inline from `PATCH /api/invoices/[id]` (not the cron job):
+Two `reminder_settings`-gated triggers, fired inline from the invoice routes (not the cron job):
 
-- **`status_changed`** — whenever `status` actually changes value. Notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type (the recipient is always the invoice's own vendor). Gated by the `status_changed` `reminder_settings` row like every other type: `isActive`, `inAppEnabled`/`emailEnabled` independently.
+- **`status_changed`** — `PATCH /api/invoices/[id]`, whenever `status` actually changes value. Notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type (the recipient is always the invoice's own vendor). Also fires on a duplicate auto-rejection, which is exactly when the vendor most needs to know.
+- **`stage_assigned`** — `PATCH /api/invoices/[id]/stage`, when `pic_stage` changes value. Notifies active users in the configured `recipientRoles` (default `GA_STAFF`/`GA_MANAGER`) and **never the vendor** — see that route above for why.
+
+Both are gated by their `reminder_settings` row: `isActive`, plus `inAppEnabled`/`emailEnabled` independently.
 
 If `RESEND_API_KEY` isn't configured, the email call no-ops silently (`src/lib/services/email.ts`) rather than failing the request.
 

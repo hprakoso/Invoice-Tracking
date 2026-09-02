@@ -133,7 +133,13 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 })
 
-export const REMINDER_TYPES = ['due_soon', 'overdue', 'invoice_submitted', 'revision_requested', 'status_changed'] as const
+// NOTE: `invoice_submitted` and `revision_requested` are configurable here and
+// in /admin/reminders but nothing fires them — leftovers from the removed
+// DRAFT/SUBMITTED/REVISION status model. Documented in docs/API.md; left in
+// place rather than silently dropping settings an admin may have edited.
+export const REMINDER_TYPES = [
+  'due_soon', 'overdue', 'invoice_submitted', 'revision_requested', 'status_changed', 'stage_assigned',
+] as const
 const REMINDER_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR'] as const
 
 export const updateReminderSettingSchema = z.object({

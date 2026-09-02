@@ -8,6 +8,24 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-03 — Stage lead-time + by-company dashboard widgets, extra filters, stage notification
+
+Four independent items (Item D of the approved plan), plus one blocking bug they surfaced.
+
+**Dashboard: average lead time per PIC stage.** The per-invoice SLA timeline already existed on the detail page; what was missing was the aggregate. `foldStageLeadTimes()` folds `invoice_stage_history` rows into `{stage, avgDays, completed, currentCount}`. A stage's duration is the gap to the **next** history row of the same invoice; the last row per invoice is still open, so it counts toward `currentCount` (invoices sitting there now) but **not** the average — averaging in-progress time would understate how long a stage actually takes. Rows are ordered `(invoiceId, changedAt)`, which is also what keeps every gap non-negative if a stage was ever recorded out of workflow order. Rendered by a new `StageLeadTimeList`, bars scaled against the slowest stage (there are no stored SLA targets, so stage-vs-stage is the only honest comparison) with amber marking the bottleneck. `avgDays: null` renders "—", not 0.
+
+**Dashboard: invoices by company.** `groupBy(['companyId'])` + a second query for names (Prisma `groupBy` can't include a relation), sorted by value. Invoices with no company are kept as an "unassigned" row rather than dropped — a missing bill-to is worth seeing. New `CompanyList` deliberately uses one neutral colour rather than `AGING_COLORS`: company is a nominal dimension, and a healthy→danger ramp would imply a ranking that isn't there.
+
+**Filters: PO number, PIC, amount range.** Added to `GET /api/invoices` and the dashboard's builder through one shared `applyInvoiceSearchFilters()`, so the two surfaces can't drift. Non-numeric amounts are ignored rather than becoming `NaN` (which Prisma rejects with an opaque driver error). The PIC filter is hidden from `VENDOR` — PIC is internal-only and already scrubbed from vendor-facing responses.
+
+**Notification on PIC stage change.** `PATCH …/stage` now fires a new `stage_assigned` trigger, inlined in that route in the same shape as `notifyStatusChanged` — two call sites with genuinely different recipient rules don't justify extracting a shared helper, and merging them would mean parameterising away the only interesting difference. Recipients are the configured **role group, never the vendor**: `pic_stage` is internal routing, so telling a vendor their invoice reached SSU leaks process detail they can't act on. Only a real change notifies — re-selecting the current stage still appends history (an explicit "still here" record) but doesn't re-ping. The route's audit metadata also improved from `{ stage }` to `{ from, to }`.
+
+**The blocking bug this surfaced:** `prisma/seed.ts` wiped `reminder_settings` and never recreated it, and every trigger no-ops when its row is missing — so `due_soon`, `overdue`, and `status_changed` were **already dead on any fresh database**, and `stage_assigned` would have shipped dead too. All 6 rows are now seeded (in-app on, email off since delivery needs `RESEND_API_KEY`; the two never-fired legacy types seeded `isActive: false` so the admin page doesn't present them as working). `docs/DATABASE.md` had claimed these rows existed since before the 2026-09-01 pass — that claim is now true rather than aspirational.
+
+**Also fixed in passing:** the `status_changed` admin-page description still listed the old 4-value status names, user-visible and wrong since the status overhaul.
+
+**Verification.** `tsc`, `lint`, **56/56 tests** (6 new on `foldStageLeadTimes`: gap measurement, last-row-is-open, the invoice-boundary guard that would otherwise read one invoice's last stage into the next invoice's first, cross-invoice averaging, all-stages-always-returned, and the backwards-correction case). Against the reseeded database both aggregates were checked for internal consistency — `currentCount` sums to exactly the invoice count (100/100, i.e. every invoice is held at exactly one stage) and `companyBreakdown` counts sum to the same 100 and come back correctly sorted. Confirmed no negative stage gaps exist in the data via a SQL `LEAD()` cross-check, and that the numbers were byte-identical before and after extracting `foldStageLeadTimes` out of the query function.
+
 ### 2026-09-03 — Multi-file attachments per invoice + AI document-type classification
 
 **What.** An invoice submission carries more than the invoice: a tax invoice (faktur pajak), a BAST, supporting files. The schema could hold exactly one — `invoices.file_path`/`file_type`, with a storage key literally `{invoiceId}.{ext}`, silently overwritten on re-upload. New `invoice_documents` table (migration `20260903000000_invoice_documents`) holds one row per file; storage keys become `{invoiceId}/{documentId}.{ext}`.
