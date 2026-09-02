@@ -613,5 +613,10 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 |---|---|---|
 | `63f5dd8` | 2026-09-03 | feat: stage lead-time + by-company dashboard widgets, filters, stage notification |
 
+### Phase 22 — Browser verification, OCR duplicate-check fix
+| Commit | Date | Message |
+|---|---|---|
+| `0a3ad9e` | 2026-09-03 | fix: stop OCR writing invoiceNumber past the duplicate check |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
