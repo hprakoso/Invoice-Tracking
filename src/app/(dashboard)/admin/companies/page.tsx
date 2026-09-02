@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useI18n } from '@/hooks/useI18n'
 
 interface CompanyRow {
   id: string
@@ -19,6 +20,7 @@ interface CompanyRow {
 const emptyForm = { name: '', npwp: '', address: '', city: '', email: '' }
 
 export default function AdminCompaniesPage() {
+  const { t } = useI18n()
   const [companies, setCompanies] = useState<CompanyRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -47,13 +49,13 @@ export default function AdminCompaniesPage() {
     })
     setSaving(false)
     if (res.ok) {
-      toast.success('Company created')
+      toast.success(t.companies.companyCreated)
       setShowCreate(false)
       setForm(emptyForm)
       fetchCompanies()
     } else {
       const data = await res.json().catch(() => ({}))
-      toast.error(data.error ?? data.details?.join(', ') ?? 'Failed to create company')
+      toast.error(data.error ?? data.details?.join(', ') ?? t.companies.companyCreateFailed)
     }
   }
 
@@ -64,10 +66,10 @@ export default function AdminCompaniesPage() {
       body: JSON.stringify({ isActive: !company.isActive }),
     })
     if (res.ok) {
-      toast.success(company.isActive ? 'Company deactivated' : 'Company reactivated')
+      toast.success(company.isActive ? t.companies.companyDeactivated : t.companies.companyReactivated)
       fetchCompanies()
     } else {
-      toast.error('Update failed')
+      toast.error(t.companies.updateFailed)
     }
   }
 
@@ -75,25 +77,25 @@ export default function AdminCompaniesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Companies</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{companies.length} companies — PT tujuan invoice (bill-to)</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.nav.companies}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t.companies.countSubtitle.replace('{count}', String(companies.length))}</p>
         </div>
         <Button className="gap-2" onClick={() => setShowCreate(v => !v)}>
-          <Plus className="h-4 w-4" /> New Company
+          <Plus className="h-4 w-4" /> {t.companies.newCompany}
         </Button>
       </div>
 
       {showCreate && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input placeholder="Company Name (PT ...)" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-            <Input placeholder="NPWP" value={form.npwp} onChange={e => setForm({ ...form, npwp: e.target.value })} />
-            <Input placeholder="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
-            <Input placeholder="City" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
-            <Input placeholder="Billing Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+            <Input placeholder={t.companies.companyNamePlaceholder} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <Input placeholder={t.companies.colNpwp} value={form.npwp} onChange={e => setForm({ ...form, npwp: e.target.value })} />
+            <Input placeholder={t.vendorProfile.address} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
+            <Input placeholder={t.vendorProfile.city} value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
+            <Input placeholder={t.companies.billingEmail} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
           </div>
           <Button onClick={createCompany} disabled={saving || !form.name}>
-            Create Company
+            {t.companies.createCompany}
           </Button>
         </div>
       )}
@@ -103,11 +105,11 @@ export default function AdminCompaniesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Name</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">NPWP</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">City</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Email</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Active</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.companies.colName}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.companies.colNpwp}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.companies.colCity}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.companies.colEmail}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.companies.colActive}</th>
                 <th className="w-10 px-2"></th>
               </tr>
             </thead>
@@ -118,9 +120,9 @@ export default function AdminCompaniesPage() {
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{c.npwp ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{c.city ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{c.email ?? '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{c.isActive ? 'Yes' : 'No'}</td>
+                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{c.isActive ? t.common.yes : t.common.no}</td>
                   <td className="px-2 py-3">
-                    <Button variant="ghost" size="icon" onClick={() => toggleActive(c)} aria-label={c.isActive ? 'Deactivate' : 'Reactivate'}>
+                    <Button variant="ghost" size="icon" onClick={() => toggleActive(c)} aria-label={c.isActive ? t.companies.deactivate : t.companies.reactivate}>
                       <Trash2 className="h-4 w-4 text-gray-400" />
                     </Button>
                   </td>

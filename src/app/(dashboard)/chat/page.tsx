@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Send, Bot, User, Sparkles, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/hooks/useI18n'
 
 interface Message {
   id: number
@@ -11,14 +12,7 @@ interface Message {
   content: string
 }
 
-const SUGGESTED_PROMPTS = [
-  'Which invoices are past due?',
-  'What is the total outstanding balance?',
-  'Which vendor has the most invoices?',
-  'Which invoices are pending approval?',
-  'What is the total VAT for all invoices this month?',
-  'Explain the invoice approval workflow in this system',
-]
+const PROMPT_KEYS = ['prompt1', 'prompt2', 'prompt3', 'prompt4', 'prompt5', 'prompt6'] as const
 
 function TypingIndicator() {
   const reduced = useReducedMotion()
@@ -84,6 +78,7 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 export default function ChatPage() {
+  const { t } = useI18n()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -116,7 +111,7 @@ export default function ChatPage() {
         }),
       })
       const data = await res.json()
-      const answer = data.answer ?? 'Sorry, no response from AI.'
+      const answer = data.answer ?? t.chat.noResponse
       setMessages((prev) => [...prev, { id: nextId(), role: 'assistant', content: answer }])
     } catch {
       setMessages((prev) => [
@@ -124,7 +119,7 @@ export default function ChatPage() {
         {
           id: nextId(),
           role: 'assistant',
-          content: 'Failed to connect to AI service. Make sure the AI service is running.',
+          content: t.chat.aiUnavailable,
         },
       ])
     } finally {
@@ -157,14 +152,14 @@ export default function ChatPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Invoice Assistant</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Powered by AI · Ask anything about your invoices</p>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{t.nav.aiAssistant}</h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t.chat.subtitle}</p>
           </div>
         </div>
         {!isEmpty && (
           <Button variant="ghost" size="sm" onClick={reset} className="gap-1.5 text-gray-500">
             <RotateCcw className="h-3.5 w-3.5" />
-            Reset
+            {t.chat.reset}
           </Button>
         )}
       </div>
@@ -181,20 +176,20 @@ export default function ChatPage() {
               <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mx-auto">
                 <Bot className="h-8 w-8 text-blue-600" />
               </div>
-              <p className="text-gray-700 dark:text-gray-300 font-semibold">Ask me about your invoices</p>
+              <p className="text-gray-700 dark:text-gray-300 font-semibold">{t.chat.askPrompt}</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">
-                I can help analyze invoices, vendors, payments, and approval status.
+                {t.chat.helpHint}
               </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md">
-              {SUGGESTED_PROMPTS.map((prompt) => (
+              {PROMPT_KEYS.map((key) => (
                 <button
-                  key={prompt}
-                  onClick={() => send(prompt)}
+                  key={key}
+                  onClick={() => send(t.chat[key])}
                   className="text-left text-sm px-3 py-2.5 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-blue-700 dark:hover:text-blue-400 transition-all shadow-sm"
                 >
-                  {prompt}
+                  {t.chat[key]}
                 </button>
               ))}
             </div>
@@ -220,7 +215,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a question... (Enter to send, Shift+Enter for new line)"
+            placeholder={t.chat.inputPlaceholder}
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none max-h-32"
             style={{ lineHeight: '1.5rem' }}
@@ -236,7 +231,7 @@ export default function ChatPage() {
           </Button>
         </div>
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center mt-2">
-          AI can make mistakes. Verify important information.
+          {t.chat.disclaimer}
         </p>
       </div>
     </div>

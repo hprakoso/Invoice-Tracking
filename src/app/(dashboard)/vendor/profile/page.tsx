@@ -202,7 +202,7 @@ export default function VendorProfilePage() {
           {vendor.contacts.map((c) => (
             <div key={c.id} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-900 rounded-md px-3 py-1.5 border dark:border-gray-700">
               <span>{c.name} {c.role && <span className="text-gray-400">({c.role})</span>} {c.email && <span className="text-gray-400">— {c.email}</span>}</span>
-              <Button variant="ghost" size="icon" onClick={() => removeContact(c.id)} aria-label="Remove contact">
+              <Button variant="ghost" size="icon" onClick={() => removeContact(c.id)} aria-label={t.vendorProfile.removeContactAria}>
                 <Trash2 className="h-3.5 w-3.5 text-gray-400" />
               </Button>
             </div>

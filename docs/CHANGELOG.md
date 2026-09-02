@@ -8,6 +8,14 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-02 — Localize remaining hardcoded UI strings to the i18n dictionary
+
+**What:** Replaced hardcoded English strings with `useI18n()`/`t.*` lookups (existing dictionary keys, no new translations needed) in the four `/admin/*` pages (users, vendors, companies, reminders), the AI chat page (page title, disclaimer, suggested-prompt buttons, error toasts), and one leftover `aria-label` on the vendor profile page. `docs/ARCHITECTURE.md`'s i18n coverage list updated — it previously called out these exact pages as "not yet translated," which is now stale.
+
+**Why:** These pages were the last remaining English-only surfaces per `docs/ARCHITECTURE.md`'s own tracking; closing that gap.
+
+**Verification:** 45/45 tests, `npm run lint` clean.
+
 ### 2026-09-02 — Duplicate-invoice auto-rejection + upload-retry orphan-row fix
 
 **What (1/2) — the orphan-row bug.** `runOCR()` in the upload wizard (`src/app/(dashboard)/invoices/upload/page.tsx`) unconditionally re-ran step 1 (`POST /api/invoices`) on every attempt, while its `catch` deliberately keeps `invoiceId` set. So a user retrying after a failed file-upload or a failed create got a **second live invoice row** — the first left orphaned with a `DRAFT-<timestamp>` number, visible in every list/dashboard/reminder scan. Fixed with a single `if (!id)` guard so a retry reuses the row the previous attempt created; `saveUploadedFile()`'s existing `upsert: true` already made re-uploading the file to the same invoice safe, so no cleanup logic was needed.

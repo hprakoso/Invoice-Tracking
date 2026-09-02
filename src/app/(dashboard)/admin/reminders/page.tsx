@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 
 interface ReminderSetting {
   id: string
@@ -17,34 +19,36 @@ interface ReminderSetting {
   inAppEnabled: boolean
 }
 
-const TYPE_LABELS: Record<string, { title: string; description: string; usesRoles: boolean; usesDays: boolean }> = {
+type ReminderTypeKey = keyof Dictionary['reminderSettings']
+
+const TYPE_LABELS: Record<string, { titleKey: ReminderTypeKey; descKey: ReminderTypeKey; usesRoles: boolean; usesDays: boolean }> = {
   due_soon: {
-    title: 'Jatuh Tempo Segera',
-    description: 'Invoice yang akan jatuh tempo dalam N hari',
+    titleKey: 'typeDueSoonTitle',
+    descKey: 'typeDueSoonDesc',
     usesRoles: true,
     usesDays: true,
   },
   overdue: {
-    title: 'Sudah Jatuh Tempo',
-    description: 'Invoice yang sudah melewati tanggal jatuh tempo',
+    titleKey: 'typeOverdueTitle',
+    descKey: 'typeOverdueDesc',
     usesRoles: true,
     usesDays: false,
   },
   invoice_submitted: {
-    title: 'Invoice Baru Diajukan',
-    description: 'Saat vendor mengajukan invoice baru',
+    titleKey: 'typeSubmittedTitle',
+    descKey: 'typeSubmittedDesc',
     usesRoles: true,
     usesDays: false,
   },
   revision_requested: {
-    title: 'Perlu Revisi',
-    description: 'Saat invoice ditandai perlu revisi — selalu dikirim ke vendor pemilik invoice, tidak bisa diubah penerimanya',
+    titleKey: 'typeRevisionTitle',
+    descKey: 'typeRevisionDesc',
     usesRoles: false,
     usesDays: false,
   },
   status_changed: {
-    title: 'Perubahan Status Invoice',
-    description: 'Saat GA/Admin mengubah status invoice (Lunas, Dibatalkan, Ditolak, Void) — selalu dikirim ke vendor pemilik invoice',
+    titleKey: 'typeStatusChangedTitle',
+    descKey: 'typeStatusChangedDesc',
     usesRoles: false,
     usesDays: false,
   },
@@ -53,7 +57,16 @@ const TYPE_LABELS: Record<string, { title: string; description: string; usesRole
 const ALL_ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
 
 function SettingCard({ setting, onSaved }: { setting: ReminderSetting; onSaved: () => void }) {
-  const meta = TYPE_LABELS[setting.type] ?? { title: setting.type, description: '', usesRoles: true, usesDays: false }
+  const { t } = useI18n()
+  const typeMeta = TYPE_LABELS[setting.type]
+  const meta = typeMeta
+    ? {
+        title: t.reminderSettings[typeMeta.titleKey],
+        description: t.reminderSettings[typeMeta.descKey],
+        usesRoles: typeMeta.usesRoles,
+        usesDays: typeMeta.usesDays,
+      }
+    : { title: setting.type, description: '', usesRoles: true, usesDays: false }
   const [isActive, setIsActive] = useState(setting.isActive)
   const [daysBefore, setDaysBefore] = useState(String(setting.daysBefore ?? 3))
   const [roles, setRoles] = useState<string[]>(setting.recipientRoles)
@@ -82,11 +95,11 @@ function SettingCard({ setting, onSaved }: { setting: ReminderSetting; onSaved: 
     })
     setSaving(false)
     if (res.ok) {
-      toast.success('Saved')
+      toast.success(t.reminderSettings.saved)
       onSaved()
     } else {
       const data = await res.json().catch(() => ({}))
-      toast.error(data.error ?? data.details?.join(', ') ?? 'Failed to save')
+      toast.error(data.error ?? data.details?.join(', ') ?? t.reminderSettings.saveFailed)
     }
   }
 
@@ -105,20 +118,20 @@ function SettingCard({ setting, onSaved }: { setting: ReminderSetting; onSaved: 
               : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
           }`}
         >
-          {isActive ? 'Aktif' : 'Nonaktif'}
+          {isActive ? t.reminderSettings.active : t.reminderSettings.inactive}
         </button>
       </div>
 
       {meta.usesDays && (
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">Hari sebelum jatuh tempo</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t.reminderSettings.daysBeforeLabel}</label>
           <Input type="number" min={1} max={30} value={daysBefore} onChange={(e) => setDaysBefore(e.target.value)} className="w-24" />
         </div>
       )}
 
       {meta.usesRoles && (
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">Role penerima</label>
+          <label className="text-xs text-gray-500 mb-1 block">{t.reminderSettings.recipientRolesLabel}</label>
           <div className="flex flex-wrap gap-2">
             {ALL_ROLES.map((role) => (
               <button
@@ -138,27 +151,28 @@ function SettingCard({ setting, onSaved }: { setting: ReminderSetting; onSaved: 
       )}
 
       <div>
-        <label className="text-xs text-gray-500 mb-1 block">Email tambahan (pisahkan dengan koma)</label>
-        <Input value={extraEmails} onChange={(e) => setExtraEmails(e.target.value)} placeholder="atasan@perusahaan.co.id" />
+        <label className="text-xs text-gray-500 mb-1 block">{t.reminderSettings.extraEmailsLabel}</label>
+        <Input value={extraEmails} onChange={(e) => setExtraEmails(e.target.value)} placeholder={t.reminderSettings.extraEmailsPlaceholder} />
       </div>
 
       <div className="flex items-center gap-4 pt-1">
         <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
           <input type="checkbox" checked={inAppEnabled} onChange={(e) => setInAppEnabled(e.target.checked)} />
-          Notifikasi in-app
+          {t.reminderSettings.inAppNotifications}
         </label>
         <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
           <input type="checkbox" checked={emailEnabled} onChange={(e) => setEmailEnabled(e.target.checked)} />
-          Kirim email
+          {t.reminderSettings.sendEmail}
         </label>
       </div>
 
-      <Button size="sm" onClick={save} disabled={saving}>Save</Button>
+      <Button size="sm" onClick={save} disabled={saving}>{t.common.save}</Button>
     </div>
   )
 }
 
 export default function AdminRemindersPage() {
+  const { t } = useI18n()
   const [settings, setSettings] = useState<ReminderSetting[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -172,9 +186,9 @@ export default function AdminRemindersPage() {
   return (
     <div className="space-y-4 max-w-2xl">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Reminder Settings</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.nav.reminderSettings}</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mt-1">
-          <Clock className="h-3.5 w-3.5" /> Reminder dikirim sekali sehari pada dini hari.
+          <Clock className="h-3.5 w-3.5" /> {t.reminderSettings.dailyNote}
         </p>
       </div>
 
