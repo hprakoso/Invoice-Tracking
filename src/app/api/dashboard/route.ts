@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const [stats, recentInvoices] = await Promise.all([
     getDashboardStats(filter),
     prisma.invoice.findMany({
-      where: filter.status ? filter : { ...filter, status: { not: 'DRAFT' } },
+      where: filter,
       take: 10,
       orderBy: { createdAt: 'desc' },
       include: { vendor: { select: { name: true } }, company: { select: { name: true } } },

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
+import { PICStageBadge, PIC_STAGE_ORDER } from '@/components/invoice/PICStageBadge'
 import { useI18n } from '@/hooks/useI18n'
 
 // Dynamic import to avoid SSR issues with react-pdf
@@ -34,7 +35,9 @@ if (typeof window !== 'undefined') {
 interface Invoice {
   id: string
   invoiceNumber: string
+  poNumber: string | null
   status: string
+  picStage: string
   totalAmount: string
   taxAmount: string | null
   subtotal: string | null
@@ -55,25 +58,22 @@ interface Invoice {
   pic: { id: string; name: string } | null
   paidBy: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string; sortOrder: number }[]
+  stageHistory: {
+    id: string
+    stage: string
+    changedAt: string
+    changedById: string | null
+    changedBy?: { name: string; email?: string | null } | null
+  }[]
 }
 
-import { formatIDR, formatDate, isOverdue } from '@/lib/format'
-
-// Duplicated (not imported) from src/lib/validations.ts — that module also
-// pulls in next/server, which can't be bundled into this client component.
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ['SUBMITTED', 'CANCELLED'],
-  SUBMITTED: ['PAID', 'CANCELLED', 'REJECTED', 'VOID', 'REVISION'],
-  REVISION: ['SUBMITTED'],
-  PAID: [],
-  CANCELLED: [],
-  REJECTED: [],
-  VOID: [],
-}
+import { formatIDR, formatDate, formatDateTime, isOverdue } from '@/lib/format'
+import { VALID_TRANSITIONS } from '@/lib/invoiceStatus'
 
 function ConfidenceBar({ value }: { value: number }) {
+  const { t } = useI18n()
   const color = value >= 80 ? 'bg-green-500' : value >= 50 ? 'bg-yellow-500' : 'bg-red-500'
-  const label = value >= 80 ? 'High' : value >= 50 ? 'Medium' : 'Low'
+  const label = value >= 80 ? t.invoiceDetail.confidenceHigh : value >= 50 ? t.invoiceDetail.confidenceMedium : t.invoiceDetail.confidenceLow
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 bg-gray-200 rounded-full h-2">
@@ -92,12 +92,13 @@ function ConfidenceBar({ value }: { value: number }) {
 function DocumentViewer({ invoice }: { invoice: Invoice }) {
   const [numPages, setNumPages] = useState<number>(1)
   const [pageNumber, setPageNumber] = useState(1)
+  const { t } = useI18n()
 
   if (!invoice.filePath || !invoice.fileType) {
     return (
       <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border-2 border-dashed text-gray-400">
         <FileText className="h-10 w-10 mb-2" />
-        <p className="text-sm">No document uploaded</p>
+        <p className="text-sm">{t.invoiceDetail.noDocument}</p>
       </div>
     )
   }
@@ -120,7 +121,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
           file={fileUrl}
           onLoadSuccess={({ numPages: n }: { numPages: number }) => setNumPages(n)}
           loading={<div className="flex items-center justify-center h-64"><Skeleton className="w-full h-64" /></div>}
-          error={<div className="flex items-center justify-center h-64 text-gray-400 text-sm">Failed to load PDF</div>}
+          error={<div className="flex items-center justify-center h-64 text-gray-400 text-sm">{t.invoiceDetail.pdfLoadFailed}</div>}
         >
           <PDFPage
             pageNumber={pageNumber}
@@ -135,7 +136,7 @@ function DocumentViewer({ invoice }: { invoice: Invoice }) {
           <Button variant="outline" size="icon" onClick={() => setPageNumber(p => Math.max(1, p - 1))} disabled={pageNumber <= 1}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm text-gray-500">Page {pageNumber} / {numPages}</span>
+          <span className="text-sm text-gray-500">{t.invoiceDetail.pdfPage.replace('{page}', String(pageNumber)).replace('{pages}', String(numPages))}</span>
           <Button variant="outline" size="icon" onClick={() => setPageNumber(p => Math.min(numPages, p + 1))} disabled={pageNumber >= numPages}>
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -153,21 +154,16 @@ export default function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<'notfound' | 'auth' | 'network' | null>(null)
   const [newStatus, setNewStatus] = useState('')
+  const [newStage, setNewStage] = useState('')
   const [comment, setComment] = useState('')
   const [acting, setActing] = useState(false)
   const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
   const [sendDateInput, setSendDateInput] = useState('')
   const [deliveredDateInput, setDeliveredDateInput] = useState('')
   const [picId, setPicId] = useState('')
-  const [revNumber, setRevNumber] = useState('')
-  const [revInvoiceDate, setRevInvoiceDate] = useState('')
-  const [revDueDate, setRevDueDate] = useState('')
-  const [revSubtotal, setRevSubtotal] = useState('')
-  const [revTax, setRevTax] = useState('')
-  const [revTotal, setRevTotal] = useState('')
-  const [revNotes, setRevNotes] = useState('')
   const [paidDateInput, setPaidDateInput] = useState('')
   const [paidAmountInput, setPaidAmountInput] = useState('')
+  const [now] = useState(() => Date.now()) // frozen at mount — Date.now() can't be called during render
 
   const fetchInvoice = async () => {
     try {
@@ -182,13 +178,6 @@ export default function InvoiceDetailPage() {
         setSendDateInput(data.sendDate?.slice(0, 10) ?? '')
         setDeliveredDateInput(data.deliveredDate?.slice(0, 10) ?? '')
         setPicId(data.pic?.id ?? '')
-        setRevNumber(data.invoiceNumber ?? '')
-        setRevInvoiceDate(data.invoiceDate?.slice(0, 10) ?? '')
-        setRevDueDate(data.dueDate?.slice(0, 10) ?? '')
-        setRevSubtotal(data.subtotal ?? '')
-        setRevTax(data.taxAmount ?? '')
-        setRevTotal(data.totalAmount ?? '')
-        setRevNotes(data.notes ?? '')
         setPaidDateInput(data.paidDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10))
         setPaidAmountInput(data.paidAmount ?? data.totalAmount ?? '')
         setFetchError(null)
@@ -210,16 +199,14 @@ export default function InvoiceDetailPage() {
   const role = (session?.user as { role?: string } | undefined)?.role
   const sessionVendorId = (session?.user as { vendorId?: string | null } | undefined)?.vendorId
   const isOwner = role === 'VENDOR' && invoice?.vendor?.id === sessionVendorId
+  // Status + PIC stage are both ADMIN/GA-only controls; VENDOR sees read-only badges.
   const canUpdateStatus = ['GA_STAFF', 'GA_MANAGER', 'ADMIN'].includes(role ?? '')
-  // Fixing & resubmitting a revision is the vendor's job — GA_STAFF/GA_MANAGER
-  // only create/handle intake, they don't correct the vendor's own data.
-  const canResubmit = invoice?.status === 'REVISION' && (role === 'ADMIN' || isOwner)
+  const canManageStage = canUpdateStatus
   const canEditDelivery = ['GA_STAFF', 'GA_MANAGER', 'ADMIN'].includes(role ?? '')
   const canEditSendDate = canEditDelivery || (role === 'VENDOR' && isOwner)
-  const canMarkPaid = canUpdateStatus && invoice?.status === 'SUBMITTED'
-  // PAID has its own dedicated form (below) that collects paidDate/paidAmount —
-  // excluded here so the generic status dropdown can't set it without those.
-  const transitionOptions = invoice ? (VALID_TRANSITIONS[invoice.status] ?? []).filter(s => s !== 'PAID') : []
+  // PAYMENT_SCHEDULED -> PAID is the only valid entry into PAID (see
+  // VALID_TRANSITIONS); the dedicated form collects paidDate/paidAmount.
+  const canMarkAccepted = canUpdateStatus && invoice?.status === 'PAYMENT_SCHEDULED'
 
   const patchInvoice = async (body: Record<string, unknown>, successMsg: string) => {
     setActing(true)
@@ -245,25 +232,33 @@ export default function InvoiceDetailPage() {
     setComment('')
   }
 
-  const handleResubmit = () => patchInvoice({
-    status: 'SUBMITTED',
-    invoiceNumber: revNumber || undefined,
-    invoiceDate: revInvoiceDate || undefined,
-    dueDate: revDueDate || undefined,
-    subtotal: revSubtotal !== '' ? Number(revSubtotal) : undefined,
-    taxAmount: revTax !== '' ? Number(revTax) : undefined,
-    totalAmount: revTotal !== '' ? Number(revTotal) : undefined,
-    notes: revNotes || undefined,
-  }, t.invoiceDetail.resubmitted)
+  const handleStageUpdate = async () => {
+    if (!newStage) { toast.error(t.invoiceDetail.selectNewStage); return }
+    setActing(true)
+    const res = await fetch(`/api/invoices/${id}/stage`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: newStage }),
+    })
+    setActing(false)
+    if (res.ok) {
+      toast.success(t.invoiceDetail.stageUpdated)
+      setNewStage('')
+      fetchInvoice()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? t.invoiceDetail.stageUpdateFailed)
+    }
+  }
 
-  const handleMarkPaid = () => {
+  const handleMarkAccepted = () => {
     if (!paidAmountInput || Number(paidAmountInput) <= 0) {
       toast.error(t.invoiceDetail.validPaidAmount)
       return
     }
     patchInvoice(
       { status: 'PAID', paidDate: paidDateInput || undefined, paidAmount: Number(paidAmountInput) },
-      t.invoiceDetail.paidAmount,
+      t.invoiceDetail.markAsAccepted,
     )
   }
 
@@ -319,7 +314,10 @@ export default function InvoiceDetailPage() {
           <h1 className="text-lg sm:text-xl font-bold text-gray-900 font-mono truncate">{invoice.invoiceNumber}</h1>
           <p className="text-sm text-gray-500">{invoice.vendor?.name}</p>
         </div>
-        <StatusBadge status={invoice.status} />
+        <div className="flex items-center gap-2">
+          <StatusBadge status={invoice.status} />
+          <PICStageBadge stage={invoice.picStage} />
+        </div>
       </div>
 
       {/* Main split layout */}
@@ -346,6 +344,7 @@ export default function InvoiceDetailPage() {
               <div>
                 <p className="text-sm font-semibold text-gray-900">{invoice.vendor?.name}</p>
                 {invoice.vendor?.npwp && <p className="text-xs text-gray-500">{t.invoiceDetail.npwp}: {invoice.vendor.npwp}</p>}
+                {invoice.poNumber && <p className="text-xs text-gray-500">{t.invoiceDetail.poNumber}: <span className="font-mono">{invoice.poNumber}</span></p>}
                 <p className="text-xs text-gray-500 mt-0.5">{t.invoiceDetail.billTo}: {invoice.company?.name ?? '—'}</p>
               </div>
             </div>
@@ -389,14 +388,15 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
 
-          {/* Payment */}
-          {invoice.status === 'PAID' ? (
+          {/* Payment — paidDate is the source of truth (set once, on -> PAID;
+              stays set through -> CLOSED), not the current status string. */}
+          {invoice.paidDate ? (
             <div className="bg-white rounded-xl border p-4 space-y-2">
               <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
                 <Banknote className="h-3 w-3" /> {t.invoiceDetail.payment}
               </p>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">{t.invoiceDetail.paidDate}</span>
+                <span className="text-gray-500">{t.invoiceDetail.acceptedDate}</span>
                 <span className="text-gray-700 font-medium">{formatDate(invoice.paidDate)}</span>
               </div>
               <div className="flex justify-between text-sm">
@@ -410,14 +410,14 @@ export default function InvoiceDetailPage() {
                 </div>
               )}
             </div>
-          ) : canMarkPaid ? (
+          ) : canMarkAccepted ? (
             <div className="bg-white rounded-xl border p-4 space-y-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1">
-                <Banknote className="h-3 w-3" /> {t.invoiceDetail.markAsPaid}
+                <Banknote className="h-3 w-3" /> {t.invoiceDetail.markAsAccepted}
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.paidDate}</label>
+                  <label className="text-xs text-gray-400">{t.invoiceDetail.acceptedDate}</label>
                   <input
                     type="date"
                     value={paidDateInput}
@@ -435,7 +435,7 @@ export default function InvoiceDetailPage() {
                   />
                 </div>
               </div>
-              <Button size="sm" onClick={handleMarkPaid} disabled={acting} className="w-full">{t.invoiceDetail.markAsPaid}</Button>
+              <Button size="sm" onClick={handleMarkAccepted} disabled={acting} className="w-full">{t.invoiceDetail.markAsAccepted}</Button>
             </div>
           ) : null}
 
@@ -515,79 +515,11 @@ export default function InvoiceDetailPage() {
             )}
           </div>
 
-          {/* Fix & Resubmit (REVISION) */}
-          {canResubmit && (
-            <div className="bg-white rounded-xl border p-4 space-y-3">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.fixAndResubmit}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.invoiceNumber}</label>
-                  <input
-                    type="text"
-                    value={revNumber}
-                    onChange={e => setRevNumber(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.invoiceDate}</label>
-                  <input
-                    type="date"
-                    value={revInvoiceDate}
-                    onChange={e => setRevInvoiceDate(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.dueDate}</label>
-                  <input
-                    type="date"
-                    value={revDueDate}
-                    onChange={e => setRevDueDate(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.subtotal}</label>
-                  <input
-                    type="number"
-                    value={revSubtotal}
-                    onChange={e => setRevSubtotal(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">{t.upload.fieldTaxAmount}</label>
-                  <input
-                    type="number"
-                    value={revTax}
-                    onChange={e => setRevTax(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">{t.invoiceDetail.total}</label>
-                  <input
-                    type="number"
-                    value={revTotal}
-                    onChange={e => setRevTotal(e.target.value)}
-                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400">{t.invoiceDetail.notes}</label>
-                <textarea
-                  rows={2}
-                  value={revNotes}
-                  onChange={e => setRevNotes(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none"
-                />
-              </div>
-              <Button onClick={handleResubmit} disabled={acting} className="w-full">{t.invoiceDetail.saveAndResubmit}</Button>
-            </div>
-          )}
-          {canUpdateStatus && transitionOptions.length > 0 && (
+          {/* Status control (ADMIN/GA only) — dropdown offers only statuses
+              the server will actually accept (VALID_TRANSITIONS), so the UI
+              never dangles a choice that 400s. ADMIN sees every status,
+              matching its server-side bypass of the transition graph. */}
+          {canUpdateStatus && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
               <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.updateStatus}</p>
               <select
@@ -596,7 +528,9 @@ export default function InvoiceDetailPage() {
                 className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
               >
                 <option value="">{t.invoiceDetail.selectNewStatus}</option>
-                {transitionOptions.map(s => <option key={s} value={s}>{(t.status as Record<string, string>)[s] ?? s}</option>)}
+                {(role === 'ADMIN' ? Object.keys(t.status) : (VALID_TRANSITIONS[invoice.status] ?? [])).map(
+                  s => <option key={s} value={s}>{(t.status as Record<string, string>)[s] ?? s}</option>,
+                )}
               </select>
               <textarea
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
@@ -606,6 +540,78 @@ export default function InvoiceDetailPage() {
                 onChange={e => setComment(e.target.value)}
               />
               <Button onClick={handleStatusUpdate} disabled={acting || !newStatus} className="w-full">{t.invoiceDetail.update}</Button>
+            </div>
+          )}
+
+          {/* PIC Stage control (ADMIN/GA only) */}
+          {canManageStage && (
+            <div className="bg-white rounded-xl border p-4 space-y-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.picStageTitle}</p>
+              <select
+                value={newStage}
+                onChange={e => setNewStage(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">{t.invoiceDetail.selectNewStage}</option>
+                {PIC_STAGE_ORDER.map(s => <option key={s} value={s}>{(t.picStage as Record<string, string>)[s] ?? s}</option>)}
+              </select>
+              <Button onClick={handleStageUpdate} disabled={acting || !newStage} className="w-full">{t.invoiceDetail.update}</Button>
+            </div>
+          )}
+
+          {/* SLA timeline — stageHistory with auto-computed durations */}
+          {invoice.stageHistory.length > 0 && (
+            <div className="bg-white rounded-xl border p-4 space-y-3">
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.slaTitle}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{t.invoiceDetail.slaSubtitle}</p>
+              </div>
+              <div>
+                {invoice.stageHistory.map((h, i) => {
+                  const isCurrent = i === invoice.stageHistory.length - 1
+                  const prev = invoice.stageHistory[i - 1]
+                  const durDays = prev
+                    ? Math.floor((new Date(h.changedAt).getTime() - new Date(prev.changedAt).getTime()) / 86400000)
+                    : null
+                  const ongoingDays = isCurrent ? Math.floor((now - new Date(h.changedAt).getTime()) / 86400000) : null
+                  const durLabel = prev
+                    ? durDays !== null && durDays <= 0
+                      ? t.invoiceDetail.stageDurationZero
+                      : t.invoiceDetail.stageDurationDays.replace('{count}', String(durDays))
+                    : '—'
+                  const ongoingLabel = ongoingDays !== null
+                    ? ongoingDays <= 0
+                      ? t.invoiceDetail.stageDurationZero
+                      : t.invoiceDetail.stageDurationOngoing.replace('{count}', String(ongoingDays))
+                    : null
+                  return (
+                    <div key={h.id} className="relative pl-5 pb-4 last:pb-0">
+                      {!isCurrent && <span className="absolute left-[5px] top-4 bottom-0 w-px bg-gray-200 dark:bg-gray-700" />}
+                      <span
+                        className={`absolute top-1.5 left-0 h-2.5 w-2.5 rounded-full ${
+                          isCurrent ? 'bg-amber-400 ring-4 ring-amber-400/20' : 'bg-teal-500 ring-4 ring-teal-500/15'
+                        }`}
+                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                          {(t.picStage as Record<string, string>)[h.stage] ?? h.stage}
+                        </span>
+                        <span className="text-[11px] text-gray-400 tabular-nums">{formatDateTime(h.changedAt)}</span>
+                        <span
+                          className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full border ${
+                            isCurrent
+                              ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800'
+                              : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800'
+                          }`}
+                        >
+                          {isCurrent ? ongoingLabel : durLabel}
+                        </span>
+                      </div>
+                      {h.changedBy?.name && <p className="text-[11px] text-gray-400 mt-0.5">{h.changedBy.name}</p>}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 

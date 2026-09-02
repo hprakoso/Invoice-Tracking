@@ -1,27 +1,27 @@
 import { describe, it, expect } from 'vitest'
-import { isValidStatusTransition, validateDeliveryDates, VALID_TRANSITIONS } from '../validations'
+import { createInvoiceSchema, updateInvoiceStageSchema, validateDeliveryDates } from '../validations'
 
-describe('isValidStatusTransition', () => {
-  it.each(
-    Object.entries(VALID_TRANSITIONS).flatMap(([from, tos]) => tos.map((to) => [from, to, true] as const)),
-  )('allows %s -> %s', (from, to, expected) => {
-    expect(isValidStatusTransition(from, to).valid).toBe(expected)
+describe('createInvoiceSchema', () => {
+  it('requires poNumber', () => {
+    const base = {
+      vendorId: '00000000-0000-4000-8000-000000000000',
+      invoiceNumber: 'INV-2026-0001',
+      totalAmount: 1000000,
+    }
+    expect(createInvoiceSchema.safeParse(base).success).toBe(false)
+    expect(createInvoiceSchema.safeParse({ ...base, poNumber: 'PO-2026-0001' }).success).toBe(true)
+  })
+})
+
+describe('updateInvoiceStageSchema', () => {
+  it('accepts every PIC stage', () => {
+    for (const stage of ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY']) {
+      expect(updateInvoiceStageSchema.safeParse({ stage }).success).toBe(true)
+    }
   })
 
-  it('rejects SUBMITTED -> SUBMITTED (not a real transition)', () => {
-    expect(isValidStatusTransition('SUBMITTED', 'SUBMITTED').valid).toBe(false)
-  })
-
-  it('rejects transitions out of terminal statuses', () => {
-    expect(isValidStatusTransition('CANCELLED', 'SUBMITTED').valid).toBe(false)
-    expect(isValidStatusTransition('REJECTED', 'SUBMITTED').valid).toBe(false)
-    expect(isValidStatusTransition('VOID', 'SUBMITTED').valid).toBe(false)
-  })
-
-  it('rejects an unknown source status', () => {
-    const result = isValidStatusTransition('BOGUS', 'SUBMITTED')
-    expect(result.valid).toBe(false)
-    expect(result.message).toMatch(/Unknown status/)
+  it('rejects an unknown stage', () => {
+    expect(updateInvoiceStageSchema.safeParse({ stage: 'BOGUS' }).success).toBe(false)
   })
 })
 

@@ -40,6 +40,8 @@ function getActionMeta(action: string, t: Dictionary): { icon: React.ReactNode; 
   const meta: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
     'invoice.created': { icon: <Upload className="h-3.5 w-3.5" />, color: 'bg-blue-100 text-blue-600', label: t.audit.actionInvoiceCreated },
     'invoice.uploaded': { icon: <Upload className="h-3.5 w-3.5" />, color: 'bg-blue-100 text-blue-600', label: t.audit.actionFileUploaded },
+    'invoice.status_changed': { icon: <Edit className="h-3.5 w-3.5" />, color: 'bg-violet-100 text-violet-600', label: t.audit.actionStatusChanged },
+    'invoice.stage_changed': { icon: <Edit className="h-3.5 w-3.5" />, color: 'bg-teal-100 text-teal-600', label: t.audit.actionStageChanged },
     'invoice.approved_step_1': { icon: <CheckCircle className="h-3.5 w-3.5" />, color: 'bg-green-100 text-green-600', label: t.audit.actionApprovedStep1 },
     'invoice.approved_step_2': { icon: <CheckCircle className="h-3.5 w-3.5" />, color: 'bg-emerald-100 text-emerald-600', label: t.audit.actionApprovedStep2 },
     'invoice.rejected': { icon: <XCircle className="h-3.5 w-3.5" />, color: 'bg-red-100 text-red-600', label: t.audit.actionRejected },

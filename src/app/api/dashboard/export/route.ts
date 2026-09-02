@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const [stats, invoices] = await Promise.all([
     getDashboardStats(filter),
     prisma.invoice.findMany({
-      where: filter.status ? filter : { ...filter, status: { not: 'DRAFT' } },
+      where: filter,
       orderBy: { createdAt: 'desc' },
       include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
     }),
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
   const sheet = wb.addWorksheet('Invoices')
   sheet.columns = [
     { header: 'Invoice Number', key: 'invoiceNumber', width: 20 },
+    { header: 'PO Number', key: 'poNumber', width: 16 },
     { header: 'Vendor', key: 'vendor', width: 24 },
     { header: 'Company (Bill To)', key: 'company', width: 24 },
     { header: 'Invoice Date', key: 'invoiceDate', width: 14 },
@@ -45,7 +46,8 @@ export async function GET(req: NextRequest) {
     { header: 'Send Date', key: 'sendDate', width: 14 },
     { header: 'Delivered Date', key: 'deliveredDate', width: 14 },
     { header: 'PIC', key: 'pic', width: 20 },
-    { header: 'Status', key: 'status', width: 14 },
+    { header: 'Status', key: 'status', width: 22 },
+    { header: 'PIC Stage', key: 'picStage', width: 14 },
     { header: 'Currency', key: 'currency', width: 10 },
     { header: 'Subtotal', key: 'subtotal', width: 16 },
     { header: 'Tax Amount', key: 'taxAmount', width: 16 },
@@ -59,6 +61,7 @@ export async function GET(req: NextRequest) {
   for (const inv of invoices) {
     sheet.addRow({
       invoiceNumber: inv.invoiceNumber,
+      poNumber: inv.poNumber,
       vendor: inv.vendor.name,
       company: inv.company?.name ?? '',
       invoiceDate: inv.invoiceDate?.toISOString().slice(0, 10) ?? '',
@@ -67,6 +70,7 @@ export async function GET(req: NextRequest) {
       deliveredDate: inv.deliveredDate?.toISOString().slice(0, 10) ?? '',
       pic: inv.pic?.name ?? '',
       status: inv.status,
+      picStage: inv.picStage,
       currency: inv.currency,
       subtotal: inv.subtotal ? Number(inv.subtotal) : '',
       taxAmount: inv.taxAmount ? Number(inv.taxAmount) : '',

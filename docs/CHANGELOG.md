@@ -8,6 +8,20 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-02 — PIC stage transition control, SLA timeline, and stage API
+
+**What:** New `PATCH /api/invoices/[id]/stage` (`src/app/api/invoices/[id]/stage/route.ts`) — `ADMIN`/`GA_STAFF`/`GA_MANAGER` only, body validated by the already-existing `updateInvoiceStageSchema`. Writes `invoices.pic_stage`, appends an `invoice_stage_history` row, and an `audit_logs` row (`action: 'invoice.stage_changed'`). This endpoint was already fully documented in `docs/API.md` (from the 2026-09-01 docs pass) but the route file itself had never been committed — this commit adds the file the docs already described.
+
+New `PICStageBadge.tsx` — read-only pill for the 5 PIC stages (`GA/BUDGET/PROC_LEGAL/SSU/TREASURY`), same visual language as `StatusBadge`. Wired into `/invoices` (list page: new "Tahap PIC"/PIC-stage column, badge + a stage-move dropdown for the 3 manager roles, `moveStage()` calling the new PATCH route) and `/invoices/[id]` (detail page: badge + a stage-change `<select>` + button for the same 3 roles, plus an SLA timeline rendering `invoice.stageHistory[]` with per-stage duration computed client-side from consecutive `changedAt` timestamps — "N days" for a closed stage, "ongoing" for the current one). Invoice list also now shows `poNumber` under the invoice number, and its status filter dropdown is generated from all `t.status` entries instead of a hardcoded 6-value list (a leftover from the pre-17-value-enum status set).
+
+`audit/page.tsx`'s action-icon map gained `invoice.status_changed` and `invoice.stage_changed` entries — both actions already existed (the former from the 2026-09-01 overhaul, the latter from this route) but had no icon/label mapping, so they fell back to the generic default row.
+
+**New tests:** `validations.test.ts` rewritten — it previously tested `isValidStatusTransition`/`VALID_TRANSITIONS`, which now have their own dedicated `invoiceStatus.test.ts` (added in the 2026-09-01 commit); replaced with coverage for `updateInvoiceStageSchema` (accepts all 5 stages, rejects an unknown one) and a gap-fill test for `createInvoiceSchema` (requires `poNumber`).
+
+**Why:** Completes the deferred PIC-stage frontend scope from the 2026-09-01 status-workflow overhaul (schema/migration/API contract were already in place; this is the UI + route implementation).
+
+**Verification:** 45/45 tests, `npm run lint` clean.
+
 ### 2026-09-02 — Localize remaining hardcoded UI strings to the i18n dictionary
 
 **What:** Replaced hardcoded English strings with `useI18n()`/`t.*` lookups (existing dictionary keys, no new translations needed) in the four `/admin/*` pages (users, vendors, companies, reminders), the AI chat page (page title, disclaimer, suggested-prompt buttons, error toasts), and one leftover `aria-label` on the vendor profile page. `docs/ARCHITECTURE.md`'s i18n coverage list updated — it previously called out these exact pages as "not yet translated," which is now stale.

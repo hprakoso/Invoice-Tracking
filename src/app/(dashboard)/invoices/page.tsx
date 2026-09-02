@@ -2,11 +2,14 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Plus, ChevronRight } from 'lucide-react'
+import { Search, Plus, ChevronRight, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
+import { PICStageBadge, PIC_STAGE_ORDER } from '@/components/invoice/PICStageBadge'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { toast } from 'sonner'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
@@ -16,6 +19,8 @@ interface Invoice {
   id: string
   invoiceNumber: string
   status: string
+  picStage: string
+  poNumber: string | null
   totalAmount: string
   dueDate: string | null
   invoiceDate: string | null
@@ -37,15 +42,11 @@ export default function InvoicesPage() {
   const router = useRouter()
   const { data: session } = useSession()
   const { t } = useI18n()
+  const canManageStage = ['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(session?.user?.role ?? '')
 
   const STATUSES = [
     { value: '', label: t.dashboard.allStatuses },
-    { value: 'SUBMITTED', label: t.status.SUBMITTED },
-    { value: 'PAID', label: t.status.PAID },
-    { value: 'REVISION', label: t.status.REVISION },
-    { value: 'CANCELLED', label: t.status.CANCELLED },
-    { value: 'REJECTED', label: t.status.REJECTED },
-    { value: 'VOID', label: t.status.VOID },
+    ...Object.entries(t.status).map(([value, label]) => ({ value, label })),
   ]
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -74,6 +75,21 @@ export default function InvoicesPage() {
     const timer = setTimeout(fetchInvoices, 300)
     return () => clearTimeout(timer)
   }, [fetchInvoices])
+
+  const moveStage = async (invoiceId: string, stage: string) => {
+    const res = await fetch(`/api/invoices/${invoiceId}/stage`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage }),
+    })
+    if (res.ok) {
+      toast.success(t.invoices.stageMoved)
+      fetchInvoices()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? t.invoices.stageMoveFailed)
+    }
+  }
 
   const canUpload = ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'].includes(session?.user?.role ?? '')
 
@@ -137,6 +153,7 @@ export default function InvoicesPage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell whitespace-nowrap">{t.invoices.colDueDate}</th>
                 <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{t.invoices.colTotal}</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.invoices.colStatus}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{t.invoices.colPicStage}</th>
                 <th className="w-8 px-2"></th>
               </tr>
             </thead>
@@ -144,14 +161,14 @@ export default function InvoicesPage() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="border-b dark:border-gray-700">
-                    {[...Array(7)].map((_, j) => (
+                    {[...Array(8)].map((_, j) => (
                       <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                     {t.invoices.noInvoicesFound}
                   </td>
                 </tr>
@@ -167,7 +184,10 @@ export default function InvoicesPage() {
                       isOverdue(inv.dueDate, inv.status) ? 'bg-red-50/30 dark:bg-red-900/10' : ''
                     }`}
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">{inv.invoiceNumber}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      <div>{inv.invoiceNumber}</div>
+                      {inv.poNumber && <div className="text-[10px] text-gray-400 dark:text-gray-500 font-sans">{t.invoices.poShort}: {inv.poNumber}</div>}
+                    </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300 max-w-[180px] truncate">{inv.vendor?.name}</td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell whitespace-nowrap">{formatDate(inv.invoiceDate)}</td>
                     <td className={`px-4 py-3 hidden sm:table-cell font-medium ${isOverdue(inv.dueDate, inv.status) ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
@@ -176,6 +196,37 @@ export default function InvoicesPage() {
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatIDR(inv.totalAmount)}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <PICStageBadge stage={inv.picStage} />
+                        {canManageStage && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" aria-label={t.invoices.moveStageAria} />
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ChevronsUpDown className="h-3.5 w-3.5" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {PIC_STAGE_ORDER.map((stage) => (
+                                <DropdownMenuItem
+                                  key={stage}
+                                  disabled={stage === inv.picStage}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    moveStage(inv.id, stage)
+                                  }}
+                                >
+                                  {(t.picStage as Record<string, string>)[stage] ?? stage}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-2 py-3"><ChevronRight className="h-4 w-4 text-gray-300 dark:text-gray-600" /></td>
                   </motion.tr>
                 ))
