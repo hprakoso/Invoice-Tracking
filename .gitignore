@@ -82,3 +82,9 @@ logs/
 # Temp
 tmp/
 temp/
+
+# Design references (local input for a redesign pass, not part of the tracked
+# repo — same convention as the 2026-07-30 Liquid Intelligence brief, see
+# docs/CHANGELOG.md)
+DESIGN.md
+temporary_design_reference/

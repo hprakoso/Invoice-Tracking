@@ -3,25 +3,19 @@
 import { signIn } from 'next-auth/react'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileStack } from 'lucide-react'
+import { motion, useReducedMotion } from 'framer-motion'
+import { ArrowRight, BadgeCheck, Droplets, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react'
 import { useI18n } from '@/hooks/useI18n'
-import type { Dictionary } from '@/lib/i18n'
-
-const DEMO_ACCOUNTS: { email: string; roleKey: keyof Dictionary['login']; color: string }[] = [
-  { email: 'vendor1@demo.com',   roleKey: 'roleVendor1',   color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' },
-  { email: 'vendor2@demo.com',   roleKey: 'roleVendor2',   color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
-  { email: 'gastaff@demo.com',   roleKey: 'roleGaStaff',   color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' },
-  { email: 'gamanager@demo.com', roleKey: 'roleGaManager', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' },
-  { email: 'admin@demo.com',     roleKey: 'roleAdmin',     color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
-]
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const { t } = useI18n()
+  const reduceMotion = useReducedMotion()
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -37,63 +31,136 @@ export default function LoginPage() {
     }
   }
 
-  async function quickLogin(accountEmail: string) {
-    setLoading(true)
-    setError('')
-    const result = await signIn('credentials', { email: accountEmail, password: 'demo123', redirect: false })
-    setLoading(false)
-    if (result?.error) {
-      setError(t.login.quickLoginFailed)
-    } else {
-      router.push('/')
-      router.refresh()
-    }
-  }
+  const fade = (y: number, delay: number) => ({
+    initial: { opacity: reduceMotion ? 1 : 0, y: reduceMotion ? 0 : y },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.5, ease: 'easeOut' as const, delay },
+  })
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
-      <div className="w-full max-w-md space-y-6">
-        {/* Brand */}
-        <div className="text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-xl mb-4 shadow-lg shadow-blue-600/20">
-            <FileStack className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t.nav.brand}</h1>
-          <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">{t.login.tagline}</p>
-        </div>
+    <main className="relative flex min-h-screen flex-col bg-background lg:flex-row lg:overflow-hidden">
+      {/* Brand panel — hidden on mobile, where the card's brand block takes over */}
+      <section className="auth-brand relative hidden lg:flex lg:w-1/2 lg:flex-col lg:justify-between lg:overflow-hidden lg:p-12 xl:p-16">
+        <div aria-hidden="true" className="auth-dots absolute inset-0" />
+        <div aria-hidden="true" className="pointer-events-none absolute -top-20 -left-24 h-96 w-96 rounded-full bg-teal-400/25 blur-[100px] mix-blend-screen" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-[28rem] w-[28rem] rounded-full bg-violet-500/40 blur-[120px] mix-blend-screen" />
 
-        {/* Card */}
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 space-y-5">
-          <form onSubmit={handleLogin} className="space-y-4">
+        <motion.div {...fade(16, 0.05)} className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 shadow-[0_0_28px_rgba(255,255,255,0.12)] backdrop-blur">
+            <Droplets className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-sm font-bold tracking-[0.3em] text-white/90">{t.nav.brand}</span>
+        </motion.div>
+
+        <motion.div {...fade(24, 0.12)}>
+          <h2 className="max-w-md text-3xl font-bold leading-[1.15] tracking-tight text-white xl:text-4xl">
+            {t.nav.brandTagline}
+          </h2>
+          {/* Liquid invoice pipeline — upload → review → paid */}
+          <div aria-hidden="true" className="mt-10 flex items-center gap-3 xl:mt-12">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-white/10 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] backdrop-blur">
+              <FileText className="h-6 w-6 text-teal-200" />
+            </div>
+            <div className="relative h-px w-12 flex-1 bg-white/25 xl:w-16">
+              <span className="auth-flow-dot" />
+            </div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-white/10 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] backdrop-blur">
+              <ShieldCheck className="h-6 w-6 text-white" />
+            </div>
+            <div className="relative h-px w-12 flex-1 bg-white/25 xl:w-16">
+              <span className="auth-flow-dot" style={{ animationDelay: '-1.6s' }} />
+            </div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-white/10 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] backdrop-blur">
+              <BadgeCheck className="h-6 w-6 text-violet-200" />
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div {...fade(16, 0.2)} aria-hidden="true" className="flex items-center gap-3">
+          <span className="h-1 w-16 rounded-full bg-white/35 backdrop-blur" />
+          <span className="h-1 w-8 rounded-full bg-white/25 backdrop-blur" />
+          <span className="h-1 w-4 rounded-full bg-white/15 backdrop-blur" />
+        </motion.div>
+      </section>
+
+      {/* Form panel */}
+      <section className="relative flex flex-1 items-center justify-center overflow-hidden px-4 py-10 sm:px-8">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/70 via-transparent to-muted/50" />
+        <div aria-hidden="true" className="pointer-events-none absolute -top-24 -right-16 h-80 w-80 rounded-full bg-violet-300/40 blur-[100px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 -left-20 h-96 w-96 rounded-full bg-teal-200/40 blur-[110px]" />
+
+        <motion.div
+          {...fade(16, 0.08)}
+          className="glass-panel-strong relative w-full max-w-md overflow-hidden rounded-[28px] p-8 sm:p-10"
+        >
+          {/* Glass top-edge highlight */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-[var(--glass-highlight)] to-transparent"
+          />
+
+          {/* Brand */}
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[22px] border border-primary/30 bg-primary/15 shadow-[0_0_44px_var(--glow-primary)]">
+              <Droplets className="h-7 w-7 text-primary" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">{t.nav.brand}</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">{t.login.tagline}</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label htmlFor="email" className="mb-2 block text-sm font-medium text-foreground/90">
                 {t.login.email}
               </label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition"
-                placeholder={t.login.emailPlaceholder}
-                autoComplete="email"
-              />
+              <div className="relative">
+                <Mail aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground/70" />
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder={t.login.emailPlaceholder}
+                  className="glass-field h-12 w-full rounded-full pl-12 pr-4 text-sm text-foreground placeholder:text-muted-foreground/60"
+                />
+              </div>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label htmlFor="password" className="mb-2 block text-sm font-medium text-foreground/90">
                 {t.login.password}
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition"
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
+              <div className="relative">
+                <Lock aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground/70" />
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="glass-field h-12 w-full rounded-full pl-12 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? t.login.hidePassword : t.login.showPassword}
+                  aria-pressed={showPassword}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-2 text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             {error && (
-              <p className="text-red-500 dark:text-red-400 text-sm bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
+              <p
+                role="alert"
+                className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              >
                 {error}
               </p>
             )}
@@ -101,40 +168,15 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-2.5 rounded-lg font-medium transition-colors shadow-sm"
+              className="btn-liquid flex h-12 w-full items-center justify-center gap-2 rounded-full text-sm font-semibold"
             >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               {loading ? t.login.submitting : t.login.submit}
+              {!loading && <ArrowRight className="h-4 w-4" />}
             </button>
           </form>
-
-          {/* Divider */}
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200 dark:border-gray-700" />
-            </div>
-            <div className="relative flex justify-center text-xs text-gray-400 dark:text-gray-500">
-              <span className="bg-white dark:bg-gray-900 px-2">{t.login.demoAccounts}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {DEMO_ACCOUNTS.map(account => (
-              <button
-                key={account.email}
-                onClick={() => quickLogin(account.email)}
-                disabled={loading}
-                className={`text-xs px-3 py-2 rounded-lg font-medium transition-opacity hover:opacity-80 disabled:opacity-40 ${account.color}`}
-              >
-                {t.login[account.roleKey]}
-              </button>
-            ))}
-          </div>
-
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500">
-            {t.login.demoPasswordNote} <span className="font-mono font-medium">demo123</span>
-          </p>
-        </div>
-      </div>
-    </div>
+        </motion.div>
+      </section>
+    </main>
   )
 }

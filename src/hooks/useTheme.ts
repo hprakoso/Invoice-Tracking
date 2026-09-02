@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 type Theme = 'light' | 'dark'
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>('light')
+  const [theme, setTheme] = useState<Theme>('dark')
   const [mounted, setMounted] = useState(false)
 
   const applyTheme = (t: Theme) => {
@@ -24,7 +24,7 @@ export function useTheme() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
     const stored = localStorage.getItem('theme') as Theme | null
-    const initial = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    const initial = stored || 'dark'
     setTheme(initial)
     applyTheme(initial)
   }, [])

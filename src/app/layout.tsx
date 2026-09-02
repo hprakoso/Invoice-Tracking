@@ -11,8 +11,8 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Invoice Intelligence",
-  description: "AI-Powered Invoice Tracking System",
+  title: "VISTA",
+  description: "Vendor Invoice Submission & Tracking Assistant",
 };
 
 export default function RootLayout({
@@ -21,8 +21,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={jakarta.variable}>
+    // `dark` is the brand default; useTheme() flips it client-side.
+    <html lang="id" className={`${jakarta.variable} dark`}>
       <body className="antialiased">
+        {/* Layer 0 — ambient liquid background, fixed behind everything */}
+        <div aria-hidden="true" className="liquid-bg">
+          <div className="blob blob-1 blob-a" />
+          <div className="blob blob-2 blob-b" />
+          <div className="blob blob-3 blob-c" />
+        </div>
+        {/* Subtle film grain over the whole app */}
+        <div aria-hidden="true" className="grain-overlay" />
         <I18nProvider>{children}</I18nProvider>
       </body>
     </html>

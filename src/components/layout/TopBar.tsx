@@ -36,9 +36,23 @@ interface Notification {
   createdAt: string
 }
 
+// Liquid icon-button pill — translucent hover, ambient primary glow.
+const iconBtn =
+  'rounded-full text-muted-foreground hover:bg-(--glass-bg-strong) hover:text-foreground hover:shadow-[0_0_14px_-6px_var(--glow-primary)] dark:hover:bg-(--glass-bg-strong) transition-colors'
+
+// Accent dot per notification type — token tints where the theme defines them,
+// fixed hues for the amber/orange reminder family (theme-independent semantics).
+const NOTIF_DOTS: Record<string, string> = {
+  invoice_submitted: 'bg-secondary shadow-[0_0_8px_var(--glow-teal)]',
+  revision_requested: 'bg-primary shadow-[0_0_8px_var(--glow-primary)]',
+  status_changed: 'bg-primary/70 shadow-[0_0_8px_var(--glow-primary)]',
+  due_soon: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.45)]',
+  overdue: 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.45)]',
+}
+
 export function TopBar() {
   const { data: session } = useSession()
-  const unreadCount = useNotificationStream()
+  const { unreadCount, clearUnread } = useNotificationStream()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
   const { t, locale, toggle: toggleLocale } = useI18n()
@@ -53,15 +67,17 @@ export function TopBar() {
   }, [open])
 
   const markAllRead = async () => {
-    await fetch('/api/notifications', { method: 'PATCH' })
+    const res = await fetch('/api/notifications', { method: 'PATCH' })
+    if (!res.ok) return
     setNotifications([])
+    clearUnread()
   }
 
   const roleColors: Record<string, string> = {
-    ADMIN:      'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-    GA_STAFF:   'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
-    GA_MANAGER: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
-    VENDOR:     'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+    ADMIN:      'border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300',
+    GA_STAFF:   'border-purple-500/25 bg-purple-500/10 text-purple-700 dark:text-purple-300',
+    GA_MANAGER: 'border-indigo-500/25 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300',
+    VENDOR:     'border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-300',
   }
 
   const role = (session?.user as { role?: string })?.role
@@ -73,10 +89,10 @@ export function TopBar() {
   const pageTitle = titleKey ? t.nav[titleKey] : t.nav.brand
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-white dark:bg-gray-900 dark:border-gray-800 px-4">
+    <header className="glass-panel sticky top-0 z-20 flex h-14 items-center gap-3 border-x-0 border-t-0 px-4">
       <MobileSidebar />
 
-      <p className="lg:hidden text-sm font-semibold text-gray-800 dark:text-gray-100 truncate flex-1">{pageTitle}</p>
+      <p className="lg:hidden text-sm font-semibold text-foreground truncate flex-1">{pageTitle}</p>
       <div className="hidden lg:block flex-1" />
 
       {/* Language Toggle */}
@@ -85,10 +101,10 @@ export function TopBar() {
         size="icon"
         aria-label={t.topbar.switchLanguage}
         onClick={toggleLocale}
-        className="gap-1"
+        className={`${iconBtn} gap-1`}
       >
         <Languages className="h-5 w-5" />
-        <span className="text-[10px] font-bold uppercase">{locale}</span>
+        <span className="text-[10px] font-bold uppercase text-primary">{locale}</span>
       </Button>
 
       {/* Theme Toggle */}
@@ -98,6 +114,7 @@ export function TopBar() {
           size="icon"
           aria-label={theme === 'light' ? t.topbar.switchToDark : t.topbar.switchToLight}
           onClick={toggle}
+          className={iconBtn}
         >
           {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </Button>
@@ -105,37 +122,44 @@ export function TopBar() {
 
       {/* Notification Bell */}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : t.topbar.notifications} className="relative inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+        <PopoverTrigger aria-label={unreadCount > 0 ? t.topbar.unreadNotifications.replace('{count}', String(unreadCount)) : t.topbar.notifications} className={`relative inline-flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-(--glass-bg-strong) hover:text-foreground hover:shadow-[0_0_14px_-6px_var(--glow-primary)] transition-colors`}>
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold">
+            // ring-background keeps the red dot crisp against the translucent glass
+            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold ring-2 ring-background shadow-[0_0_10px_rgba(239,68,68,0.6)]">
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-80 p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <p className="text-sm font-semibold">{t.topbar.notifications}</p>
+        <PopoverContent align="end" className="glass-panel-strong bg-transparent w-80 gap-0 overflow-hidden rounded-2xl p-0 ring-0 shadow-[inset_0_1px_0_0_var(--glass-highlight),var(--glass-shadow)]">
+          <div className="flex items-center justify-between border-b border-(--glass-border) px-4 py-3">
+            <p className="text-sm font-semibold text-foreground">{t.topbar.notifications}</p>
             {notifications.length > 0 && (
-              <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">
+              <button onClick={markAllRead} className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20">
                 {t.topbar.markAllRead}
               </button>
             )}
           </div>
-          <div className="max-h-64 overflow-y-auto">
+          <div className="liquid-scrollbar max-h-64 overflow-y-auto p-2">
             {notifications.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">{t.topbar.noNewNotifications}</p>
+              <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                <Bell className="h-5 w-5 opacity-40" />
+                <p className="text-sm">{t.topbar.noNewNotifications}</p>
+              </div>
             ) : (
               notifications.map(n => (
-                <div key={n.id} className="px-4 py-3 border-b last:border-0 hover:bg-gray-50 dark:hover:bg-gray-800 dark:border-gray-800">
-                  <p className="text-xs font-medium text-gray-900 dark:text-gray-100">{n.title}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{n.body}</p>
+                <div key={n.id} className="mb-1.5 rounded-2xl border border-(--glass-border) bg-(--glass-bg)/60 px-3 py-2.5 transition-all last:mb-0 hover:border-primary/20 hover:bg-(--glass-bg-strong) hover:shadow-[0_0_18px_-6px_var(--glow-primary)]">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${NOTIF_DOTS[n.type] ?? 'bg-muted-foreground/40'}`} />
+                    <p className="truncate text-xs font-semibold text-foreground">{n.title}</p>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{n.body}</p>
                 </div>
               ))
             )}
           </div>
-          <div className="px-4 py-2 border-t">
-            <Link href="/reminders" className="text-xs text-blue-600 hover:underline" onClick={() => setOpen(false)}>
+          <div className="border-t border-(--glass-border) px-4 py-2">
+            <Link href="/reminders" onClick={() => setOpen(false)} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
               {t.topbar.viewAll}
             </Link>
           </div>
@@ -144,12 +168,12 @@ export function TopBar() {
 
       {/* User */}
       <div className="flex items-center gap-2">
-        <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${role ? roleColors[role] : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+        <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${role ? roleColors[role] : 'border-(--glass-border) bg-(--glass-bg-strong) text-muted-foreground'}`}>
           <User className="h-3 w-3" />
           <span className="hidden sm:inline">{session?.user?.name?.split(' ')[0]}</span>
           <span className="sm:hidden">{role}</span>
         </div>
-        <Button variant="ghost" size="icon" aria-label={t.topbar.logout} onClick={() => signOut({ callbackUrl: '/login' })}>
+        <Button variant="ghost" size="icon" aria-label={t.topbar.logout} onClick={() => signOut({ callbackUrl: '/login' })} className={iconBtn}>
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

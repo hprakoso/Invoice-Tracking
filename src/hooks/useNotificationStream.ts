@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react'
 
 const POLL_INTERVAL_MS = 60_000
 
-export function useNotificationStream(): number {
+export function useNotificationStream(): { unreadCount: number; clearUnread: () => void } {
   const [unreadCount, setUnreadCount] = useState(0)
+
+  const clearUnread = () => setUnreadCount(0)
 
   useEffect(() => {
     let cancelled = false
@@ -31,5 +33,5 @@ export function useNotificationStream(): number {
     }
   }, [])
 
-  return unreadCount
+  return { unreadCount, clearUnread }
 }

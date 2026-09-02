@@ -7,7 +7,7 @@ import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, FileText, Upload, Users, MessageSquare,
-  Bell, ClipboardList, Menu, X, FileStack, ChevronRight, Building2, Settings, Briefcase
+  Bell, ClipboardList, Menu, X, Droplets, Building2, Settings, Briefcase
 } from 'lucide-react'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -38,16 +38,16 @@ function NavItem({ href, label, icon: Icon, active, indent }: { href: string; la
       <motion.div
         whileHover={{ x: 4 }}
         className={cn(
-          'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+          'flex items-center gap-3 px-4 py-2.5 rounded-full text-sm font-medium border transition-colors cursor-pointer',
           active
-            ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100',
+            ? 'bg-primary/15 text-primary border-primary/25 shadow-[0_0_24px_var(--glow-primary)]'
+            : 'text-muted-foreground border-transparent hover:bg-(--glass-bg-strong) hover:text-foreground',
           indent && 'text-[13px]'
         )}
       >
         <Icon className="h-4 w-4 flex-shrink-0" />
         <span>{label}</span>
-        {active && <ChevronRight className="h-3 w-3 ml-auto" />}
+        {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--glow-primary)]" />}
       </motion.div>
     </Link>
   )
@@ -66,15 +66,15 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
     : []
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
-      {/* Logo */}
-      <div className="flex items-center gap-2 px-4 py-5 border-b dark:border-gray-800">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-          <FileStack className="h-4 w-4 text-white" />
+    <div className="flex flex-col h-full">
+      {/* Brand */}
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-(--glass-border)">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15 shadow-[0_0_20px_var(--glow-primary)]">
+          <Droplets className="h-5 w-5 text-primary" />
         </div>
-        <div>
-          <p className="text-sm font-bold text-gray-900 dark:text-white">{t.nav.brand}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t.nav.brandTagline}</p>
+        <div className="min-w-0">
+          <p className="text-sm font-bold tracking-tight text-foreground">{t.nav.brand}</p>
+          <p className="line-clamp-2 text-[11px] leading-tight text-muted-foreground">{t.nav.brandTagline}</p>
         </div>
         {onClose && (
           <Button variant="ghost" size="icon" className="ml-auto" onClick={onClose}>
@@ -84,7 +84,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+      <nav className="liquid-scrollbar flex-1 overflow-y-auto px-3 py-4 space-y-1">
         {visibleItems.map(item => (
           <NavItem
             key={item.href}
@@ -98,14 +98,14 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       </nav>
 
       {/* Role badge */}
-      <div className="px-4 py-3 border-t dark:border-gray-800">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-xs font-bold text-blue-700 dark:text-blue-300">
+      <div className="px-4 py-3 border-t border-(--glass-border)">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-primary/25 bg-gradient-to-br from-primary/30 to-secondary/20 text-xs font-bold text-primary">
             {session?.user?.name?.charAt(0) ?? '?'}
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={session?.user?.name}>{session?.user?.name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{role}</p>
+            <p className="truncate text-xs font-medium text-foreground" title={session?.user?.name}>{session?.user?.name}</p>
+            <p className="text-[11px] text-muted-foreground">{role}</p>
           </div>
         </div>
       </div>
@@ -115,7 +115,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
 
 export function Sidebar() {
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:fixed lg:inset-y-0 border-r dark:border-gray-800 bg-white dark:bg-gray-900 z-30">
+    <aside className="glass-panel hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:fixed lg:inset-y-0 z-30 border-y-0 border-l-0 border-r">
       <SidebarContent />
     </aside>
   )
@@ -123,15 +123,28 @@ export function Sidebar() {
 
 export function MobileSidebar() {
   const [open, setOpen] = useState(false)
+  const { t } = useI18n()
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
-        className="lg:hidden inline-flex items-center justify-center h-9 w-9 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-        aria-label="Open menu"
+        className="lg:hidden inline-flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:bg-(--glass-bg-strong) hover:text-foreground transition-colors"
+        aria-label={t.nav.openMenu}
       >
         <Menu className="h-5 w-5" />
       </SheetTrigger>
-      <SheetContent side="left" className="p-0 w-64">
+      {/* Inline glass recipe — the sheet's base bg-popover is solid, so this
+          overrides it to keep the mobile drawer translucent like the desktop one. */}
+      <SheetContent
+        side="left"
+        className="p-0 w-72 border-r-0"
+        style={{
+          background: 'var(--glass-bg-strong)',
+          backdropFilter: 'blur(var(--glass-blur))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          borderRight: '1px solid var(--glass-border)',
+          boxShadow: 'inset 0 1px 0 0 var(--glass-highlight), var(--glass-shadow)',
+        }}
+      >
         <SidebarContent onClose={() => setOpen(false)} />
       </SheetContent>
     </Sheet>

@@ -8,6 +8,20 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-02 — Liquid Glass dark-first redesign, rebrand to "VISTA"
+
+**What:** Full visual reskin of `feat/prod-adjustment`, independent of and unrelated to the "Architectural Glass" redesign already shipped on `feat/new-design` (2026-08-14, see `memory.md`) — these are two separate design explorations on two separate branches, not a reversion of that decision. App renamed "Invoice Intelligence" → **VISTA** ("Vendor Invoice Submission & Tracking Assistant", `src/app/layout.tsx` metadata). Dark is now the brand default (`<html class="dark">`, `useTheme()`'s initial state and no-`localStorage` fallback changed from reading `prefers-color-scheme` to a hardcoded `'dark'`); `/login` and `/change-password` are force-light instead (new `src/components/auth/AuthThemeReset.tsx` strips the `dark` class on mount and restores the stored theme on unmount, since an inline pre-paint script can't rerun on a client-side soft navigation the way it does on a hard load).
+
+`globals.css` token set rebuilt around a "liquid glass" surface language (`.glass-panel`/`.glass-panel-strong`, `--glass-bg`/`--glass-border`/`--glass-highlight`/`--glass-shadow`, `--glow-primary`/`--glow-teal` for hover glows) plus an ambient 3-blob background + film-grain overlay mounted once at the root layout (`.liquid-bg`/`.grain-overlay`, `<html>` body). Swept through `Sidebar`, `TopBar` (icon buttons, notification popover, role chips, unread badge), the dashboard/auth layouts, and the login page (rebuilt split-panel hero, unchanged structurally from the pre-existing pattern but restyled to the new token set).
+
+**Fixed while touching `TopBar`/`useNotificationStream`:** `markAllRead()` cleared the notification list locally even when the `PATCH /api/notifications` call failed (no `res.ok` check) — now bails out on a failed response so a network error doesn't silently show "no notifications" while the server still has them marked unread. `useNotificationStream()`'s return type changed from a bare `number` to `{ unreadCount, clearUnread }` so the bell's unread count can be cleared immediately on a successful mark-all-read instead of waiting for the next 60s poll.
+
+**Not committed:** `DESIGN.md` (the design brief this reskin follows) — added to `.gitignore` instead, same convention the 2026-07-30 Liquid Intelligence redesign used for its own brief and reference screens (local input, not part of the tracked repo, per that earlier explicit user request).
+
+**Why:** User-directed visual redesign, no functional/API changes. Existing `feat/new-design` branch's own redesign is a separate track and out of scope for this change.
+
+**Verification:** 45/45 tests, `npm run lint` clean on all touched files.
+
 ### 2026-09-02 — Replace dashboard aging/status-breakdown charts with trend + flow charts
 
 **What:** Deleted `AgingBar.tsx`/`StatusDonut.tsx`, added `MonthlyTrendChart.tsx` (area chart, `data.monthlyTrend` — total amount per month, trailing 12 months), `StatusFlowChart.tsx` (9-step main-flow pipeline strip + a separate compact chip row for the 8 exception statuses, `data.statusByMonth`/`data.statusBreakdown`), `AgingList.tsx` (row-list replacement for the old bar chart, same `agingBuckets[]` data), `ChartEmpty.tsx` (shared empty-state), and `chartShared.ts` (axis/tooltip formatters, the aging severity color ramp). This is the frontend half of the 2026-09-01 status-workflow-overhaul commit (`60635df`) that was deliberately left uncommitted then — see that commit's message: "Frontend pages... (dashboard page, StatusFlowChart) are updated on disk but intentionally left out... entangled with unrelated uncommitted redesign work from an earlier session." `dashboardStats.ts`/`i18n` dictionaries already shipped in that commit; no backend changes here, purely the deferred UI half.
