@@ -541,5 +541,13 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 |---|---|---|
 | `eb2ee04` | 2026-09-02 | feat: duplicate-invoice auto-rejection + fix orphan row on upload retry |
 
+### Phase 19 — Completed deferred Phase 17 frontend, i18n gap-fill, Liquid Glass redesign
+| Commit | Date | Message |
+|---|---|---|
+| `f62cc2d` | 2026-09-02 | refactor: localize hardcoded strings in admin, chat, vendor pages |
+| `2247bf5` | 2026-09-02 | feat: add PIC stage transition control, SLA timeline, and stage API |
+| `a4b4bc2` | 2026-09-02 | refactor: replace dashboard donut/aging charts with trend + flow charts |
+| `73b7f24` | 2026-09-02 | feat: apply Liquid Glass dark-first redesign, rebrand app to VISTA |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
