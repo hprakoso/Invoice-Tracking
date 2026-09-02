@@ -8,6 +8,18 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-02 — Replace dashboard aging/status-breakdown charts with trend + flow charts
+
+**What:** Deleted `AgingBar.tsx`/`StatusDonut.tsx`, added `MonthlyTrendChart.tsx` (area chart, `data.monthlyTrend` — total amount per month, trailing 12 months), `StatusFlowChart.tsx` (9-step main-flow pipeline strip + a separate compact chip row for the 8 exception statuses, `data.statusByMonth`/`data.statusBreakdown`), `AgingList.tsx` (row-list replacement for the old bar chart, same `agingBuckets[]` data), `ChartEmpty.tsx` (shared empty-state), and `chartShared.ts` (axis/tooltip formatters, the aging severity color ramp). This is the frontend half of the 2026-09-01 status-workflow-overhaul commit (`60635df`) that was deliberately left uncommitted then — see that commit's message: "Frontend pages... (dashboard page, StatusFlowChart) are updated on disk but intentionally left out... entangled with unrelated uncommitted redesign work from an earlier session." `dashboardStats.ts`/`i18n` dictionaries already shipped in that commit; no backend changes here, purely the deferred UI half.
+
+`KPICard` prop API changed: dropped `icon`/`color` (each KPI was previously its own colored+iconed card) in favor of `tone?: 'default' | 'danger'` + `className` — the four KPIs now render as cells of one bordered strip (grid drawn by the page, not per-card borders), matching the redesign's flatter typographic hierarchy. `KPICard.test.tsx` updated to match (dropped the icon-crash regression test since `icon` no longer exists; added a `tone="danger"` assertion).
+
+`GET /api/dashboard` and `GET /api/dashboard/export` both changed their invoice-list `where` clause from conditionally excluding `DRAFT` (`filter.status ? filter : { ...filter, status: { not: 'DRAFT' } }`) to always using the plain filter — this was actually a bug fix, not new behavior: `docs/API.md` already documented both routes as reflecting "no status exclusion of its own" / "unfiltered = every invoice" (written during the 2026-09-01 docs pass), the code just hadn't caught up. `docs/API.md`'s export column list updated to add **PO Number** and **PIC Stage** (both already in the code's `sheet.columns`, just missing from the doc).
+
+**Why:** Completes the deferred frontend scope from the 2026-09-01 status-workflow overhaul; the old donut/bar charts couldn't represent the new 17-value status set legibly (a 17-slice donut is unreadable).
+
+**Verification:** 45/45 tests, `npm run lint` clean, docs updated (`docs/API.md`).
+
 ### 2026-09-02 — PIC stage transition control, SLA timeline, and stage API
 
 **What:** New `PATCH /api/invoices/[id]/stage` (`src/app/api/invoices/[id]/stage/route.ts`) — `ADMIN`/`GA_STAFF`/`GA_MANAGER` only, body validated by the already-existing `updateInvoiceStageSchema`. Writes `invoices.pic_stage`, appends an `invoice_stage_history` row, and an `audit_logs` row (`action: 'invoice.stage_changed'`). This endpoint was already fully documented in `docs/API.md` (from the 2026-09-01 docs pass) but the route file itself had never been committed — this commit adds the file the docs already described.

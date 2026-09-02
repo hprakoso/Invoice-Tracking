@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { FileText, DollarSign, AlertTriangle, Clock } from 'lucide-react'
 import { KPICard } from '../KPICard'
 
 vi.mock('framer-motion', () => ({
@@ -16,12 +15,7 @@ vi.mock('@/hooks/useCountUp', () => ({
 }))
 
 describe('KPICard', () => {
-  const base = {
-    title: 'Total Invoice',
-    value: 42,
-    icon: <FileText className="h-5 w-5" />,
-    color: 'blue' as const,
-  }
+  const base = { title: 'Total Invoice', value: 42 }
 
   it('renders the title', () => {
     render(<KPICard {...base} />)
@@ -53,27 +47,18 @@ describe('KPICard', () => {
     expect(screen.getByText('Rp 2.5M')).toBeInTheDocument()
   })
 
-  it('accepts ReactNode icon without crashing — RSC boundary fix', () => {
-    const icons = [
-      <FileText key="f" className="h-5 w-5" />,
-      <DollarSign key="d" className="h-5 w-5" />,
-      <AlertTriangle key="a" className="h-5 w-5" />,
-      <Clock key="c" className="h-5 w-5" />,
-    ]
-    for (const icon of icons) {
-      const { unmount } = render(<KPICard {...base} icon={icon} />)
-      expect(screen.getByText('Total Invoice')).toBeInTheDocument()
-      unmount()
-    }
+  it('applies danger tone to the figure', () => {
+    const { container } = render(<KPICard {...base} tone="danger" />)
+    expect(container.querySelector('p:nth-of-type(2)')?.className).toContain('text-destructive')
   })
 
-  it.each([
-    ['blue', 'text-blue-600'],
-    ['green', 'text-emerald-600'],
-    ['red', 'text-red-600'],
-    ['orange', 'text-amber-600'],
-  ] as const)('applies %s colour class to icon wrapper', (color, cls) => {
-    const { container } = render(<KPICard {...base} color={color} />)
-    expect(container.querySelector('span')?.className).toContain(cls)
+  it('keeps default tone foreground-colored', () => {
+    const { container } = render(<KPICard {...base} />)
+    expect(container.querySelector('p:nth-of-type(2)')?.className).toContain('text-foreground')
+  })
+
+  it('appends cell chrome classes passed via className', () => {
+    const { container } = render(<KPICard {...base} className="border-l border-border/60" />)
+    expect(container.firstElementChild?.className).toContain('border-l')
   })
 })

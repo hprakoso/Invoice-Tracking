@@ -2,23 +2,31 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { Search, FileText, DollarSign, AlertTriangle, Clock, Download } from 'lucide-react'
+import { Search, Download, Inbox } from 'lucide-react'
 import { KPICard } from '@/components/dashboard/KPICard'
-import { StatusDonut } from '@/components/dashboard/StatusDonut'
-import { AgingBar } from '@/components/dashboard/AgingBar'
+import { MonthlyTrendChart } from '@/components/dashboard/MonthlyTrendChart'
+import { StatusFlowChart } from '@/components/dashboard/StatusFlowChart'
+import { AgingList } from '@/components/dashboard/AgingList'
+import { ChartEmpty } from '@/components/dashboard/ChartEmpty'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
 import { formatIDR, formatDate } from '@/lib/format'
 import { useI18n } from '@/hooks/useI18n'
 
-interface DashboardData {
-  totalInvoices: number
+// Hairline dividers between KPI strip cells — mobile 2×2 grid, desktop 1×4.
+// Odd cells are the left column (no left border), cells 1–2 are the top row (no top border).
+const KPI_CELL =
+  'border-t border-l border-border/60 max-lg:[&:nth-child(-n+2)]:border-t-0 max-lg:[&:nth-child(odd)]:border-l-0 lg:first:border-l-0'
+
+interface DashboardData {  totalInvoices: number
   totalPayable: number
   overdueCount: number
   openCount: number
   statusBreakdown: { status: string; count: number }[]
   agingBuckets: { label: string; amount: number }[]
+  monthlyTrend: { month: string; totalAmount: number; count: number }[]
+  statusByMonth: { month: string; entered: number; accepted: number }[]
   recentInvoices: {
     id: string
     invoiceNumber: string
@@ -30,17 +38,18 @@ interface DashboardData {
   }[]
 }
 
-function DashboardSkeleton() {
+function DashboardSkeleton({ ariaLabel }: { ariaLabel: string }) {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+    <div className="space-y-5 sm:space-y-6" aria-busy="true" aria-label={ariaLabel}>
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Skeleton className="h-72 rounded-xl" />
-        <Skeleton className="h-72 rounded-xl" />
+      <Skeleton className="h-80 rounded-2xl" />
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+        <Skeleton className="h-72 rounded-2xl" />
+        <Skeleton className="h-72 rounded-2xl" />
       </div>
-      <Skeleton className="h-64 rounded-xl" />
+      <Skeleton className="h-56 rounded-2xl" />
     </div>
   )
 }
@@ -53,12 +62,7 @@ export default function DashboardPage() {
 
   const STATUSES = [
     { value: '', label: t.dashboard.allStatuses },
-    { value: 'SUBMITTED', label: t.status.SUBMITTED },
-    { value: 'PAID', label: t.status.PAID },
-    { value: 'REVISION', label: t.status.REVISION },
-    { value: 'CANCELLED', label: t.status.CANCELLED },
-    { value: 'REJECTED', label: t.status.REJECTED },
-    { value: 'VOID', label: t.status.VOID },
+    ...Object.entries(t.status).map(([value, label]) => ({ value, label })),
   ]
 
   const [data, setData] = useState<DashboardData | null>(null)
@@ -111,27 +115,30 @@ export default function DashboardPage() {
   }
   const translatedAgingBuckets = data?.agingBuckets.map((b) => ({ ...b, label: AGING_LABELS[b.label] ?? b.label }))
 
+  const trendTotal = data?.monthlyTrend.reduce((sum, p) => sum + p.totalAmount, 0) ?? 0
+  const trendCount = data?.monthlyTrend.reduce((sum, p) => sum + p.count, 0) ?? 0
+
   return (
     <div>
       <div className="mb-6 flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.dashboard.title}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t.dashboard.subtitle}</p>
+          <h1 className="text-xl font-bold text-foreground sm:text-2xl">{t.dashboard.title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t.dashboard.subtitle}</p>
         </div>
         <a
           href={`/api/dashboard/export?${buildParams()}`}
           download
-          className="inline-flex items-center gap-2 h-9 px-3 rounded-md border text-sm font-medium text-gray-700 dark:text-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors whitespace-nowrap"
+          className="glass-panel-strong inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-sm font-medium whitespace-nowrap transition hover:brightness-105"
         >
           <Download className="h-4 w-4" /> {t.dashboard.exportExcel}
         </a>
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-3 sm:p-4 mb-6">
-        <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
-          <div className="relative flex-1 min-w-[160px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+      <div className="glass-panel mb-6 rounded-2xl p-3 sm:p-4">
+        <div className="flex flex-col flex-wrap gap-2 sm:flex-row sm:gap-3">
+          <div className="relative min-w-[160px] flex-1">
+            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder={t.dashboard.searchPlaceholder}
               value={search}
@@ -142,7 +149,7 @@ export default function DashboardPage() {
           <select
             value={status}
             onChange={e => setStatus(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
             {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
@@ -150,7 +157,7 @@ export default function DashboardPage() {
             <select
               value={vendorId}
               onChange={e => setVendorId(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
               <option value="">{t.dashboard.allVendors}</option>
               {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -159,7 +166,7 @@ export default function DashboardPage() {
           <select
             value={companyId}
             onChange={e => setCompanyId(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
             <option value="">{t.dashboard.allCompanies}</option>
             {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -169,77 +176,108 @@ export default function DashboardPage() {
               type="date"
               value={dueFrom}
               onChange={e => setDueFrom(e.target.value)}
-              aria-label="Due date from"
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label={t.dashboard.filterDueFrom}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
-            <span className="text-gray-400 text-sm">–</span>
+            <span className="text-sm text-muted-foreground">–</span>
             <input
               type="date"
               value={dueTo}
               onChange={e => setDueTo(e.target.value)}
-              aria-label="Due date to"
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label={t.dashboard.filterDueTo}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
         </div>
       </div>
 
-      {loading || !data ? <DashboardSkeleton /> : (
-        <div className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <KPICard title={t.dashboard.totalInvoices} value={data.totalInvoices} icon={<FileText className="h-5 w-5" />} color="blue" />
-            <KPICard title={t.dashboard.totalPayable} value={data.totalPayable} icon={<DollarSign className="h-5 w-5" />} color="green" format="currency" subtitle={t.dashboard.totalPayableSubtitle} />
-            <KPICard title={t.dashboard.overdue} value={data.overdueCount} icon={<AlertTriangle className="h-5 w-5" />} color="red" subtitle={t.dashboard.overdueSubtitle} />
-            <KPICard title={t.dashboard.openInvoices} value={data.openCount} icon={<Clock className="h-5 w-5" />} color="orange" />
-          </div>
+      {loading || !data ? <DashboardSkeleton ariaLabel={t.dashboard.loadingAria} /> : (
+        <div className="space-y-5 sm:space-y-6">
+          {/* KPI summary — single glass strip, hairline-divided cells */}
+          <section className="glass-panel overflow-hidden rounded-2xl" aria-label={t.dashboard.subtitle}>
+            <div className="grid grid-cols-2 lg:grid-cols-4">
+              <KPICard className={KPI_CELL} title={t.dashboard.totalInvoices} value={data.totalInvoices} />
+              <KPICard className={KPI_CELL} title={t.dashboard.totalPayable} value={data.totalPayable} format="currency" subtitle={t.dashboard.totalPayableSubtitle} />
+              <KPICard className={KPI_CELL} title={t.dashboard.overdue} value={data.overdueCount} tone="danger" subtitle={t.dashboard.overdueSubtitle} />
+              <KPICard className={KPI_CELL} title={t.dashboard.openInvoices} value={data.openCount} />
+            </div>
+          </section>
 
-          {/* Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">{t.dashboard.invoiceStatus}</h3>
-              <StatusDonut data={data.statusBreakdown} />
+          {/* Hero — monthly trend */}
+          <section className="glass-panel rounded-2xl p-4 sm:p-6">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{t.dashboard.monthlyTrendTitle}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.monthlyTrendSubtitle}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-border bg-background/60 px-2.5 py-1 text-xs text-muted-foreground">
+                  {t.dashboard.monthlyTrendCount.replace('{count}', String(trendCount))}
+                </span>
+                <span className="rounded-full border border-border bg-background/60 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
+                  {formatIDR(trendTotal)}
+                </span>
+              </div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">{t.dashboard.agingAnalysis}</h3>
-              <AgingBar data={translatedAgingBuckets ?? []} />
-            </div>
+            <MonthlyTrendChart data={data.monthlyTrend ?? []} />
+          </section>
+
+          {/* Verification flow + aging */}
+          <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
+            <section className="glass-panel rounded-2xl p-4 sm:p-6">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-foreground">{t.dashboard.statusFlowTitle}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.statusFlowSubtitle}</p>
+              </div>
+              <StatusFlowChart data={data.statusByMonth ?? []} breakdown={data.statusBreakdown ?? []} />
+            </section>
+            <section className="glass-panel rounded-2xl p-4 sm:p-6">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-foreground">{t.dashboard.agingTitle}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t.dashboard.agingSubtitle}</p>
+              </div>
+              <AgingList data={translatedAgingBuckets ?? []} openCount={data.openCount} />
+            </section>
           </div>
 
           {/* Recent Invoices */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
-            <div className="px-4 sm:px-5 py-4 border-b dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">{t.dashboard.recentInvoices}</h3>
+          <section className="glass-panel overflow-hidden rounded-2xl">
+            <div className="border-b border-border/60 px-4 py-4 sm:px-5">
+              <h3 className="text-sm font-semibold text-foreground">{t.dashboard.recentInvoices}</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="liquid-scrollbar overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                    <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.dashboard.colInvoiceNo}</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.dashboard.colVendor}</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden md:table-cell">{t.dashboard.colCompany}</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell">{t.dashboard.colDueDate}</th>
-                    <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.dashboard.colTotal}</th>
-                    <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.dashboard.colStatus}</th>
+                  <tr className="border-b border-border/60 bg-black/[0.02] dark:bg-white/[0.03]">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">{t.dashboard.colInvoiceNo}</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">{t.dashboard.colVendor}</th>
+                    <th className="hidden px-4 py-3 text-left text-xs font-medium text-muted-foreground md:table-cell">{t.dashboard.colCompany}</th>
+                    <th className="hidden px-4 py-3 text-left text-xs font-medium text-muted-foreground sm:table-cell">{t.dashboard.colDueDate}</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground">{t.dashboard.colTotal}</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-muted-foreground">{t.dashboard.colStatus}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.recentInvoices.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
-                        {t.dashboard.noInvoicesFound}
+                      <td colSpan={6} className="px-4">
+                        <ChartEmpty
+                          icon={<Inbox className="h-5 w-5" />}
+                          title={t.dashboard.noInvoicesFound}
+                          hint={t.dashboard.recentInvoicesEmptyHint}
+                        />
                       </td>
                     </tr>
                   ) : (
                     data.recentInvoices.map((inv) => (
-                      <tr key={inv.id} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-gray-700 dark:text-gray-300">{inv.invoiceNumber}</td>
-                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{inv.vendor?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell">{inv.company?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">
+                      <tr key={inv.id} className="border-b border-border/50 transition-colors last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">{inv.invoiceNumber}</td>
+                        <td className="px-4 py-3 text-foreground">{inv.vendor?.name ?? '—'}</td>
+                        <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">{inv.company?.name ?? '—'}</td>
+                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
                           {inv.dueDate ? formatDate(inv.dueDate) : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300">
+                        <td className="px-4 py-3 text-right font-medium tabular-nums text-foreground">
                           {formatIDR(Number(inv.totalAmount))}
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -251,7 +289,7 @@ export default function DashboardPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
         </div>
       )}
     </div>
