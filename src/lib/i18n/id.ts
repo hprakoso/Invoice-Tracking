@@ -65,8 +65,8 @@ const id = {
     companies: 'Perusahaan',
     reminderSettings: 'Pengaturan Pengingat',
     companyProfile: 'Profil Perusahaan',
-    brand: 'VISTA',
-    brandTagline: 'Vendor Invoice Submission & Tracking Assistant',
+    brand: 'SIP',
+    brandTagline: 'Smart Invoice & Payment',
     openMenu: 'Buka menu',
   },
   topbar: {

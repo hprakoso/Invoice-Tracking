@@ -11,8 +11,8 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "VISTA",
-  description: "Vendor Invoice Submission & Tracking Assistant",
+  title: "SIP",
+  description: "Smart Invoice & Payment",
 };
 
 export default function RootLayout({

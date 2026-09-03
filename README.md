@@ -1,6 +1,6 @@
-# 🧾 Invoice Intelligence System
+# 🧾 SIP — Smart Invoice & Payment
 
-> An AI-powered Invoice Tracking & Accounts Payable Assistant — built as a demo MVP to showcase real-time OCR extraction, multi-step approval workflows, and an AI chatbot, all in a single responsive web app.
+> An AI-powered invoice tracking and accounts-payable platform — centralized submission, OCR extraction, per-stage PIC/SLA tracking, and an AI assistant, in a single responsive web app.
 
 > 📚 This file is the pitch/quick-start. For architecture, database schema, API reference (with field-level data-source tracing), and setup/troubleshooting details, see [`docs/`](./docs/INDEX.md).
 
@@ -8,13 +8,15 @@
 
 ## 📌 What is this project?
 
-This is a **full-stack invoice management system** that automates the accounts payable process from document upload to payment approval. It combines:
+This is a **full-stack invoice management system** that centralizes the accounts payable process from document submission through to payment. It combines:
 
-- **Optical Character Recognition (OCR)** — upload a PDF or image invoice and watch fields extract automatically, one by one, in real time
-- **Multi-step Approval Workflow** — Finance reviews first, then escalates to Manager with a single click
+- **AI extraction & document classification** — upload a PDF or image and watch fields extract in real time; supporting documents (faktur pajak, BAST) are auto-identified, with a manual override on every one
+- **17-stage invoice workflow** — a linear main flow (Received → Registered → Verification → Ready for Payment → Treasury → Paid → Closed) plus exception states (Document Incomplete, Waiting Approval, Payment Hold, …), with server-enforced valid transitions
+- **PIC stage & SLA tracking** — an independent GA → Budget → Proc/Legal → SSU → Treasury dimension recording who holds each invoice, with per-stage lead times computed from the timestamped history
+- **Duplicate detection** — a repeat invoice number from the same vendor is auto-rejected with an audit trail rather than silently accepted
 - **AI Chatbot** — ask natural language questions about your invoices ("Which invoices are overdue?" / "Total tagihan bulan ini berapa?")
-- **In-app Notification System** — due-date reminders and approval alerts pushed to the notification bell without email or external services
-- **Audit Log** — every action (upload, approve, reject) is recorded with who did what and when
+- **Notifications** — configurable due-date, status-change, and stage-assignment triggers, delivered in-app and/or by email
+- **Audit Log** — every action (upload, status change, reclassify, auto-reject) is recorded with who did what and when
 
 The UI is fully responsive — it works on mobile, tablet, and desktop.
 
@@ -48,7 +50,7 @@ This project is built as a **2-day demo MVP** — ideal for:
 
 - Presenting an AI-powered invoice automation concept to stakeholders
 - Showcasing OCR + LLM extraction in action with real documents
-- Demonstrating a role-based approval workflow in a live presentation
+- Demonstrating role-based invoice tracking and per-stage SLA monitoring in a live presentation
 - Using as a starting point or blueprint for a production accounts payable system
 
 > This is **not** a production system. It uses local disk storage, hardcoded demo users, and synchronous OCR. See the Known Limitations section for what would need to change before going live.

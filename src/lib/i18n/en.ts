@@ -67,8 +67,8 @@ const en: Dictionary = {
     companies: 'Companies',
     reminderSettings: 'Reminder Settings',
     companyProfile: 'Company Profile',
-    brand: 'VISTA',
-    brandTagline: 'Vendor Invoice Submission & Tracking Assistant',
+    brand: 'SIP',
+    brandTagline: 'Smart Invoice & Payment',
     openMenu: 'Open menu',
   },
   topbar: {

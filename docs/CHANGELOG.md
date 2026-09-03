@@ -8,6 +8,19 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-03 — Rebrand to SIP (Smart Invoice & Payment)
+
+**What:** App renamed **VISTA → SIP**, tagline "Vendor Invoice Submission & Tracking Assistant" → **"Smart Invoice & Payment"**. Changed in `src/app/layout.tsx` (page metadata/browser tab), both i18n dictionaries (`nav.brand`/`nav.brandTagline`, which drive the sidebar), `README.md`, and `docs/INDEX.md`.
+
+**Deliberately unchanged, per the user's decision:**
+- `prisma/seed.ts`'s bootstrap admin stays `admin@vista.id` — it's a login credential, and changing it would invalidate the existing admin on the next reseed. Still overridable via `ADMIN_EMAIL`.
+- The email templates in `src/lib/services/email.ts` keep "Invoice Tracking" in their header/footer.
+- `docs/CHANGELOG.md`'s earlier entries keep saying VISTA — they're a historical record of what happened on 2026-09-02, not current-state documentation.
+
+**Also corrected while renaming** (the README's feature list sat directly under the title being rebranded and described a product that no longer exists): it advertised a "Multi-step Approval Workflow — Finance reviews first, then escalates to Manager", but `ApprovalWorkflow` was dropped back in migration `20260715171000_invoice_workflow_overhaul` and the `FINANCE`/`MANAGER` roles it names were deleted in `20260726171012_simplify_roles`. The bullets now describe what SIP actually does: the 17-stage workflow, PIC/SLA tracking, duplicate detection, and multi-document classification. The "approval alerts"/"approve, reject" phrasing in the notification and audit-log bullets was corrected for the same reason.
+
+**Verified in the browser:** sidebar renders "SIP / Smart Invoice & Payment", browser tab title is `SIP`, no "VISTA" string remains anywhere on the rendered page, and the toggle confirms both language dictionaries carry the new name.
+
 ### 2026-09-03 — Fix: OCR wrote invoiceNumber past the duplicate check
 
 **Found by running the app in a browser**, not by tests — `tsc`, lint and the suite were all green with this bug present.

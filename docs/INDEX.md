@@ -1,6 +1,6 @@
-# Invoice Intelligence System — Documentation
+# SIP (Smart Invoice & Payment) — Documentation
 
-Technical reference for the Invoice Intelligence System. The root [`README.md`](../README.md) is the pitch/quick-start for demo purposes; the files here are the structured engineering reference.
+Technical reference for SIP. The root [`README.md`](../README.md) is the pitch/quick-start for demo purposes; the files here are the structured engineering reference.
 
 | Doc | Contents |
 |---|---|
