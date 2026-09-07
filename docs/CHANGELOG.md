@@ -824,6 +824,8 @@ Six batches from a cross-feature review (10 parallel finders → 8 adversarial v
 | `dd42ae6` | 2026-09-07 | feat: add invoice date/amount constraints, hot-path indexes, and draft flag |
 | `4d17da2` | 2026-09-07 | fix: correct payment lifecycle, vendor edit lock, and duplicate auto-reject |
 | `0a98636` | 2026-09-07 | fix: duplicate POST conflict, stale file mirror, dashboard stall, audit page guard |
+| `85fd149` | 2026-09-07 | docs: record review remediation phase in commit log and DB targeting gotcha |
+| `3efe40a` | 2026-09-07 | feat: make seed UAT-ready and add production cutover runbook |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
