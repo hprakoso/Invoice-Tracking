@@ -49,8 +49,7 @@ export async function PATCH(
 
 // Removing a document a user attached by mistake. Hard delete — the storage
 // object is intentionally left in place (orphaned but harmless): deleting it
-// would make an accidental click unrecoverable, and the row is what every
-// read path goes through.
+// would make an accidental click unrecoverable.
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; documentId: string }> },
@@ -62,11 +61,22 @@ export async function DELETE(
 
   const existing = await prisma.invoiceDocument.findFirst({
     where: { id: documentId, invoiceId: id },
-    select: { id: true, originalName: true, type: true },
+    select: { id: true, originalName: true, type: true, filePath: true },
   })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   await prisma.invoiceDocument.delete({ where: { id: documentId } })
+
+  // Uploading a primary document also mirrors its path onto the legacy
+  // Invoice.filePath/fileType columns, and three read paths still go through
+  // that mirror — the /file endpoint, the detail page's fallback preview, and
+  // the OCR route. Deleting only the row left all three serving a document
+  // that no longer exists, and OCR's classification updateMany (matched by
+  // file_path) silently updating zero rows. The mirror is cleared with it.
+  await prisma.invoice.updateMany({
+    where: { id, filePath: existing.filePath },
+    data: { filePath: null, fileType: null },
+  })
 
   await prisma.auditLog.create({
     data: {

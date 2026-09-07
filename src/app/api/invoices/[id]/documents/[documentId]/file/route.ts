@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth/helpers'
-import { getFileBuffer } from '@/lib/services/fileService'
-
-const MIME_MAP: Record<string, string> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-}
+import { getFileBuffer, mimeTypeFor } from '@/lib/services/fileService'
 
 // Per-document sibling of GET /api/invoices/[id]/file (which serves only the
 // legacy single Invoice.filePath). Same auth rule: VENDOR reaches its own
@@ -44,7 +37,7 @@ export async function GET(
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
-      'Content-Type': MIME_MAP[document.fileType] ?? 'application/octet-stream',
+      'Content-Type': mimeTypeFor(document.fileType),
       'Cache-Control': 'private, max-age=3600',
     },
   })

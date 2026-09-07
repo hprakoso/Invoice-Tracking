@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole, unlinkedVendorResponse } from '@/lib/auth/helpers'
+import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
 import { buildDashboardFilter } from '@/lib/services/dashboardStats'
 
@@ -56,7 +57,9 @@ export async function POST(req: NextRequest) {
   const effectivePicId =
     session.user.role === 'GA_STAFF' ? session.user.id : (data.picId ?? null)
 
-  const invoice = await prisma.invoice.create({
+  let invoice
+  try {
+    invoice = await prisma.invoice.create({
     data: {
       vendorId: effectiveVendorId as string,
       companyId: data.companyId ?? null,
@@ -88,8 +91,24 @@ export async function POST(req: NextRequest) {
         })),
       },
     },
-    include: { vendor: true, items: true },
-  })
+      include: { vendor: true, items: true },
+    })
+  } catch (e) {
+    // The partial unique index (migration 20260902000000_invoice_duplicate_guard)
+    // is all that stands between a direct API caller and two live invoices
+    // carrying the same number. POST had no duplicate check and no P2002
+    // handler, so a collision surfaced as an opaque 500 rather than the
+    // conflict PATCH reports. Unlike PATCH there is no auto-reject here: a
+    // brand-new row rejected on arrival is noise, so the caller is told to fix
+    // the number instead.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'Invoice number already exists for this vendor', invoiceNumber: data.invoiceNumber },
+        { status: 409 },
+      )
+    }
+    throw e
+  }
 
   await prisma.auditLog.create({
     data: {

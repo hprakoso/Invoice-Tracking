@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireInvoiceAccess } from '@/lib/auth/helpers'
-import { getFileBuffer } from '@/lib/services/fileService'
-
-const MIME_MAP: Record<string, string> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-}
+import { getFileBuffer, mimeTypeFor } from '@/lib/services/fileService'
 
 export async function GET(
   _req: NextRequest,
@@ -29,7 +22,7 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
-  const contentType = MIME_MAP[invoice.fileType ?? ''] ?? 'application/octet-stream'
+  const contentType = mimeTypeFor(invoice.fileType)
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {

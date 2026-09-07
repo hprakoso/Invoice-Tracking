@@ -42,9 +42,13 @@ describe('KPICard', () => {
     expect(screen.getByText('Rp 5jt')).toBeInTheDocument()
   })
 
-  it('formats currency in billions', () => {
+  // id-ID decimal separator, matching the chart axes and tooltips on the same
+  // screen. This asserted 'Rp 2.5M' while the charts rendered 'Rp 2,5M' for the
+  // same amount — and a dot is the *thousands* separator in id-ID, so the old
+  // output read as an entirely different number to the intended audience.
+  it('formats currency in billions the same way the chart axes do', () => {
     render(<KPICard {...base} value={2_500_000_000} format="currency" />)
-    expect(screen.getByText('Rp 2.5M')).toBeInTheDocument()
+    expect(screen.getByText('Rp 2,5M')).toBeInTheDocument()
   })
 
   it('applies danger tone to the figure', () => {

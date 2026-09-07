@@ -4,6 +4,26 @@ import { createClient } from '@supabase/supabase-js'
 const BUCKET = 'invoices'
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'invoices')
 
+/**
+ * Content type for a stored `fileType` (the extension saveUploadedFile derives).
+ * Lives here because this module already owns the extension logic; it was
+ * previously copy-pasted into three API routes, which had already drifted —
+ * the OCR route defaulted to 'application/pdf' while the two file routes
+ * defaulted to 'application/octet-stream'. Adding a supported upload type
+ * meant remembering three more edits, and missing one made that route serve a
+ * download instead of a preview, or hand Gemini the wrong mime.
+ */
+const MIME_TYPES: Record<string, string> = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+}
+
+export function mimeTypeFor(fileType: string | null | undefined, fallback = 'application/octet-stream'): string {
+  return MIME_TYPES[fileType ?? ''] ?? fallback
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 

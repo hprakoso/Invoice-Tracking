@@ -1,6 +1,7 @@
 'use client'
 import { motion } from 'framer-motion'
 import { useCountUp } from '@/hooks/useCountUp'
+import { formatAxisIDR } from './chartShared'
 
 interface KPICardProps {
   title: string
@@ -13,13 +14,13 @@ interface KPICardProps {
   className?: string
 }
 
+// Abbreviation comes from formatAxisIDR, the one abbreviator, rather than a
+// second implementation. The local copy used toFixed, so the KPI strip rendered
+// "Rp 1.5M" while the chart axes right below it rendered "Rp 1,5M" for the same
+// amount — and in id-ID a dot is the *thousands* separator, so the strip's
+// version was genuinely ambiguous to the audience it was written for.
 function formatValue(val: number, format: 'number' | 'currency') {
-  if (format === 'currency') {
-    if (val >= 1_000_000_000) return `Rp ${(val / 1_000_000_000).toFixed(1)}M`
-    if (val >= 1_000_000) return `Rp ${(val / 1_000_000).toFixed(0)}jt`
-    return `Rp ${val.toLocaleString('id-ID')}`
-  }
-  return val.toLocaleString('id-ID')
+  return format === 'currency' ? formatAxisIDR(val) : val.toLocaleString('id-ID')
 }
 
 /**

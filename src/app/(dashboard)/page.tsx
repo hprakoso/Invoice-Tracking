@@ -94,16 +94,28 @@ export default function DashboardPage() {
 
   const fetchDashboard = useCallback(async () => {
     setLoading(true)
-    const res = await fetch(`/api/dashboard?${buildParams()}`)
-    setData(res.ok ? await res.json() : null)
-    setLoading(false)
+    // try/finally, not a bare await: a rejected fetch (a network blip, a server
+    // restart, a JSON parse failure) used to kill this callback before
+    // setLoading(false) ran, leaving the whole dashboard stuck on its skeleton
+    // until the user happened to change a filter — the only other re-trigger.
+    try {
+      const res = await fetch(`/api/dashboard?${buildParams()}`)
+      setData(res.ok ? await res.json() : null)
+    } catch {
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
   }, [buildParams])
 
   useEffect(() => {
     if (!isVendor) {
       fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
     }
-    fetch('/api/companies').then(r => r.json()).then((d: unknown) => setCompanies(Array.isArray(d) ? d : []))
+    // includeInactive: the "by company" panel aggregates every invoice,
+    // deactivated companies included, so an active-only dropdown showed a
+    // number the user could see but not drill into.
+    fetch('/api/companies?includeInactive=true').then(r => r.json()).then((d: unknown) => setCompanies(Array.isArray(d) ? d : []))
   }, [isVendor])
 
   useEffect(() => {

@@ -8,6 +8,50 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-07 — Review remediation 6/6: remaining defects, duplication, and end-to-end verification
+
+The tail of the review's 32 findings, plus the behavioural verification covering all six batches.
+
+**`POST /api/invoices` returns 409 on a duplicate invoice number** instead of an opaque 500. The partial unique index was the only thing preventing two live invoices with the same number, and POST had neither a pre-check nor a P2002 handler. Unlike PATCH there is no auto-reject here — a brand-new row rejected on arrival is noise, so the caller is told to fix the number.
+
+**Deleting a document clears the legacy `Invoice.filePath`/`fileType` mirror.** A primary upload dual-writes the path onto the invoice, and three read paths still go through that mirror (the `/file` endpoint, the detail page's fallback preview, the OCR route). Deleting only the `invoice_documents` row left all three serving a document that no longer existed, and OCR's classification `updateMany` — matched by `file_path` — silently updating zero rows. The route's own comment claiming "the row is what every read path goes through" was factually wrong and has been corrected.
+
+**The dashboard no longer sticks on its skeleton forever.** `fetchDashboard` had no `try`/`finally`, so a rejected fetch (network blip, server restart, JSON parse failure) skipped `setLoading(false)` and the page stayed on its loading state until the user happened to change a filter — the only other re-trigger.
+
+**`GET /api/audit?page=abc` no longer 500s.** `parseInt` produced `NaN`, and `?page=0`/`-1` a negative `skip`; both reached Prisma and threw an unhandled validation error. Clamped to a sane page, the same treatment the amount filters already gave junk input.
+
+**The company filter can now select the companies the chart shows.** The "by company" panel aggregates every invoice including deactivated companies, while the dropdown was fed by `/api/companies` without `includeInactive` — so a user could see a number they had no way to drill into.
+
+**Two already-diverged duplications collapsed.** `MIME_MAP` was byte-identical in three API routes and had drifted (the OCR route defaulted to `application/pdf`, the file routes to `application/octet-stream`); it now lives as `mimeTypeFor()` in `fileService.ts`, which already owned the extension logic. And `KPICard` had its own Rupiah abbreviator using `toFixed`, so the KPI strip rendered **"Rp 2.5M"** while the chart axes directly below rendered **"Rp 2,5M"** for the same amount — in id-ID a dot is the *thousands* separator, so the strip's version read as a different number entirely. It now calls `formatAxisIDR`. The existing KPICard test had encoded the wrong output and was updated.
+
+**Data touched:** `invoices.file_path`/`file_type` set to NULL when the matching primary document is deleted (previously left dangling). No other data or schema changes in this batch.
+
+**Deliberately not changed:** the notification bell still fetches up to 50 full rows every 60s to render a badge count — the new `notifications(user_id, is_read)` index removes the scan cost, and a dedicated count endpoint would change the API contract for a cosmetic payload saving. `GET /api/invoices` still has no pagination; dropping the `items` include (batch 1) removed the bulk of it, but real pagination needs the list UI changed too. `companyId` remains client-side-required only. All three are follow-ups, not regressions.
+
+---
+
+#### End-to-end verification of all six batches
+
+Run against the reseeded local database (`localhost:5433/invoice_demo`, 100 invoices), deliberately weighted toward **negative paths** — every check below asserts something the old code allowed now fails. Constraint probes run inside transactions that always roll back; the two boundary invoices are created and deleted. Confirmed afterwards: 100 invoices, 0 leftover rows.
+
+**22 checks, 22 passed.**
+
+*Writes the database now refuses:* `due_date` before `invoice_date` (the originally reported bug) → `invoices_due_date_after_invoice_date`; negative `total_amount` and negative `paid_amount` → `invoices_amounts_non_negative`; negative line-item total → `invoice_items_total_non_negative`. *Still accepted:* due > invoice, due = invoice, a null due date, and a genuine zero tax amount.
+
+*The due-day boundary, constructed rather than hoped for* — the seed happens to contain no invoice due exactly today, which would have made the check vacuous. Adding one due **today** and one due **yesterday** moved the Overdue KPI from 22 to **23**, not 24: the due-today invoice is not overdue. `isOverdue()` drew the same line, the due-today amount landed in "Belum jatuh tempo" (+Rp 7.000.000) rather than an overdue bucket, and the reminder cron picked it up in its **due-soon** window — where it used to fall straight through to the "sudah melewati jatuh tempo" email on its own due date.
+
+*Numbers that used to contradict each other on one screen:* aging buckets now sum to Total Payable exactly (Rp 11.917.100.000 = Rp 11.917.100.000 — previously impossible, with an unbounded first bucket and null-due-date invoices in no bucket at all); the aging panel's overdue total matches the Overdue KPI (Rp 3.790.350.000 / 22 invoices, against 22 actual); and all 22 rows the dashboard calls overdue are also tagged overdue by the list/detail predicate.
+
+*The PAID-filter contradiction:* filtering the dashboard to `status=PAID` now reports 0 overdue and Rp 0 payable. An invalid `?status=paid` is ignored instead of reaching the driver as a 500.
+
+*Tenant isolation:* an unlinked VENDOR cannot produce an unscoped filter (it throws rather than silently returning every vendor's data); a linked VENDOR is scoped to its own `vendorId`.
+
+*Drafts:* a draft carrying a Rp 999.000.000 total and a month-old due date changed neither Total Payable nor the invoice count, and generated no overdue reminder.
+
+*Money parsing:* `'1.500.000'` → 1500000 (not 1.5), `'12.500.000'` → 12500000, `'N/A'` → null (not NaN), `'0'` → 0 (not null).
+
+**Suite:** `tsc --noEmit` clean, `eslint` clean, **93/93 unit tests** (37 added across the six batches).
+
 ### 2026-09-07 — Review remediation 5/5: payment lifecycle and the status graph
 
 All in `PATCH /api/invoices/[id]`, whose payment block had five ways to produce a record that contradicted itself.

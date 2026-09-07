@@ -3,15 +3,8 @@ import { prisma } from '@/lib/db/prisma'
 import { requireInvoiceAccess } from '@/lib/auth/helpers'
 import { TERMINAL_STATUSES } from '@/lib/validations'
 import { rateLimit } from '@/lib/rate-limit'
-import { getFileBuffer } from '@/lib/services/fileService'
+import { getFileBuffer, mimeTypeFor } from '@/lib/services/fileService'
 import { extractInvoiceFields, buildOcrUpdate } from '@/lib/services/geminiExtraction'
-
-const MIME_MAP: Record<string, string> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-}
 
 export async function GET(
   req: NextRequest,
@@ -58,7 +51,7 @@ export async function GET(
         controller.enqueue(emit('status', { step: 'ocr', message: 'Membaca dokumen...' }))
 
         const buffer = await getFileBuffer(invoice.filePath)
-        const mimeType = MIME_MAP[invoice.fileType ?? ''] ?? 'application/pdf'
+        const mimeType = mimeTypeFor(invoice.fileType, 'application/pdf')
 
         controller.enqueue(emit('status', { step: 'extracting', message: 'Mengekstrak data...' }))
 
@@ -127,6 +120,7 @@ export async function GET(
         //      an SSE error — silently discarding every other extracted field.
         // The client still receives the number via the `field` events above and
         // submits it through PATCH, which duplicate-checks it properly.
+        //
         // Everything below goes through the same rules PATCH enforces. This
         // write used to bypass zod entirely: amounts went in via bare
         // parseFloat (so '12.500.000' became 12.5, 'N/A' became NaN and made
