@@ -4,7 +4,7 @@ import { requireInvoiceAccess } from '@/lib/auth/helpers'
 import { TERMINAL_STATUSES } from '@/lib/validations'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFileBuffer } from '@/lib/services/fileService'
-import { extractInvoiceFields } from '@/lib/services/geminiExtraction'
+import { extractInvoiceFields, buildOcrUpdate } from '@/lib/services/geminiExtraction'
 
 const MIME_MAP: Record<string, string> = {
   pdf: 'application/pdf',
@@ -127,20 +127,18 @@ export async function GET(
         //      an SSE error — silently discarding every other extracted field.
         // The client still receives the number via the `field` events above and
         // submits it through PATCH, which duplicate-checks it properly.
-        await prisma.invoice.update({
-          where: { id },
-          data: {
-            invoiceDate: extracted.invoice_date?.value ? new Date(extracted.invoice_date.value) : null,
-            dueDate: extracted.due_date?.value ? new Date(extracted.due_date.value) : null,
-            currency: extracted.currency?.value ?? 'IDR',
-            subtotal: extracted.subtotal?.value ? parseFloat(extracted.subtotal.value) : null,
-            taxAmount: extracted.tax_amount?.value ? parseFloat(extracted.tax_amount.value) : null,
-            totalAmount: extracted.total_amount?.value
-              ? parseFloat(extracted.total_amount.value)
-              : invoice.totalAmount,
-            ocrConfidence: extracted.overall_confidence ?? 0,
-          },
-        })
+        // Everything below goes through the same rules PATCH enforces. This
+        // write used to bypass zod entirely: amounts went in via bare
+        // parseFloat (so '12.500.000' became 12.5, 'N/A' became NaN and made
+        // the whole update throw, and a negative was stored as-is), currency
+        // took whatever string the model produced, and a missed extraction
+        // NULLed a due date that was already correct.
+        const extractedUpdate = buildOcrUpdate(extracted, invoice)
+        await prisma.invoice.update({ where: { id }, data: extractedUpdate.data })
+
+        if (extractedUpdate.rejected.length > 0) {
+          controller.enqueue(emit('warning', { fields: extractedUpdate.rejected }))
+        }
 
         // Update line items if extracted
         if (extracted.line_items?.length > 0) {

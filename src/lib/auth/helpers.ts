@@ -69,6 +69,8 @@ export async function requireInvoiceAccess(invoiceId: string, allowedRoles?: Rol
       filePath: true,
       fileType: true,
       totalAmount: true,
+      invoiceDate: true,
+      dueDate: true,
     },
   })
 

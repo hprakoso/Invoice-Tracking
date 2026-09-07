@@ -8,6 +8,23 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-07 — Review remediation 3/5: money parsing and the OCR write path
+
+**Typing an ordinary Indonesian amount stored one millionth of it.** The OCR review screen parsed edited amounts with `parseFloat(raw.replace(/[^0-9.]/g, ''))`. That regex *keeps* the dots, and in id-ID a dot groups thousands — so correcting a total to `1.500.000` made `parseFloat` stop at the second dot and persist **1.5**. Zod only checked `min(0)`, so it sailed through and the invoice entered the payment workflow at Rp 1,50. The same expression handled `tax_amount` and `subtotal`. New `parseAmountID()` in `src/lib/format.ts` reads the Indonesian convention (`.` groups, `,` decimals) and still handles plain and US-grouped input; the wizard now uses it. The wizard's `|| null` became `?? null` at the same time — `parseFloat('0') || null` turned a genuine zero (a tax-exempt invoice) into NULL "unknown", which the Excel export then rendered as an empty cell.
+
+**The OCR route no longer writes unvalidated model output to the database.** It called `prisma.invoice.update` directly with `parseFloat(...)` and `new Date(model_string)`, bypassing every zod rule the PATCH path enforces. Four ways that produced impossible data:
+
+- `'N/A'` → `parseFloat` → `NaN` → the update **throws**, the route's `catch` turns it into one SSE `error`, and *every* extracted field is silently discarded;
+- `'12.500.000'` → `12.5`, and `'-500000'` stored negative (there are no CHECK constraints), poisoning every dashboard `_sum`;
+- `currency` took whatever string the model produced (`'US$'`, `'Rupiah'`) — and since PATCH's `applyUpdate` has no `currency` branch, a bad value could never be corrected through the API;
+- a due date earlier than the invoice date was written unchallenged, and a *missed* extraction NULLed a due date that was already correct.
+
+New `buildOcrUpdate(extracted, current)` in `geminiExtraction.ts` is a pure function that validates the extraction into a Prisma update: amounts via `parseAmountID` with negatives rejected, currency constrained to `/^[A-Z]{3}$/` and upper-cased, dates required to be parseable **and** plausible (year 2000 → now+10, which catches `'0202'`/`'2205'` misreads that otherwise park an invoice in the wrong aging bucket forever), and **`dueDate >= invoiceDate` enforced against the stored invoice date when the model doesn't return one**. A field that fails validation keeps its current value instead of being nulled, and its key is reported in `rejected`, emitted as a new SSE `warning` event so the UI can tell the user which fields need typing by hand.
+
+**Data touched:** `invoices.invoice_date`, `due_date`, `currency`, `subtotal`, `tax_amount`, `total_amount`, `ocr_confidence` — same columns as before, but now only written when the extracted value validates (previously written unconditionally, including nulls). No schema change. Also replaced the wizard's hand-rolled `Rp {toLocaleString('id-ID')}` on line-item totals with `formatIDR`.
+
+**Verified:** `tsc --noEmit` clean, **80/80 tests** (19 new). The parser suite covers `1.500.000` → 1500000, `1.500.000,50` → 1500000.5, `Rp 1.500.000`, US-grouped `1,500,000`, a genuine `0` distinguished from absent, and `N/A`/`-`/prose → null. The `buildOcrUpdate` suite is deliberately mostly negative paths: due-before-invoice rejected (both when the model supplies the invoice date and when it's read from the stored row), equal dates accepted, implausible years rejected, an existing due date left alone when extraction returns nothing, negatives rejected, `'N/A'` rejected **while the other fields still survive** (the old failure discarded all of them), a genuine zero kept, and `'US$'`/`'Rupiah'` rejected while `'usd'` normalises to `USD`.
+
 ### 2026-09-07 — Review remediation 2/5: one definition of "overdue" and "open"
 
 The dashboard could report overdue invoices while the invoice list showed none — the case that started this review. Root cause was not one bug but **four different definitions of "overdue" and two of "open"**, each written out separately and already drifted apart.

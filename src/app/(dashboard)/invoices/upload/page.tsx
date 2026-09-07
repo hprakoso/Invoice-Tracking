@@ -13,6 +13,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useI18n } from '@/hooks/useI18n'
 import type { Dictionary } from '@/lib/i18n'
+import { formatIDR, parseAmountID } from '@/lib/format'
 
 interface ExtractedField {
   key: string
@@ -355,12 +356,12 @@ export default function UploadPage() {
         poNumber: editableValues['po_number'] || poNumberValue.trim() || undefined,
         invoiceDate: editableValues['invoice_date'] || null,
         dueDate: editableValues['due_date'] || null,
-        totalAmount:
-          parseFloat(totalField?.replace(/[^0-9.]/g, '') ?? '0') || 0,
-        taxAmount:
-          parseFloat(editableValues['tax_amount']?.replace(/[^0-9.]/g, '') ?? '0') || null,
-        subtotal:
-          parseFloat(editableValues['subtotal']?.replace(/[^0-9.]/g, '') ?? '0') || null,
+        // parseAmountID, not parseFloat: '1.500.000' is one and a half million
+        // here, and `?? null` rather than `|| null` so a genuine 0 (a
+        // tax-exempt invoice) is stored as 0 instead of "unknown".
+        totalAmount: parseAmountID(totalField) ?? 0,
+        taxAmount: parseAmountID(editableValues['tax_amount']),
+        subtotal: parseAmountID(editableValues['subtotal']),
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
         sendDate: sendDateValue || null,
         picId: canAssignPic ? (picIdValue || null) : undefined,
@@ -644,7 +645,7 @@ export default function UploadPage() {
                           {item.description}
                         </span>
                         <span className="text-gray-700 dark:text-gray-200 font-medium ml-4">
-                          Rp {Number(item.total).toLocaleString('id-ID')}
+                          {formatIDR(item.total)}
                         </span>
                       </div>
                     ))}

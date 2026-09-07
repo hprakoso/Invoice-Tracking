@@ -17,6 +17,58 @@ export function formatIDR(v: string | number | null | undefined): string {
   }).format(num)
 }
 
+/**
+ * Parse an amount written the way Indonesian users (and Indonesian invoices)
+ * write it: `.` groups thousands and `,` marks decimals.
+ *
+ *   '1.500.000'    -> 1500000
+ *   'Rp 1.500.000' -> 1500000
+ *   '1.500.000,50' -> 1500000.5
+ *   '1500000'      -> 1500000
+ *   'N/A'          -> null
+ *
+ * Replaces `parseFloat(raw.replace(/[^0-9.]/g, ''))`, which kept the dots — so
+ * a user correcting a total to '1.500.000' stored **1.5**, roughly one
+ * millionth of the real amount, with nothing anywhere flagging it.
+ *
+ * Returns null (not 0, not NaN) when there is no usable number, so callers can
+ * tell "absent" from "zero" instead of coercing a genuine 0 away.
+ */
+export function parseAmountID(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+
+  const cleaned = raw.replace(/[^\d.,-]/g, '')
+  if (!/\d/.test(cleaned)) return null
+
+  const lastDot = cleaned.lastIndexOf('.')
+  const lastComma = cleaned.lastIndexOf(',')
+  const groupsOfThree = (s: string, sep: string) =>
+    s.split(sep).length - 1 > 1 || s.length - s.lastIndexOf(sep) - 1 === 3
+
+  let normalised: string
+  if (lastDot >= 0 && lastComma >= 0) {
+    // Both present: whichever comes last is the decimal separator.
+    normalised =
+      lastComma > lastDot
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned.replace(/,/g, '')
+  } else if (lastComma >= 0) {
+    // Repeated commas can only be thousands grouping; a single one is decimal.
+    normalised = cleaned.split(',').length - 1 > 1
+      ? cleaned.replace(/,/g, '')
+      : cleaned.replace(',', '.')
+  } else if (lastDot >= 0) {
+    // '12.500.000' and '1.500' are grouped thousands; '1.5' is a decimal.
+    normalised = groupsOfThree(cleaned, '.') ? cleaned.replace(/\./g, '') : cleaned
+  } else {
+    normalised = cleaned
+  }
+
+  const value = Number(normalised)
+  return Number.isFinite(value) ? value : null
+}
+
 /** Format an ISO date string as a localised Indonesian date (e.g. "15 Jan 2026"). */
 export function formatDate(d: string | null | undefined): string {
   if (!d) return '—'

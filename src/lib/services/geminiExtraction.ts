@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai'
+import { parseAmountID } from '@/lib/format'
 
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 
@@ -108,6 +109,98 @@ export interface ExtractionResult {
   total_amount: ExtractedField
   line_items: { description: string; quantity: number | null; unit_price: number | null; total: number }[]
   overall_confidence: number
+}
+
+/** A date the model returned is only accepted if it's parseable and plausible. */
+function parseExtractedDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null
+  const parsed = new Date(raw)
+  if (isNaN(parsed.getTime())) return null
+  const year = parsed.getUTCFullYear()
+  // Guards year misreads ('0202', '2205'), which otherwise park an invoice in
+  // the wrong aging bucket permanently and never stop generating reminders.
+  if (year < 2000 || year > new Date().getUTCFullYear() + 10) return null
+  return parsed
+}
+
+const AMOUNT_COLUMNS = [
+  ['subtotal', 'subtotal'],
+  ['tax_amount', 'taxAmount'],
+  ['total_amount', 'totalAmount'],
+] as const
+
+export interface OcrUpdate {
+  data: {
+    ocrConfidence: number
+    invoiceDate?: Date
+    dueDate?: Date
+    currency?: string
+    subtotal?: number
+    taxAmount?: number
+    totalAmount?: number
+  }
+  /** Extraction keys the model produced but that failed validation. */
+  rejected: string[]
+}
+
+/**
+ * Turn a raw extraction into a validated Prisma update.
+ *
+ * The OCR route used to write the model's output straight through — no zod, no
+ * checks — which is how impossible data reached the database:
+ *   - amounts via bare `parseFloat`, so '12.500.000' stored as 12.5, a
+ *     '-500000' stored negative, and 'N/A' produced NaN, which made the whole
+ *     update throw and silently discarded *every* extracted field;
+ *   - `currency` was whatever string came back ('US$', 'Rupiah'), and PATCH has
+ *     no `currency` branch, so a bad value could never be corrected via the API;
+ *   - a due date earlier than the invoice date was written unchallenged — the
+ *     case that produced invoices the dashboard counted as overdue while the
+ *     detail view showed nothing sensible;
+ *   - a missed extraction NULLed a due date that was already correct.
+ *
+ * A field that fails validation is **left at its current value** rather than
+ * nulled, and reported in `rejected` so the caller can tell the user which
+ * fields need typing in by hand.
+ */
+export function buildOcrUpdate(
+  extracted: ExtractionResult,
+  current: { invoiceDate: Date | null; dueDate: Date | null },
+): OcrUpdate {
+  const rejected: string[] = []
+  const data: OcrUpdate['data'] = { ocrConfidence: extracted.overall_confidence ?? 0 }
+
+  const invoiceDate = parseExtractedDate(extracted.invoice_date?.value)
+  if (invoiceDate) data.invoiceDate = invoiceDate
+  else if (extracted.invoice_date?.value) rejected.push('invoice_date')
+
+  const dueDate = parseExtractedDate(extracted.due_date?.value)
+  const effectiveInvoiceDate = invoiceDate ?? current.invoiceDate
+  if (dueDate && effectiveInvoiceDate && dueDate < effectiveInvoiceDate) {
+    // An invoice cannot fall due before it was issued: the pair is a misread
+    // (commonly the two dates swapped), so the due date is dropped rather than
+    // stored as an impossible combination.
+    rejected.push('due_date')
+  } else if (dueDate) {
+    data.dueDate = dueDate
+  } else if (extracted.due_date?.value) {
+    rejected.push('due_date')
+  }
+
+  const currency = extracted.currency?.value?.trim().toUpperCase()
+  if (currency && /^[A-Z]{3}$/.test(currency)) data.currency = currency
+  else if (currency) rejected.push('currency')
+
+  for (const [key, column] of AMOUNT_COLUMNS) {
+    const raw = extracted[key]?.value
+    const value = parseAmountID(raw)
+    if (value === null || value < 0) {
+      if (raw) rejected.push(key)
+      continue
+    }
+    data[column] = value
+  }
+
+  return { data, rejected }
 }
 
 // Matches ai-service's old overall_confidence formula: average confidence of the

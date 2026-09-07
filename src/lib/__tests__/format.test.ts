@@ -1,5 +1,47 @@
 import { describe, it, expect } from 'vitest'
-import { isOverdue, jakartaDayStart } from '../format'
+import { isOverdue, jakartaDayStart, parseAmountID } from '../format'
+
+// The bug this guards: the OCR review screen parsed edited amounts with
+// `parseFloat(raw.replace(/[^0-9.]/g, ''))`, which keeps the dots — so typing
+// an ordinary Indonesian '1.500.000' persisted 1.5.
+describe('parseAmountID', () => {
+  it('reads Indonesian thousands grouping', () => {
+    expect(parseAmountID('1.500.000')).toBe(1500000)
+    expect(parseAmountID('12.500.000')).toBe(12500000)
+    expect(parseAmountID('1.500')).toBe(1500)
+    expect(parseAmountID('Rp 1.500.000')).toBe(1500000)
+  })
+
+  it('reads a decimal comma', () => {
+    expect(parseAmountID('1.500.000,50')).toBe(1500000.5)
+    expect(parseAmountID('1500000,25')).toBe(1500000.25)
+  })
+
+  it('still reads plain and US-grouped numbers', () => {
+    expect(parseAmountID('1500000')).toBe(1500000)
+    expect(parseAmountID('1,500,000')).toBe(1500000)
+    expect(parseAmountID('1500000.50')).toBe(1500000.5)
+    expect(parseAmountID(1500000)).toBe(1500000)
+  })
+
+  it('distinguishes a genuine zero from an absent value', () => {
+    expect(parseAmountID('0')).toBe(0)
+    expect(parseAmountID(0)).toBe(0)
+    expect(parseAmountID('')).toBeNull()
+    expect(parseAmountID(null)).toBeNull()
+    expect(parseAmountID(undefined)).toBeNull()
+  })
+
+  it('returns null for text that holds no number', () => {
+    expect(parseAmountID('N/A')).toBeNull()
+    expect(parseAmountID('-')).toBeNull()
+    expect(parseAmountID('tidak terbaca')).toBeNull()
+  })
+
+  it('keeps the sign so callers can reject negatives explicitly', () => {
+    expect(parseAmountID('-500.000')).toBe(-500000)
+  })
+})
 
 describe('isOverdue', () => {
   const past = new Date(Date.now() - 86400_000).toISOString()
