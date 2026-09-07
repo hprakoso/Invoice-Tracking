@@ -154,6 +154,13 @@ async function main() {
   const monthsAgo = (monthsBack: number, day: number, h = 9, m = 0, s = 0) =>
     new Date(Date.UTC(curYear, curMonth - monthsBack, day, h, m, s))
 
+  // Date-valued columns (invoice/due/send/delivered/paid) hold calendar dates,
+  // not instants — the app writes them from 'YYYY-MM-DD' strings, i.e. UTC
+  // midnight. The generator used to derive them from `now`, so seeded rows
+  // carried the seed run's time-of-day and fell outside date-range filters on
+  // their own boundary day. Everything date-valued goes through this.
+  const dayOnly = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+
   // Weighted status mix across the 17-value workflow — roughly mirrors the
   // old 4-bucket mix (early verification / internal verification / sent for
   // payment / settled), split finer, plus a light sprinkling of exception
@@ -244,17 +251,26 @@ async function main() {
 
     // dueDate rules are deterministic per status ordinal — no rand — so the
     // dashboard's overdue-aging bucket always gets open-status rows.
+    //
+    // The overdue/due-soon targets are measured from `now` while the invoice
+    // date is `createdAt`, so a recently-created invoice could land a due date
+    // *before* its own invoice date. That produced 9 impossible rows in the
+    // demo database — invoices the dashboard counted as overdue while their
+    // detail view showed a due date preceding the invoice date. The clamp below
+    // is what keeps the generated data satisfying the new
+    // `invoices_due_date_after_invoice_date` CHECK constraint.
     const settled = status === InvoiceStatus.PAID || status === InvoiceStatus.CLOSED || status === InvoiceStatus.REJECTED
-    let dueDate: Date
+    let dueTarget: number
     if (settled) {
-      dueDate = new Date(createdAt.getTime() + (30 + (k % 3) * 15) * ADD) // settled, due in the past
+      dueTarget = createdAt.getTime() + (30 + (k % 3) * 15) * ADD // settled, due in the past
     } else if (k % 3 === 0) {
-      dueDate = new Date(now.getTime() - (1 + ((k * 7) % 45)) * ADD) // overdue
+      dueTarget = now.getTime() - (1 + ((k * 7) % 45)) * ADD // overdue
     } else if (k % 3 === 1) {
-      dueDate = new Date(now.getTime() + (2 + ((k * 5) % 12)) * ADD) // due soon
+      dueTarget = now.getTime() + (2 + ((k * 5) % 12)) * ADD // due soon
     } else {
-      dueDate = new Date(now.getTime() + (20 + ((k * 11) % 70)) * ADD) // far future
+      dueTarget = now.getTime() + (20 + ((k * 11) % 70)) * ADD // far future
     }
+    const dueDate = dayOnly(new Date(Math.max(dueTarget, createdAt.getTime() + ADD)))
 
     const totalAmount = Math.round((5_000_000 + Math.pow(rand(), 1.8) * 495_000_000) / 50_000) * 50_000
     const taxAmount = Math.round(totalAmount * 0.11)
@@ -273,9 +289,9 @@ async function main() {
       companyId: rand() < 0.8 ? companies[Math.floor(rand() * companies.length)].id : null,
       picId: !closed && rand() < 0.6 ? admin.id : null,
       ocrConfidence: closed ? 60 + Math.floor(rand() * 40) : 60 + Math.floor(rand() * 40),
-      sendDate: new Date(createdAt.getTime() - ADD),
-      deliveredDate: !closed && rand() < 0.7 ? createdAt : null,
-      invoiceDate: createdAt,
+      sendDate: dayOnly(new Date(createdAt.getTime() - ADD)),
+      deliveredDate: !closed && rand() < 0.7 ? dayOnly(createdAt) : null,
+      invoiceDate: dayOnly(createdAt),
     })
   }
 
@@ -326,7 +342,7 @@ async function main() {
         ocrConfidence: s.ocrConfidence,
         createdById: admin.id,
         createdAt: s.createdAt, // explicit — not the DB default(now())
-        paidDate: accepted ? new Date(s.dueDate.getTime() - 3 * ADD) : null,
+        paidDate: accepted ? dayOnly(new Date(s.dueDate.getTime() - 3 * ADD)) : null,
         paidAmount: accepted ? s.totalAmount : null,
         paidById: accepted ? admin.id : null,
         stageHistory: { create: stageHistory },

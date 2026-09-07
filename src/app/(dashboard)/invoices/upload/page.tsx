@@ -216,6 +216,12 @@ export default function UploadPage() {
             invoiceNumber: `DRAFT-${Date.now()}`,
             poNumber: poNumberValue.trim(),
             totalAmount: 0,
+            // The row has to exist before OCR (the file attaches to its id),
+            // but it isn't an invoice until the review step is confirmed.
+            // Until then it stays out of every KPI, list, export and reminder,
+            // so abandoning the wizard leaves nothing behind that anyone has to
+            // chase or clean up.
+            isDraft: true,
           }),
         })
         if (!createRes.ok) throw new Error(t.upload.createFailed)
@@ -365,6 +371,9 @@ export default function UploadPage() {
         notes: vendorNameField ? `Vendor: ${vendorNameField}` : null,
         sendDate: sendDateValue || null,
         picId: canAssignPic ? (picIdValue || null) : undefined,
+        // Confirming the review is what turns the placeholder row into a real
+        // invoice that the dashboard, lists and reminders can see.
+        isDraft: false,
       }),
     })
 

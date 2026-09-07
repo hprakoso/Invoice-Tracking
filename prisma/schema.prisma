@@ -165,6 +165,13 @@ model Invoice {
   paidAmount     Decimal?      @map("paid_amount") @db.Decimal(15, 2)
   paidById       String?       @map("paid_by")
 
+  // The upload wizard creates the row before OCR runs (it needs an id to
+  // attach the file to), so an abandoned wizard used to leave a fully live
+  // RECEIVED invoice behind — counted in every KPI and emailed about daily by
+  // the reminder cron. Drafts are excluded from all of that until the user
+  // confirms the review step, which flips this to false.
+  isDraft        Boolean       @default(false) @map("is_draft")
+
   vendor         Vendor         @relation(fields: [vendorId], references: [id])
   company        Company?       @relation(fields: [companyId], references: [id])
   createdBy      User           @relation("CreatedBy", fields: [createdById], references: [id])
@@ -176,6 +183,15 @@ model Invoice {
   auditLogs      AuditLog[]
   notifications  Notification[]
 
+  // Postgres does not index foreign keys automatically and this schema had no
+  // @@index at all, so every dashboard aggregate, list filter and cron sweep
+  // was a sequential scan. These four cover the hot paths: the open/overdue
+  // predicates (status + dueDate), vendor scoping, the company breakdown, and
+  // the list's default ordering / 12-month trend window.
+  @@index([status, dueDate])
+  @@index([vendorId])
+  @@index([companyId])
+  @@index([createdAt])
   @@map("invoices")
 }
 
@@ -213,6 +229,8 @@ model InvoiceStageHistory {
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   changedBy User?   @relation("StageChangedBy", fields: [changedById], references: [id])
 
+  // The stage lead-time widget reads every row for the filtered invoice set.
+  @@index([invoiceId, changedAt])
   @@map("invoice_stage_history")
 }
 
@@ -243,6 +261,10 @@ model AuditLog {
   user       User?    @relation(fields: [userId], references: [id])
   invoice    Invoice? @relation(fields: [invoiceId], references: [id])
 
+  // The audit page pages by createdAt; the invoice detail timeline filters by
+  // entityId (an invoice id written by every route that mutates one).
+  @@index([entityType, entityId])
+  @@index([createdAt])
   @@map("audit_logs")
 }
 
@@ -282,5 +304,9 @@ model Notification {
   user      User     @relation(fields: [userId], references: [id])
   invoice   Invoice? @relation(fields: [invoiceId], references: [id])
 
+  // The bell polls unread-per-user every 60s per open tab; the reminder cron
+  // reads today's rows by type.
+  @@index([userId, isRead])
+  @@index([type, createdAt])
   @@map("notifications")
 }

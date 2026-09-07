@@ -2,9 +2,47 @@ import { z } from 'zod'
 import { NextResponse } from 'next/server'
 import { INVOICE_STATUSES } from './invoiceStatus'
 
-const isoDateString = z.string().refine((v) => !isNaN(Date.parse(v)), {
-  message: 'Invalid date format',
-})
+/**
+ * A calendar date. Accepts 'YYYY-MM-DD' or a full ISO timestamp and normalises
+ * to the date part, because these columns store dates and not instants.
+ *
+ * Previously this was only `!isNaN(Date.parse(v))`, which let two things
+ * through: a value carrying a time component (stored as e.g. 03:00Z, which a
+ * `dueDate <= '2026-09-07'` range filter then excluded, so the invoice
+ * disappeared from the dashboard and the Excel export on its own due day while
+ * the unfiltered list still showed it), and implausible years like '0202' or
+ * '2205' from an OCR misread, which park an invoice in the wrong aging bucket
+ * permanently and keep generating reminders forever.
+ */
+const isoDateString = z
+  .string()
+  .refine((v) => !isNaN(Date.parse(v)), { message: 'Invalid date format' })
+  .refine(
+    (v) => {
+      const year = new Date(v).getUTCFullYear()
+      return year >= 2000 && year <= new Date().getUTCFullYear() + 10
+    },
+    { message: 'Date is outside the supported range' },
+  )
+  .transform((v) => new Date(v).toISOString().slice(0, 10))
+
+/**
+ * An invoice cannot fall due before it was issued. Enforced here for payloads
+ * carrying both dates, in the PATCH route against the stored value when only
+ * one is sent, and by the `invoices_due_date_after_invoice_date` CHECK
+ * constraint for every other write path. Dates are normalised date-only
+ * strings by this point, so a lexicographic compare is a date compare.
+ */
+export function validateInvoiceDates(
+  invoiceDate: string | Date | null | undefined,
+  dueDate: string | Date | null | undefined,
+): { valid: boolean; message?: string } {
+  if (!invoiceDate || !dueDate) return { valid: true }
+  if (new Date(dueDate) < new Date(invoiceDate)) {
+    return { valid: false, message: 'dueDate cannot be earlier than invoiceDate' }
+  }
+  return { valid: true }
+}
 
 const itemSchema = z.object({
   description: z.string().min(1, 'Item description required'),
@@ -26,8 +64,11 @@ export const PIC_STAGES = ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY'] as c
 export const createInvoiceSchema = z.object({
   vendorId: z.string().uuid('Invalid vendor ID'),
   companyId: z.string().uuid('Invalid company ID').optional().nullable(),
-  invoiceNumber: z.string().min(1, 'Invoice number required').max(100),
-  poNumber: z.string().min(1, 'PO number required').max(100),
+  // Trimmed: ' INV-001 ' and 'INV-001' are the same document, but both the
+  // case-insensitive duplicate check and the lower() unique index treat padded
+  // strings as distinct, so two live invoices could exist for one document.
+  invoiceNumber: z.string().trim().min(1, 'Invoice number required').max(100),
+  poNumber: z.string().trim().min(1, 'PO number required').max(100),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
   currency: z.string().length(3).default('IDR'),
@@ -39,11 +80,29 @@ export const createInvoiceSchema = z.object({
   sendDate: isoDateString.optional().nullable(),
   picId: z.string().uuid().optional().nullable(),
   picStage: z.enum(PIC_STAGES).optional(),
+  // The upload wizard sets this so its pre-OCR placeholder row stays out of
+  // every KPI, list and reminder until the review step is confirmed.
+  isDraft: z.boolean().optional(),
 })
+  .refine((d) => validateInvoiceDates(d.invoiceDate, d.dueDate).valid, {
+    message: 'dueDate cannot be earlier than invoiceDate',
+    path: ['dueDate'],
+  })
+  // Only checked on create, where all three figures come from one source at
+  // once. PATCH deliberately does NOT block this: a user correcting a single
+  // misread field mid-review would otherwise be locked out until they fixed
+  // every other one too.
+  .refine(
+    (d) =>
+      d.subtotal == null ||
+      d.taxAmount == null ||
+      Math.abs(d.totalAmount - (d.subtotal + d.taxAmount)) <= 1,
+    { message: 'totalAmount must equal subtotal + taxAmount', path: ['totalAmount'] },
+  )
 
 export const updateInvoiceSchema = z.object({
-  invoiceNumber: z.string().min(1).max(100).optional(),
-  poNumber: z.string().min(1).max(100).optional(),
+  invoiceNumber: z.string().trim().min(1).max(100).optional(),
+  poNumber: z.string().trim().min(1).max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
   currency: z.string().length(3).optional(),
@@ -60,7 +119,12 @@ export const updateInvoiceSchema = z.object({
   paidAmount: z.number().nonnegative().optional().nullable(),
   companyId: z.string().uuid().optional().nullable(),
   comment: z.string().max(2000).optional(),
+  isDraft: z.boolean().optional(),
 })
+  .refine((d) => validateInvoiceDates(d.invoiceDate, d.dueDate).valid, {
+    message: 'dueDate cannot be earlier than invoiceDate',
+    path: ['dueDate'],
+  })
 
 export const updateInvoiceStageSchema = z.object({
   stage: z.enum(PIC_STAGES),

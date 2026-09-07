@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
       totalAmount: data.totalAmount,
       notes: data.notes ?? null,
       status: 'RECEIVED',
+      isDraft: data.isDraft ?? false,
       picStage: data.picStage,
       sendDate: data.sendDate ? new Date(data.sendDate) : null,
       picId: effectivePicId,

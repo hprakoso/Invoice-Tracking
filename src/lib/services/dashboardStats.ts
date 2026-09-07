@@ -87,7 +87,10 @@ export function buildDashboardFilter(
   searchParams: URLSearchParams,
   session: { user: { role: string; vendorId?: string | null } },
 ): Prisma.InvoiceWhereInput {
-  const where: Prisma.InvoiceWhereInput = {}
+  // Wizard rows that never reached the review step are not invoices yet: they
+  // stay out of every KPI, chart, list and export until confirmed. They are
+  // still reachable by id, which is where the wizard sends the user.
+  const where: Prisma.InvoiceWhereInput = { isDraft: false }
 
   // VENDOR is always scoped to their own invoices — never client-controlled.
   if (session.user.role === 'VENDOR') {

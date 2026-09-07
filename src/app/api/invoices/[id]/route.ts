@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from '@/lib/auth/helpers'
 import {
   updateInvoiceSchema,
   validateDeliveryDates,
+  validateInvoiceDates,
   validationErrorResponse,
   isValidStatusTransition,
   TERMINAL_STATUSES,
@@ -57,6 +58,9 @@ const CREATE_TIME_FIELDS = [
   'totalAmount',
   'notes',
   'companyId',
+  // Set at creation by the upload wizard and cleared when the user confirms
+  // the review step — whoever may edit the invoice's data may promote it.
+  'isDraft',
 ] as const
 
 // Fields each role may write via PATCH. ADMIN bypasses this for corrections.
@@ -98,6 +102,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     select: {
       status: true, sendDate: true, deliveredDate: true, vendorId: true,
       createdById: true, totalAmount: true, invoiceNumber: true, notes: true,
+      invoiceDate: true, dueDate: true,
     },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -128,6 +133,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const dateCheck = validateDeliveryDates(effectiveSendDate, effectiveDeliveredDate)
     if (!dateCheck.valid) {
       return NextResponse.json({ error: dateCheck.message }, { status: 400 })
+    }
+  }
+
+  // The schema catches a payload carrying both dates; this catches the case it
+  // can't see — one date sent against the other already stored. Without it, a
+  // PATCH of dueDate alone could still land before the stored invoice date,
+  // which is the shape that produced the impossible rows in the first place.
+  if (filtered.invoiceDate || filtered.dueDate) {
+    const orderCheck = validateInvoiceDates(
+      filtered.invoiceDate ?? current.invoiceDate,
+      filtered.dueDate ?? current.dueDate,
+    )
+    if (!orderCheck.valid) {
+      return NextResponse.json({ error: orderCheck.message }, { status: 400 })
     }
   }
 
@@ -173,6 +192,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               .join('\n')
           : filtered.notes,
         companyId: filtered.companyId,
+        isDraft: filtered.isDraft,
         status: dup ? 'REJECTED' : filtered.status,
         ocrConfidence: filtered.ocrConfidence,
         sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,

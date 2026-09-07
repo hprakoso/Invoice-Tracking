@@ -35,7 +35,9 @@ export async function checkDueDates() {
     const days = dueSoonSetting.daysBefore ?? 3
     const threshold = new Date(todayStart.getTime() + days * 24 * 60 * 60 * 1000)
     const dueSoon = await prisma.invoice.findMany({
-      where: { status: { in: OPEN_STATUSES }, dueDate: { gte: todayStart, lte: threshold } },
+      // isDraft excluded: an abandoned wizard row is not something anyone
+      // should be chased about.
+      where: { isDraft: false, status: { in: OPEN_STATUSES }, dueDate: { gte: todayStart, lte: threshold } },
       include: { vendor: { select: { name: true } } },
     })
     dueSoonCount = dueSoon.length
@@ -70,7 +72,7 @@ export async function checkDueDates() {
 
   if (overdueSetting?.isActive && (overdueSetting.inAppEnabled || overdueSetting.emailEnabled)) {
     const overdue = await prisma.invoice.findMany({
-      where: { status: { in: OPEN_STATUSES }, dueDate: { lt: todayStart } },
+      where: { isDraft: false, status: { in: OPEN_STATUSES }, dueDate: { lt: todayStart } },
       include: { vendor: { select: { name: true } } },
     })
     overdueCount = overdue.length
