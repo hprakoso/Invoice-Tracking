@@ -214,6 +214,11 @@ model InvoiceDocument {
   invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   uploadedBy User?   @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
 
+  // Declared to match reality: migration 20260903000000 already creates
+  // invoice_documents_invoice_id_idx, but the model never declared it, so the
+  // next `migrate dev` would have generated a DROP for an index the app needs.
+  @@index([invoiceId])
+
   @@map("invoice_documents")
 }
 

@@ -673,14 +673,25 @@ user (baca saja). Yang ini `/admin/reminders`, konfigurasi. Beri label menu yang
 DATABASE_URL              # Supabase pooler
 DIRECT_URL                # Supabase direct (migrasi)
 NEXTAUTH_SECRET
-NEXTAUTH_URL
+NEXTAUTH_URL              # WAJIB — dipakai sebagai URL dasar tombol di email
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY # server-only, jangan pernah diberi prefix NEXT_PUBLIC_
-GEMINI_API_KEY
+GOOGLE_API_KEY            # bukan GEMINI_API_KEY
 RESEND_API_KEY
-EMAIL_FROM
+RESEND_FROM_EMAIL         # bukan EMAIL_FROM
 CRON_SECRET
+AUTH_TRUST_HOST           # wajib di host non-Vercel, jika tidak login gagal total
 ```
+
+> Dikoreksi 2026-09-07: daftar ini sebelumnya menyebut `GEMINI_API_KEY` dan
+> `EMAIL_FROM`. Kode tidak pernah membaca keduanya — yang dibaca adalah
+> `GOOGLE_API_KEY` (`geminiExtraction.ts`, `geminiChat.ts`) dan
+> `RESEND_FROM_EMAIL` (`email.ts`). Menyiapkan environment dari daftar lama
+> menghasilkan deployment yang OCR dan chat-nya error saat dipakai, dan semua
+> email reminder terkirim dari alamat sandbox resend.dev yang hanya sampai ke
+> pemilik akun. Sumber kebenaran untuk nama variabel adalah `.env.example`.
+> Daftar lengkap beserta perilaku saat variabel hilang ada di
+> `docs/UAT_AND_CUTOVER.md`.
 
 `SUPABASE_SERVICE_ROLE_KEY` melewati semua Row Level Security. Kunci ini **hanya boleh** dipakai
 di route handler / server action, tidak pernah di komponen client.

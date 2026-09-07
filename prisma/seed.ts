@@ -42,8 +42,26 @@ function mulberry32(seed: number) {
 const STAGE_ORDER: PICStage[] = ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY']
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('Seed script blocked in production environment.')
+  // This script DELETES every domain table before it writes, so the guard has
+  // to be reliable. The old check was `NODE_ENV === 'production'`, which never
+  // fired: the script is run as `npx tsx prisma/seed.ts` (package.json db:seed)
+  // and nothing in that path sets NODE_ENV, so it was always undefined and the
+  // guard was dead code — a `npm run db:seed` with a production DATABASE_URL
+  // would have wiped production.
+  //
+  // The host of the connection string is the honest signal. Set
+  // SEED_ALLOW_REMOTE=yes-i-know to seed a non-local database deliberately
+  // (a fresh UAT environment being the legitimate case).
+  const targetHost = new URL(connectionString).hostname
+  const isLocal = ['localhost', '127.0.0.1', '::1', 'postgres', 'db'].includes(targetHost)
+  if (!isLocal && process.env.SEED_ALLOW_REMOTE !== 'yes-i-know') {
+    console.error(
+      `Refusing to seed a non-local database.\n` +
+        `  target host : ${targetHost}\n` +
+        `  this script : DELETES every invoice, user, vendor and company first\n` +
+        `If that is genuinely what you want (a fresh UAT database), re-run with:\n` +
+        `  SEED_ALLOW_REMOTE=yes-i-know npm run db:seed`,
+    )
     process.exit(1)
   }
 
@@ -147,6 +165,51 @@ async function main() {
     )
   }
 
+  // UAT logins for the three non-admin roles. Without these the seed produced
+  // exactly one account (ADMIN), so a tester had no way to reach the vendor
+  // portal, the GA queue, or any role-gated screen at all — the two throwaway
+  // root scripts that used to create them are gitignored and meant to be
+  // deleted. The vendor account is linked to the first seeded vendor, which is
+  // what makes cross-tenant scoping testable.
+  //
+  // Safe to keep in the tracked seed because this whole script is destructive
+  // by construction (it deleteMany()s every table at the top) and must never be
+  // pointed at production — see docs/UAT_AND_CUTOVER.md.
+  const demoPassword = process.env.DEMO_PASSWORD ?? 'demo1234'
+  const demoUsers = [
+    { email: 'gastaff@sip.id', name: 'GA Staff (Demo)', role: Role.GA_STAFF, vendorId: null },
+    { email: 'gamanager@sip.id', name: 'GA Manager (Demo)', role: Role.GA_MANAGER, vendorId: null },
+    { email: 'vendor@sip.id', name: `Vendor (${vendorSpecs[0].name})`, role: Role.VENDOR, vendorId: vendors[0].id },
+    { email: 'vendor2@sip.id', name: `Vendor (${vendorSpecs[1].name})`, role: Role.VENDOR, vendorId: vendors[1].id },
+    // Two auth states that otherwise have no starting row: the inactive-account
+    // rejection and the forced password-change redirect.
+    { email: 'nonaktif@sip.id', name: 'User Nonaktif (Demo)', role: Role.GA_STAFF, vendorId: null, isActive: false },
+    { email: 'gantipassword@sip.id', name: 'Wajib Ganti Password (Demo)', role: Role.GA_STAFF, vendorId: null, mustChangePassword: true },
+  ]
+  const createdDemoUsers: Record<string, { id: string }> = {}
+  for (const u of demoUsers) {
+    createdDemoUsers[u.email] = await prisma.user.create({
+      data: {
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        vendorId: u.vendorId,
+        passwordHash: await hashPassword(demoPassword),
+        mustChangePassword: u.mustChangePassword ?? false,
+        isActive: u.isActive ?? true,
+      },
+    })
+  }
+  const gaStaff = createdDemoUsers['gastaff@sip.id']
+  const gaManager = createdDemoUsers['gamanager@sip.id']
+  console.log(`Demo logins ready: ${demoUsers.map((u) => u.email).join(', ')}`)
+
+  // One inactive vendor and one inactive company, so the isActive toggles, the
+  // active-only vendor dropdown and the dashboard's includeInactive=true
+  // company fetch all have a real row to act on.
+  await prisma.vendor.update({ where: { id: vendors[vendors.length - 1].id }, data: { isActive: false } })
+  await prisma.company.update({ where: { id: companies[companies.length - 1].id }, data: { isActive: false } })
+
   const now = new Date()
   const curYear = now.getUTCFullYear()
   const curMonth = now.getUTCMonth() // 0-11
@@ -166,20 +229,28 @@ async function main() {
   // payment / settled), split finer, plus a light sprinkling of exception
   // states so the dashboard/status-badge UI has something of each family to
   // render against.
+  // All 17 statuses appear. The previous mix covered only 13, so four badges,
+  // their transition edges and their exception chips could never be reached in
+  // UAT: RETURNED_TO_VENDOR, WAITING_USER_CONFIRMATION, WAITING_TAX_DOCUMENT
+  // and VENDOR_BANK_ISSUE.
   const statusCounts: [InvoiceStatus, number][] = [
-    [InvoiceStatus.RECEIVED, 10],
-    [InvoiceStatus.REGISTERED, 15],
-    [InvoiceStatus.DOC_VERIFICATION, 15],
-    [InvoiceStatus.FINANCE_VERIFICATION, 12],
-    [InvoiceStatus.READY_FOR_PAYMENT, 8],
-    [InvoiceStatus.TREASURY_PROCESS, 8],
-    [InvoiceStatus.PAYMENT_SCHEDULED, 7],
-    [InvoiceStatus.PAID, 15],
+    [InvoiceStatus.RECEIVED, 9],
+    [InvoiceStatus.REGISTERED, 13],
+    [InvoiceStatus.DOC_VERIFICATION, 13],
+    [InvoiceStatus.FINANCE_VERIFICATION, 11],
+    [InvoiceStatus.READY_FOR_PAYMENT, 7],
+    [InvoiceStatus.TREASURY_PROCESS, 7],
+    [InvoiceStatus.PAYMENT_SCHEDULED, 6],
+    [InvoiceStatus.PAID, 14],
     [InvoiceStatus.CLOSED, 4],
     [InvoiceStatus.DOC_INCOMPLETE, 2],
+    [InvoiceStatus.RETURNED_TO_VENDOR, 2],
+    [InvoiceStatus.WAITING_USER_CONFIRMATION, 2],
     [InvoiceStatus.WAITING_APPROVAL, 2],
-    [InvoiceStatus.REJECTED, 1],
-    [InvoiceStatus.PAYMENT_HOLD, 1],
+    [InvoiceStatus.WAITING_TAX_DOCUMENT, 2],
+    [InvoiceStatus.REJECTED, 2],
+    [InvoiceStatus.PAYMENT_HOLD, 2],
+    [InvoiceStatus.VENDOR_BANK_ISSUE, 2],
   ]
   const statuses: InvoiceStatus[] = []
   for (const [status, n] of statusCounts) for (let i = 0; i < n; i++) statuses.push(status)
@@ -198,14 +269,19 @@ async function main() {
       case InvoiceStatus.REGISTERED:
       case InvoiceStatus.DOC_VERIFICATION:
       case InvoiceStatus.DOC_INCOMPLETE:
+      // Both are document-stage off-ramps: the ball is back with the vendor.
+      case InvoiceStatus.RETURNED_TO_VENDOR:
+      case InvoiceStatus.WAITING_TAX_DOCUMENT:
         return k % 4 === 0 ? PICStage.BUDGET : PICStage.GA
       case InvoiceStatus.FINANCE_VERIFICATION:
       case InvoiceStatus.READY_FOR_PAYMENT:
       case InvoiceStatus.WAITING_APPROVAL:
+      case InvoiceStatus.WAITING_USER_CONFIRMATION:
         return k % 3 === 0 ? PICStage.PROC_LEGAL : PICStage.BUDGET
       case InvoiceStatus.TREASURY_PROCESS:
       case InvoiceStatus.PAYMENT_SCHEDULED:
       case InvoiceStatus.PAYMENT_HOLD:
+      case InvoiceStatus.VENDOR_BANK_ISSUE:
         return k % 3 === 0 ? PICStage.SSU : PICStage.PROC_LEGAL
       case InvoiceStatus.PAID:
       case InvoiceStatus.CLOSED:
@@ -239,13 +315,18 @@ async function main() {
     // month; the first 12 invoices guarantee one row per trailing month so
     // all 12 chart buckets are populated.
     const bucket = i < 12 ? i : 11 - Math.floor(Math.pow(rand(), 1.5) * 12)
-    const createdAt = monthsAgo(
+    const generated = monthsAgo(
       11 - bucket,
       1 + Math.floor(rand() * 28),
       8 + Math.floor(rand() * 10),
       Math.floor(rand() * 60),
       Math.floor(rand() * 60),
     )
+    // Never in the future. The current-month bucket picks a day between 1 and
+    // 28 regardless of today's date, so seeding on the 7th produced invoices
+    // "created" on the 8th and the 20th — and, once settled, invoices marked
+    // PAID on a date that has not happened yet.
+    const createdAt = new Date(Math.min(generated.getTime(), now.getTime()))
     const status = statuses[i]
     const k = (statusIdx[status] = (statusIdx[status] ?? 0) + 1)
 
@@ -262,7 +343,11 @@ async function main() {
     const settled = status === InvoiceStatus.PAID || status === InvoiceStatus.CLOSED || status === InvoiceStatus.REJECTED
     let dueTarget: number
     if (settled) {
-      dueTarget = createdAt.getTime() + (30 + (k % 3) * 15) * ADD // settled, due in the past
+      // Capped at today. The term was measured purely from createdAt, so a
+      // recently-created settled invoice got a due date — and therefore a
+      // paidDate — weeks in the FUTURE. Six rows read as "paid on a date that
+      // hasn't happened yet", which a UAT tester rightly files as a bug.
+      dueTarget = Math.min(createdAt.getTime() + (30 + (k % 3) * 15) * ADD, now.getTime())
     } else if (k % 3 === 0) {
       dueTarget = now.getTime() - (1 + ((k * 7) % 45)) * ADD // overdue
     } else if (k % 3 === 1) {
@@ -287,7 +372,10 @@ async function main() {
       subtotal,
       taxAmount,
       companyId: rand() < 0.8 ? companies[Math.floor(rand() * companies.length)].id : null,
-      picId: !closed && rand() < 0.6 ? admin.id : null,
+      // A real GA_STAFF, not the admin: the PIC dropdown is populated from
+      // /api/users?role=GA_STAFF, so admin-owned picIds meant filtering by any
+      // selectable PIC always returned zero rows.
+      picId: !closed && rand() < 0.6 ? gaStaff.id : null,
       ocrConfidence: closed ? 60 + Math.floor(rand() * 40) : 60 + Math.floor(rand() * 40),
       sendDate: dayOnly(new Date(createdAt.getTime() - ADD)),
       deliveredDate: !closed && rand() < 0.7 ? dayOnly(createdAt) : null,
@@ -340,9 +428,19 @@ async function main() {
         deliveredDate: s.deliveredDate,
         picId: s.picId,
         ocrConfidence: s.ocrConfidence,
-        createdById: admin.id,
+        // Spread across the internal accounts. Every invoice used to be
+        // created by the admin, and GA write permissions hinge on
+        // createdById === caller (isEditor), so the wider GA field set could
+        // never be reached by a GA tester.
+        createdById: [admin.id, gaStaff.id, gaManager.id][seq % 3],
         createdAt: s.createdAt, // explicit — not the DB default(now())
-        paidDate: accepted ? dayOnly(new Date(s.dueDate.getTime() - 3 * ADD)) : null,
+        // Never in the future, never before the invoice was issued.
+        paidDate: accepted
+          ? dayOnly(new Date(Math.max(
+              s.invoiceDate.getTime(),
+              Math.min(s.dueDate.getTime() - 3 * ADD, now.getTime()),
+            )))
+          : null,
         paidAmount: accepted ? s.totalAmount : null,
         paidById: accepted ? admin.id : null,
         stageHistory: { create: stageHistory },
@@ -373,10 +471,68 @@ async function main() {
   // no atomicity is needed.
   await Promise.all(invoiceCreates)
 
+  // --- UAT boundary cases ---------------------------------------------------
+  // The random mix above never lands on the edges that the 2026-09-07 review
+  // was actually about, so they are created explicitly and named UAT-* to be
+  // obvious in the list. All belong to vendors[0], the vendor@sip.id login, so
+  // a tester signed in as that vendor sees them (and vendor2@sip.id must not).
+  const jkt = (d: Date) => dayOnly(new Date(d.getTime() + 7 * 3600_000))
+  const todayJkt = jkt(now)
+  const uatIssued = new Date(todayJkt.getTime() - 10 * ADD)
+  const uatCases: {
+    n: string; label: string; due: Date | null; status: InvoiceStatus; isDraft?: boolean
+  }[] = [
+    // Due today must read as NOT overdue — the exact case that started the review.
+    { n: 'UAT-DUE-TODAY', label: 'Jatuh tempo hari ini', due: todayJkt, status: InvoiceStatus.REGISTERED },
+    // One day either side of the boundary, so the flip is visible in the list.
+    { n: 'UAT-DUE-TOMORROW', label: 'Jatuh tempo besok', due: new Date(todayJkt.getTime() + ADD), status: InvoiceStatus.REGISTERED },
+    { n: 'UAT-OVERDUE-1D', label: 'Terlambat 1 hari', due: new Date(todayJkt.getTime() - ADD), status: InvoiceStatus.DOC_VERIFICATION },
+    // Belongs in the "Tanpa jatuh tempo" aging bucket and no reminder at all.
+    { n: 'UAT-NO-DUEDATE', label: 'Tanpa jatuh tempo', due: null, status: InvoiceStatus.RECEIVED },
+    // Must be invisible in every KPI, list, export and reminder.
+    { n: 'UAT-DRAFT', label: 'Draft wizard terlantar', due: new Date(todayJkt.getTime() - 30 * ADD), status: InvoiceStatus.RECEIVED, isDraft: true },
+  ]
+
+  await Promise.all(
+    uatCases.map((c, i) => {
+      // An invoice is never issued after it falls due — the UAT-DRAFT case
+      // (due 30 days ago) would otherwise trip the new CHECK constraint, which
+      // is exactly what the constraint is there to prevent.
+      const issued = c.due
+        ? new Date(Math.min(uatIssued.getTime(), c.due.getTime() - ADD))
+        : uatIssued
+      return prisma.invoice.create({
+        data: {
+          vendorId: vendors[0].id,
+          companyId: companies[0].id,
+          invoiceNumber: c.n,
+          poNumber: `PO-${c.n}`,
+          invoiceDate: issued,
+          dueDate: c.due,
+          currency: 'IDR',
+          subtotal: 9_009_009,
+          taxAmount: 990_991,
+          totalAmount: 10_000_000,
+          status: c.status,
+          picStage: PICStage.GA,
+          sendDate: new Date(issued.getTime() - ADD),
+          createdById: admin.id,
+          createdAt: new Date(issued.getTime() + i * 1000),
+          isDraft: c.isDraft ?? false,
+          notes: `UAT: ${c.label}`,
+          stageHistory: { create: { stage: PICStage.GA, changedById: admin.id, changedAt: issued } },
+          items: { create: { description: 'Jasa Konsultasi IT', quantity: 1, unitPrice: 9_009_009, total: 9_009_009, sortOrder: 1 } },
+        },
+      })
+    }),
+  )
+
+  console.log(`UAT boundary invoices: ${uatCases.map((c) => c.n).join(', ')} (vendor: ${vendorSpecs[0].name})`)
   console.log('Dummy data created: 3 companies, 6 vendors, 100 invoices (2 items each), stage history')
   console.log(`
-Bootstrap Admin:
-  ${adminEmail}  (role: ADMIN — password from ADMIN_PASSWORD env or its default)
+Logins
+  ${adminEmail}  ADMIN        (password: ADMIN_PASSWORD env, or its default)
+${demoUsers.map((u) => `  ${u.email.padEnd(adminEmail.length)}  ${u.role.padEnd(12)} (password: DEMO_PASSWORD env, default "demo1234")`).join('\n')}
   `)
 }
 

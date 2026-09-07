@@ -3,9 +3,13 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 
 function createPrismaClient() {
+  // Port 5433 — what docker-compose publishes and what prisma.config.ts falls
+  // back to. This said 5434, so a deployment that forgot DATABASE_URL failed
+  // against a port nothing has ever listened on, and the error pointed
+  // triage at the wrong place.
   const connectionString =
     process.env.DATABASE_URL ??
-    'postgresql://invoice_user:invoice_pass@localhost:5434/invoice_demo'
+    'postgresql://invoice_user:invoice_pass@localhost:5433/invoice_demo'
 
   // Strip sslmode/sslaccept from URL — explicit ssl option below takes precedence
   const url = new URL(connectionString)
