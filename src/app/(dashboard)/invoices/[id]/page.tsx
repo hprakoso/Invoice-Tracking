@@ -75,7 +75,7 @@ interface Invoice {
   }[]
 }
 
-import { formatIDR, formatDate, formatDateTime, isOverdue } from '@/lib/format'
+import { formatIDR, formatDate, formatDateTime, isOverdue, jakartaDayStart } from '@/lib/format'
 import { VALID_TRANSITIONS } from '@/lib/invoiceStatus'
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -276,7 +276,10 @@ export default function InvoiceDetailPage() {
         setSendDateInput(data.sendDate?.slice(0, 10) ?? '')
         setDeliveredDateInput(data.deliveredDate?.slice(0, 10) ?? '')
         setPicId(data.pic?.id ?? '')
-        setPaidDateInput(data.paidDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10))
+        // Jakarta's calendar date, not the UTC one: before 07:00 WIB
+        // `new Date().toISOString()` is still yesterday, so the payment was
+        // pre-filled — and recorded, if nobody noticed — one day early.
+        setPaidDateInput(data.paidDate?.slice(0, 10) ?? jakartaDayStart().toISOString().slice(0, 10))
         setPaidAmountInput(data.paidAmount ?? data.totalAmount ?? '')
         setFetchError(null)
       }
@@ -352,6 +355,13 @@ export default function InvoiceDetailPage() {
   const handleMarkAccepted = () => {
     if (!paidAmountInput || Number(paidAmountInput) <= 0) {
       toast.error(t.invoiceDetail.validPaidAmount)
+      return
+    }
+    // The server rejects a partial settlement (PAID drops out of every payable
+    // KPI, so a remainder would vanish silently). Caught here too, to explain
+    // it before the round-trip rather than as a bare 400.
+    if (invoice && Math.abs(Number(paidAmountInput) - Number(invoice.totalAmount)) > 1) {
+      toast.error(t.invoiceDetail.paidAmountMustMatchTotal)
       return
     }
     patchInvoice(

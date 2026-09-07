@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { INVOICE_STATUSES, TERMINAL_STATUSES, VALID_TRANSITIONS, isValidStatusTransition } from '../invoiceStatus'
+import {
+  INVOICE_STATUSES,
+  TERMINAL_STATUSES,
+  VALID_TRANSITIONS,
+  isValidStatusTransition,
+  canVendorEdit,
+  MAIN_FLOW_STATUSES,
+  EXCEPTION_STATUSES,
+  OPEN_STATUSES,
+  NON_OPEN_STATUSES,
+} from '../invoiceStatus'
 
 describe('isValidStatusTransition', () => {
   it('allows the main-flow linear progression', () => {
@@ -42,5 +52,40 @@ describe('isValidStatusTransition', () => {
     for (const status of TERMINAL_STATUSES) {
       expect(VALID_TRANSITIONS[status]).toEqual([])
     }
+  })
+})
+
+// The vendor edit-lock used to be "not CLOSED/REJECTED", which left a vendor
+// able to rewrite totalAmount, dueDate and invoiceNumber on an invoice finance
+// had verified, treasury had scheduled, or that was already PAID.
+describe('canVendorEdit', () => {
+  it('allows edits while the invoice is still with the vendor', () => {
+    for (const s of ['RECEIVED', 'REGISTERED', 'DOC_INCOMPLETE', 'RETURNED_TO_VENDOR', 'WAITING_TAX_DOCUMENT']) {
+      expect(canVendorEdit(s)).toBe(true)
+    }
+  })
+
+  it('locks edits once verification has started or payment is in motion', () => {
+    for (const s of [
+      'DOC_VERIFICATION', 'FINANCE_VERIFICATION', 'READY_FOR_PAYMENT', 'TREASURY_PROCESS',
+      'PAYMENT_SCHEDULED', 'PAID', 'CLOSED', 'REJECTED', 'PAYMENT_HOLD', 'WAITING_APPROVAL',
+    ]) {
+      expect(canVendorEdit(s)).toBe(false)
+    }
+  })
+})
+
+describe('status set composition', () => {
+  it('splits every status into exactly one of main-flow or exception', () => {
+    expect([...MAIN_FLOW_STATUSES, ...EXCEPTION_STATUSES].sort()).toEqual([...INVOICE_STATUSES].sort())
+    for (const s of MAIN_FLOW_STATUSES) {
+      expect((EXCEPTION_STATUSES as readonly string[]).includes(s)).toBe(false)
+    }
+  })
+
+  it('treats open and settled as complements — nothing counted twice or missed', () => {
+    expect([...OPEN_STATUSES, ...NON_OPEN_STATUSES].sort()).toEqual([...INVOICE_STATUSES].sort())
+    expect(OPEN_STATUSES).not.toContain('PAID')
+    expect(OPEN_STATUSES).toContain('PAYMENT_HOLD') // exception states are still open
   })
 })

@@ -10,6 +10,8 @@ import {
   isValidStatusTransition,
   TERMINAL_STATUSES,
 } from '@/lib/validations'
+import { canVendorEdit, NON_OPEN_STATUSES } from '@/lib/invoiceStatus'
+import { jakartaDayStart } from '@/lib/format'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
 
@@ -70,13 +72,24 @@ const CREATE_TIME_FIELDS = [
 function allowedFields(role: string, currentStatus: string, isOwner: boolean, isEditor: boolean): string[] {
   const editable = !(TERMINAL_STATUSES as readonly string[]).includes(currentStatus)
   switch (role) {
-    case 'VENDOR':
+    case 'VENDOR': {
       if (!isOwner) return []
-      if (!editable) return []
+      // A vendor may only correct its own figures while the ball is still in
+      // its court. The old rule was merely "not CLOSED/REJECTED", which left a
+      // vendor able to rewrite invoiceNumber, totalAmount and dueDate on an
+      // invoice finance had already verified and treasury had scheduled — or
+      // one already marked PAID — so the approved amount and the stored one
+      // could silently diverge.
+      if (!canVendorEdit(currentStatus)) return []
       return [...CREATE_TIME_FIELDS, 'sendDate']
+    }
     case 'GA_STAFF':
     case 'GA_MANAGER':
-      return isEditor && editable
+      // `editable` gates both branches now. The fallback used to ignore it, so
+      // GA could still mutate deliveredDate/picId/sendDate on a CLOSED or
+      // REJECTED invoice that every other rule treats as immutable.
+      if (!editable) return []
+      return isEditor
         ? [...CREATE_TIME_FIELDS, 'deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
         : ['deliveredDate', 'picId', 'sendDate', 'status', 'paidDate', 'paidAmount']
     default:
@@ -172,6 +185,57 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     })
   }
 
+  // Auto-rejection is still a status transition and must obey the graph. It
+  // used to be written straight into the update, so PATCHing the invoiceNumber
+  // of an already-PAID invoice into a collision forced it to REJECTED — a
+  // transition PAID does not have (its only edge is CLOSED) — and left
+  // paidDate/paidAmount/paidById sitting on a rejected row.
+  if (duplicateOf && role !== 'ADMIN' && !isValidStatusTransition(current.status, 'REJECTED')) {
+    return NextResponse.json(
+      {
+        error: 'Duplicate invoice number, but this invoice can no longer be rejected',
+        from: current.status,
+        duplicateOf,
+      },
+      { status: 409 },
+    )
+  }
+
+  // Recording a payment happens on the transition INTO PaID — not on a
+  // PAID -> PAID self-transition, which isValidStatusTransition allows and
+  // which used to re-run this block: paidDate reset to today, a partial
+  // paidAmount re-defaulted to the full total, and paidById reassigned to
+  // whoever sent the second request.
+  const isBecomingPaid = !duplicateOf && filtered.status === 'PAID' && current.status !== 'PAID'
+
+  if (isBecomingPaid) {
+    // Partial payments are rejected outright: PAID is excluded from every
+    // payable KPI, so an invoice settled for less than its total silently
+    // dropped the remainder out of Total Payable, Overdue and aging, and
+    // nothing anywhere computed the outstanding balance.
+    const paidAmount = filtered.paidAmount ?? Number(current.totalAmount)
+    if (Math.abs(paidAmount - Number(current.totalAmount)) > 1) {
+      return NextResponse.json(
+        {
+          error: 'paidAmount must equal the invoice total',
+          paidAmount,
+          totalAmount: Number(current.totalAmount),
+        },
+        { status: 400 },
+      )
+    }
+  }
+
+  // Moving off PAID (an ADMIN correction — ADMIN bypasses the transition
+  // graph) clears the payment record. Without this the invoice kept rendering
+  // its Payment panel, and geminiChat's unfiltered sumPaidAmount kept counting
+  // money that was no longer considered paid.
+  const leavingPaid =
+    !duplicateOf &&
+    !!filtered.status &&
+    current.status === 'PAID' &&
+    !(NON_OPEN_STATUSES as readonly string[]).includes(filtered.status)
+
   // A duplicate is auto-rejected rather than blocked: the row is still saved
   // (so it isn't stranded with a placeholder number and no way back to it),
   // but forced to REJECTED regardless of the status the caller asked for.
@@ -193,22 +257,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           : filtered.notes,
         companyId: filtered.companyId,
         isDraft: filtered.isDraft,
+        // `currency` was missing entirely, so a bad value written by the old
+        // unvalidated OCR path could never be corrected through the API.
+        currency: filtered.currency,
         status: dup ? 'REJECTED' : filtered.status,
         ocrConfidence: filtered.ocrConfidence,
         sendDate: filtered.sendDate ? new Date(filtered.sendDate) : undefined,
         deliveredDate: filtered.deliveredDate ? new Date(filtered.deliveredDate) : undefined,
         picId: filtered.picId,
-        // Transitioning to PAID is when payment is recorded: paidById is
-        // server-assigned (never client-supplied), paidDate/paidAmount
-        // default to now/totalAmount. CLOSED (which always follows PAID)
-        // doesn't re-trigger this — already set from the PAID transition.
-        ...(!dup && filtered.status === 'PAID'
+        // Transitioning INTO PAID is when payment is recorded: paidById is
+        // server-assigned (never client-supplied), paidDate/paidAmount default
+        // to today/totalAmount. CLOSED (which always follows PAID) doesn't
+        // re-trigger this — already set from the PAID transition.
+        ...(isBecomingPaid
           ? {
-              paidDate: new Date(filtered.paidDate ?? Date.now()),
+              paidDate: new Date(filtered.paidDate ?? jakartaDayStart()),
               paidAmount: filtered.paidAmount ?? current.totalAmount,
               paidById: session.user.id,
             }
           : {}),
+        // Correcting a payment record without re-running the transition:
+        // paidDate/paidAmount were only ever written inside the block above, so
+        // a PATCH carrying them alone returned 200 while persisting nothing —
+        // and wrote an audit row claiming they had changed.
+        ...(!dup && !isBecomingPaid && !leavingPaid
+          ? {
+              paidDate: filtered.paidDate ? new Date(filtered.paidDate) : undefined,
+              paidAmount: filtered.paidAmount ?? undefined,
+            }
+          : {}),
+        // Leaving PAID clears the record rather than leaving a paid-looking
+        // invoice behind.
+        ...(leavingPaid ? { paidDate: null, paidAmount: null, paidById: null } : {}),
       },
       include: { vendor: { select: { name: true } }, stageHistory: { orderBy: { changedAt: 'asc' } } },
     })

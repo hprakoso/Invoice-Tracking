@@ -209,6 +209,7 @@ const id = {
     markedBy: 'Ditandai oleh',
     markAsPaid: 'Tandai Lunas',
     validPaidAmount: 'Masukkan jumlah bayar yang valid',
+    paidAmountMustMatchTotal: 'Jumlah bayar harus sama dengan total invoice — pembayaran sebagian tidak didukung',
     invoiceItems: 'Item Invoice',
     colDescription: 'Deskripsi',
     colQty: 'Qty',

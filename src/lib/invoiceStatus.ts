@@ -56,6 +56,11 @@ export const VENDOR_EDITABLE_STATUSES = [
   'RECEIVED', 'REGISTERED', 'DOC_INCOMPLETE', 'RETURNED_TO_VENDOR', 'WAITING_TAX_DOCUMENT',
 ] as const
 
+/** Whether a VENDOR may still edit its own invoice's figures at this status. */
+export function canVendorEdit(status: string): boolean {
+  return (VENDOR_EDITABLE_STATUSES as readonly string[]).includes(status)
+}
+
 // Each exception state has exactly one fixed entry point and one fixed
 // resolution target (not "return to whatever it was before") — keeps this
 // table deterministic without a `preExceptionStatus` column. See the

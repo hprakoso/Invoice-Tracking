@@ -211,6 +211,7 @@ const en: Dictionary = {
     markedBy: 'Marked by',
     markAsPaid: 'Mark as Paid',
     validPaidAmount: 'Enter a valid paid amount',
+    paidAmountMustMatchTotal: 'Paid amount must equal the invoice total — partial payments are not supported',
     invoiceItems: 'Invoice Items',
     colDescription: 'Description',
     colQty: 'Qty',

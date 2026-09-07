@@ -8,6 +8,28 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-07 — Review remediation 5/5: payment lifecycle and the status graph
+
+All in `PATCH /api/invoices/[id]`, whose payment block had five ways to produce a record that contradicted itself.
+
+**Auto-rejecting a duplicate no longer bypasses the transition graph.** The duplicate check wrote `status: 'REJECTED'` directly into the update, while the graph guard above it only ran when the *caller* supplied a status — which it doesn't when only `invoiceNumber` is patched. So PATCHing the invoice number of an already-**PAID** invoice into a collision forced it to REJECTED, a transition PAID does not have (its only edge is CLOSED), and left `paidDate`/`paidAmount`/`paidById` sitting on a rejected row while the vendor was notified their paid invoice had been rejected. The auto-rejection is now validated like any other transition and returns 409 when it isn't legal.
+
+**`PAID → PAID` no longer rewrites who paid and when.** `isValidStatusTransition` returns true for `from === to`, and the payment block keyed off `filtered.status === 'PAID'` — so re-sending the same status re-ran it: `paidDate` reset to today, `paidAmount` re-defaulted to the full total, and `paidById` reassigned to whoever sent the second request. The block now keys off `isBecomingPaid` (`status === 'PAID' && current.status !== 'PAID'`).
+
+**Payment records are correctable, and cleared when they stop applying.** `paidDate`/`paidAmount` were only ever written *inside* the PAID transition, so a PATCH carrying them alone returned 200 having persisted nothing — while still writing an audit row claiming those fields had changed. They can now be written outside the transition. In the other direction, an ADMIN moving an invoice off PAID (ADMIN bypasses the graph, which is how a mistaken PAID gets corrected) now clears all three fields; previously the invoice kept rendering its Payment panel — the detail page shows it whenever `paidDate` is truthy — and `geminiChat`'s unfiltered `sumPaidAmount` kept counting money no longer considered paid.
+
+**Partial payments are refused.** `paidAmount` was validated only as `nonnegative()`, with the `> 0` check living in the client. Since PAID is excluded from every payable KPI, marking a Rp 100jt invoice paid for Rp 40jt silently dropped Rp 60jt out of Total Payable, Overdue and aging, and nothing anywhere computed an outstanding balance. The server now requires `paidAmount` to equal `totalAmount` (±1 rupiah) and returns 400 with both figures; the detail page checks the same rule first so the user gets an explanation rather than a bare 400. **Decided with the maintainer** over the two alternatives (keep partial payments open and count the remainder; treat them as settled and surface an `outstanding` column).
+
+**Vendors can no longer edit verified invoices.** `VENDOR_EDITABLE_STATUSES` — RECEIVED, REGISTERED, DOC_INCOMPLETE, RETURNED_TO_VENDOR, WAITING_TAX_DOCUMENT — replaces the old "not CLOSED/REJECTED" rule, which left a vendor able to rewrite `invoiceNumber`, `totalAmount` and `dueDate` on invoices in FINANCE_VERIFICATION, READY_FOR_PAYMENT, PAYMENT_SCHEDULED, and even PAID, so the approved amount and the stored one could diverge with only an `invoice.updated` audit row as trace. The cutoff is "the ball is still in the vendor's court". **Decided with the maintainer** over a looser cutoff (up to READY_FOR_PAYMENT) and a stricter one (no vendor edits at all).
+
+**GA can no longer edit settled invoices.** `allowedFields`' GA fallback branch never consulted the `editable` (non-terminal) check that gates the VENDOR branch, so GA roles could still write `deliveredDate`/`picId`/`sendDate` on CLOSED and REJECTED invoices. Both branches are gated now.
+
+**`currency` is writable through PATCH.** `applyUpdate` had no `currency` key at all — even for ADMIN, whose allow-list is the whole payload — so a bad value written by the old unvalidated OCR path could never be corrected through the API.
+
+**Data touched:** `invoices.paid_date`, `paid_amount`, `paid_by` — now written on the transition into PAID (as before), on a correcting PATCH that carries them (new), and set to NULL when status leaves PAID (new). `invoices.currency` now writable via PATCH. `paid_date` defaults to `jakartaDayStart()` rather than `Date.now()`, and the detail page's date input defaults to the Jakarta calendar date instead of the UTC one — before 07:00 WIB it was pre-filling, and recording, the previous day.
+
+**Verified:** `tsc --noEmit` clean, `eslint` clean, **93/93 tests** (4 new). `canVendorEdit` was extracted into `invoiceStatus.ts` specifically so the rule is testable without exporting non-handler symbols from a route file: the tests assert every vendor-court status allows edits and that all ten verification/payment/terminal statuses refuse them. Two set-composition tests guard the split that batch 2 introduced — main-flow ∪ exception equals the full status list with no overlap, and open ∪ settled likewise, with `PAYMENT_HOLD` confirmed still open.
+
 ### 2026-09-07 — Review remediation 4/5: database constraints, indexes, and the draft flag
 
 Migration `20260907000000_invoice_integrity_constraints`, hand-written because `prisma migrate dev` needs a shadow database the local container refuses to create (template1 collation mismatch) and because CHECK constraints have no schema-diff equivalent.
