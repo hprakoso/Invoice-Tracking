@@ -787,5 +787,17 @@ Numbered 14, not 11, to avoid colliding with the pre-existing "Phase 11/12/13" t
 |---|---|---|
 | `1765ea7` | 2026-09-03 | refactor: rebrand app from VISTA to SIP (Smart Invoice & Payment) |
 
+### Phase 24 — Whole-repo review remediation (branch `feat/prod-adjustment`)
+Six batches from a cross-feature review (10 parallel finders → 8 adversarial verifiers → 32 confirmed findings). Details per batch in Code Changes Made above.
+
+| Commit | Date | Message |
+|---|---|---|
+| `3e16c1c` | 2026-09-07 | fix: enforce invoice ownership on OCR write path and vendor scoping on dashboard |
+| `5119cb7` | 2026-09-07 | fix: unify overdue and open-invoice definitions across dashboard, list, reminders |
+| `716cf21` | 2026-09-07 | fix: parse Indonesian amount format and validate OCR output before writing |
+| `dd42ae6` | 2026-09-07 | feat: add invoice date/amount constraints, hot-path indexes, and draft flag |
+| `4d17da2` | 2026-09-07 | fix: correct payment lifecycle, vendor edit lock, and duplicate auto-reject |
+| `0a98636` | 2026-09-07 | fix: duplicate POST conflict, stale file mirror, dashboard stall, audit page guard |
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
