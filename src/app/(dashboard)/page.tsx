@@ -26,7 +26,7 @@ interface DashboardData {  totalInvoices: number
   overdueCount: number
   openCount: number
   statusBreakdown: { status: string; count: number }[]
-  agingBuckets: { label: string; amount: number }[]
+  agingBuckets: { label: string; amount: number; overdue: boolean }[]
   monthlyTrend: { month: string; totalAmount: number; count: number }[]
   statusByMonth: { month: string; entered: number; accepted: number }[]
   stageLeadTimes: StageLeadTime[]
@@ -112,10 +112,12 @@ export default function DashboardPage() {
   }, [fetchDashboard])
 
   const AGING_LABELS: Record<string, string> = {
+    'Belum jatuh tempo': t.dashboard.agingNotDue,
     '0–30 hari': t.dashboard.aging0_30,
     '31–60 hari': t.dashboard.aging31_60,
     '61–90 hari': t.dashboard.aging61_90,
     '> 90 hari': t.dashboard.aging90plus,
+    'Tanpa jatuh tempo': t.dashboard.agingNoDueDate,
   }
   const translatedAgingBuckets = data?.agingBuckets.map((b) => ({ ...b, label: AGING_LABELS[b.label] ?? b.label }))
 

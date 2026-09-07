@@ -1,13 +1,11 @@
 import { prisma } from '@/lib/db/prisma'
 import type { InvoiceStatus, Role } from '@prisma/client'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
-import { NON_OPEN_STATUSES } from '@/lib/services/dashboardStats'
-import { INVOICE_STATUSES } from '@/lib/validations'
+import { OPEN_STATUSES as OPEN_STATUS_NAMES } from '@/lib/invoiceStatus'
+import { jakartaDayStart } from '@/lib/format'
 
 // Invoices still "in play" — everything except the settled/dead statuses.
-const OPEN_STATUSES: InvoiceStatus[] = INVOICE_STATUSES.filter(
-  (s) => !(NON_OPEN_STATUSES as readonly string[]).includes(s),
-) as InvoiceStatus[]
+const OPEN_STATUSES = OPEN_STATUS_NAMES as readonly string[] as InvoiceStatus[]
 
 export async function checkDueDates() {
   const [dueSoonSetting, overdueSetting] = await Promise.all([
@@ -16,6 +14,12 @@ export async function checkDueDates() {
   ])
 
   const now = new Date()
+  // Due dates are calendar dates at UTC midnight, so every comparison is made
+  // against the start of today in Jakarta. Comparing against `now` excluded an
+  // invoice due today from the due-soon window (its midnight is already in the
+  // past) and matched it as overdue instead — the "sudah melewati jatuh tempo"
+  // email went out on the invoice's own due date.
+  const todayStart = jakartaDayStart(now)
   const notifications: {
     userId: string
     invoiceId: string
@@ -29,27 +33,29 @@ export async function checkDueDates() {
 
   if (dueSoonSetting?.isActive && (dueSoonSetting.inAppEnabled || dueSoonSetting.emailEnabled)) {
     const days = dueSoonSetting.daysBefore ?? 3
-    const threshold = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+    const threshold = new Date(todayStart.getTime() + days * 24 * 60 * 60 * 1000)
     const dueSoon = await prisma.invoice.findMany({
-      where: { status: { in: OPEN_STATUSES }, dueDate: { gte: now, lte: threshold } },
+      where: { status: { in: OPEN_STATUSES }, dueDate: { gte: todayStart, lte: threshold } },
       include: { vendor: { select: { name: true } } },
     })
     dueSoonCount = dueSoon.length
     const recipients = await recipientsForRoles(dueSoonSetting.recipientRoles)
 
-    if (dueSoonSetting.emailEnabled && dueSoon.length > 0) {
-      const to = [...recipients.map((u) => u.email), ...extraEmailsOf(dueSoonSetting.extraEmails)]
-      await sendEmail(
-        to,
-        `${dueSoon.length} invoice akan jatuh tempo dalam ${days} hari`,
-        renderInvoiceListEmail(`${dueSoon.length} invoice akan jatuh tempo dalam ${days} hari`, dueSoon),
+    if (dueSoonSetting.emailEnabled) {
+      await sendDigest(
+        recipients,
+        extraEmailsOf(dueSoonSetting.extraEmails),
+        dueSoon,
+        (n) => `${n} invoice akan jatuh tempo dalam ${days} hari`,
+        (n) => `${n} invoice akan jatuh tempo dalam ${days} hari`,
       )
     }
 
     if (dueSoonSetting.inAppEnabled) {
-      for (const invoice of dueSoon) {
-        for (const user of recipients) {
-          if (await alreadyNotifiedToday(user.id, invoice.id, 'due_soon')) continue
+      const notified = await notifiedTodayKeys('due_soon', todayStart)
+      for (const user of recipients) {
+        for (const invoice of scopedFor(user, dueSoon)) {
+          if (notified.has(`${user.id}:${invoice.id}`)) continue
           notifications.push({
             userId: user.id,
             invoiceId: invoice.id,
@@ -64,25 +70,27 @@ export async function checkDueDates() {
 
   if (overdueSetting?.isActive && (overdueSetting.inAppEnabled || overdueSetting.emailEnabled)) {
     const overdue = await prisma.invoice.findMany({
-      where: { status: { in: OPEN_STATUSES }, dueDate: { lt: now } },
+      where: { status: { in: OPEN_STATUSES }, dueDate: { lt: todayStart } },
       include: { vendor: { select: { name: true } } },
     })
     overdueCount = overdue.length
     const recipients = await recipientsForRoles(overdueSetting.recipientRoles)
 
-    if (overdueSetting.emailEnabled && overdue.length > 0) {
-      const to = [...recipients.map((u) => u.email), ...extraEmailsOf(overdueSetting.extraEmails)]
-      await sendEmail(
-        to,
-        `${overdue.length} invoice sudah jatuh tempo`,
-        renderInvoiceListEmail(`${overdue.length} invoice sudah melewati jatuh tempo`, overdue),
+    if (overdueSetting.emailEnabled) {
+      await sendDigest(
+        recipients,
+        extraEmailsOf(overdueSetting.extraEmails),
+        overdue,
+        (n) => `${n} invoice sudah jatuh tempo`,
+        (n) => `${n} invoice sudah melewati jatuh tempo`,
       )
     }
 
     if (overdueSetting.inAppEnabled) {
-      for (const invoice of overdue) {
-        for (const user of recipients) {
-          if (await alreadyNotifiedToday(user.id, invoice.id, 'overdue')) continue
+      const notified = await notifiedTodayKeys('overdue', todayStart)
+      for (const user of recipients) {
+        for (const invoice of scopedFor(user, overdue)) {
+          if (notified.has(`${user.id}:${invoice.id}`)) continue
           notifications.push({
             userId: user.id,
             invoiceId: invoice.id,
@@ -105,7 +113,63 @@ export async function checkDueDates() {
 async function recipientsForRoles(recipientRoles: unknown) {
   const roles = Array.isArray(recipientRoles) ? (recipientRoles as Role[]) : []
   if (roles.length === 0) return []
-  return prisma.user.findMany({ where: { role: { in: roles }, isActive: true }, select: { id: true, email: true } })
+  // role/vendorId are selected because VENDOR recipients must be scoped to
+  // their own invoices — see scopedFor() and sendDigest().
+  return prisma.user.findMany({
+    where: { role: { in: roles }, isActive: true },
+    select: { id: true, email: true, role: true, vendorId: true },
+  })
+}
+
+type Recipient = { id: string; email: string; role: Role; vendorId: string | null }
+
+type InvoiceForDigest = {
+  vendorId: string
+  invoiceNumber: string
+  dueDate: Date | null
+  totalAmount: unknown
+  vendor: { name: string }
+}
+
+/**
+ * The invoices a given recipient is allowed to hear about. VENDOR is a
+ * selectable recipient role, but the due-soon/overdue queries span every
+ * vendor — so an unscoped fan-out told each vendor the invoice numbers and
+ * vendor names of all the others.
+ */
+function scopedFor<T extends { vendorId: string }>(recipient: Recipient, invoices: T[]): T[] {
+  if (recipient.role !== 'VENDOR') return invoices
+  if (!recipient.vendorId) return []
+  return invoices.filter((i) => i.vendorId === recipient.vendorId)
+}
+
+/**
+ * One digest to the internal recipients (plus any configured extra addresses),
+ * and a separate per-vendor digest to each VENDOR recipient containing only
+ * that vendor's rows.
+ */
+async function sendDigest(
+  recipients: Recipient[],
+  extraEmails: string[],
+  invoices: InvoiceForDigest[],
+  subject: (count: number) => string,
+  heading: (count: number) => string,
+) {
+  if (invoices.length === 0) return
+
+  const internalTo = [
+    ...recipients.filter((r) => r.role !== 'VENDOR').map((r) => r.email),
+    ...extraEmails,
+  ]
+  if (internalTo.length > 0) {
+    await sendEmail(internalTo, subject(invoices.length), renderInvoiceListEmail(heading(invoices.length), invoices))
+  }
+
+  for (const recipient of recipients.filter((r) => r.role === 'VENDOR')) {
+    const own = scopedFor(recipient, invoices)
+    if (own.length === 0) continue
+    await sendEmail([recipient.email], subject(own.length), renderInvoiceListEmail(heading(own.length), own))
+  }
 }
 
 export function extraEmailsOf(extraEmails: unknown): string[] {
@@ -141,9 +205,21 @@ export function renderInvoiceListEmail(
   })
 }
 
-async function alreadyNotifiedToday(userId: string, invoiceId: string, type: string) {
-  const existing = await prisma.notification.findFirst({
-    where: { userId, invoiceId, type, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+/**
+ * `${userId}:${invoiceId}` pairs already notified for this reminder type today,
+ * fetched once per run.
+ *
+ * Two fixes over the old per-pair `findFirst`: it was issued once per
+ * invoice-per-recipient and sequentially awaited inside nested loops (500
+ * overdue invoices × 5 recipients = 2,500 round-trips per run), and it compared
+ * against a rolling 24h window rather than a calendar day — so a cron firing
+ * even a minute earlier than the previous day's run found yesterday's row still
+ * inside the window and silently skipped the whole day's reminders.
+ */
+async function notifiedTodayKeys(type: string, todayStart: Date): Promise<Set<string>> {
+  const rows = await prisma.notification.findMany({
+    where: { type, createdAt: { gte: todayStart } },
+    select: { userId: true, invoiceId: true },
   })
-  return !!existing
+  return new Set(rows.map((r) => `${r.userId}:${r.invoiceId}`))
 }

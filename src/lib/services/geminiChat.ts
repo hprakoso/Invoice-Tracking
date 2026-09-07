@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db/prisma'
 import type { Prisma, InvoiceStatus } from '@prisma/client'
 import { NON_OPEN_STATUSES } from '@/lib/services/dashboardStats'
 import { INVOICE_STATUSES } from '@/lib/validations'
+import { jakartaDayStart } from '@/lib/format'
 
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 const STATUS_VALUES: InvoiceStatus[] = [...INVOICE_STATUSES]
@@ -55,8 +56,15 @@ async function executeQueryInvoices(args: QueryInvoicesArgs) {
   if (args.vendorName) where.vendor = { name: { contains: args.vendorName, mode: 'insensitive' } }
   if (args.companyName) where.company = { name: { contains: args.companyName, mode: 'insensitive' } }
   if (args.overdueOnly) {
-    where.status = { notIn: NON_OPEN_STATUSES }
-    where.dueDate = { lt: new Date() }
+    // An explicit status must survive: overwriting it here turned "how many
+    // PAYMENT_HOLD invoices are overdue?" into a count of every open overdue
+    // invoice, which the assistant then reported as the answer.
+    where.status = where.status
+      ? { equals: where.status as InvoiceStatus, notIn: NON_OPEN_STATUSES }
+      : { notIn: NON_OPEN_STATUSES }
+    // Same Jakarta day boundary as the dashboard and the reminder cron, so all
+    // three agree on what "overdue" means.
+    where.dueDate = { lt: jakartaDayStart() }
   }
   if (args.dueBefore || args.dueAfter) {
     where.dueDate = {

@@ -7,6 +7,7 @@ import { useI18n } from '@/hooks/useI18n'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
 import { ChartEmpty } from './ChartEmpty'
 import { formatMonthAxis, formatMonthFull } from './chartShared'
+import { MAIN_FLOW_STATUSES, EXCEPTION_STATUSES, NON_OPEN_STATUSES } from '@/lib/invoiceStatus'
 
 export interface StatusMonthPoint {
   month: string
@@ -22,16 +23,12 @@ export interface StatusBreakdownItem {
 // Linear main-flow order — the pipeline strip renders in exactly this
 // sequence. Exception states branch off this flow and aren't part of it —
 // shown separately below as a compact chip row instead.
-const FLOW_ORDER = [
-  'RECEIVED', 'REGISTERED', 'DOC_VERIFICATION', 'FINANCE_VERIFICATION', 'READY_FOR_PAYMENT',
-  'TREASURY_PROCESS', 'PAYMENT_SCHEDULED', 'PAID', 'CLOSED',
-] as const
+//
+// Both lists come from the shared status module rather than being re-declared
+// here: local copies meant a status added to the workflow got a badge and a
+// label but silently vanished from this chart.
+const FLOW_ORDER = MAIN_FLOW_STATUSES
 type FlowKey = (typeof FLOW_ORDER)[number]
-
-const EXCEPTION_STATUSES = [
-  'DOC_INCOMPLETE', 'RETURNED_TO_VENDOR', 'WAITING_USER_CONFIRMATION', 'WAITING_APPROVAL',
-  'WAITING_TAX_DOCUMENT', 'REJECTED', 'PAYMENT_HOLD', 'VENDOR_BANK_ISSUE',
-] as const
 
 // Sequential reading, healthy → settled: violet (masuk) fading toward teal
 // (dibayar/selesai) across the 9 main-flow steps.
@@ -120,7 +117,14 @@ export function StatusFlowChart({
   )
 
   const total = FLOW_ORDER.reduce((sum, k) => sum + breakdownByKey[k], 0)
-  const open = FLOW_ORDER.slice(0, -2).reduce((sum, k) => sum + breakdownByKey[k], 0) // all but PAID/CLOSED
+  // "Belum selesai" counts every non-settled invoice, exception states
+  // included — the same rule the Open Invoices KPI on this page uses. Summing
+  // only the main-flow steps meant invoices parked in DOC_INCOMPLETE,
+  // PAYMENT_HOLD, WAITING_* etc. were missing here, so the two figures
+  // disagreed whenever anything sat off the happy path.
+  const open = breakdown
+    .filter(item => !(NON_OPEN_STATUSES as readonly string[]).includes(item.status))
+    .reduce((sum, item) => sum + item.count, 0)
   const monthlyHasData = data.length > 0 && data.some(p => p.entered > 0 || p.accepted > 0)
   const hasData = total > 0 || monthlyHasData
 

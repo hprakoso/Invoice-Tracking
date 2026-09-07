@@ -1,11 +1,12 @@
 import { prisma } from '@/lib/db/prisma'
 import type { Prisma, InvoiceStatus } from '@prisma/client'
-import { INVOICE_STATUSES } from '@/lib/invoiceStatus'
+import { INVOICE_STATUSES, NON_OPEN_STATUSES as SETTLED_STATUSES } from '@/lib/invoiceStatus'
+import { jakartaDayStart } from '@/lib/format'
 
-// Settled/dead statuses — excluded from "open" KPI metrics (Total Payable,
-// Overdue, Open Count, Aging). A REJECTED invoice isn't payable any more
-// than a PAID/CLOSED one is, so it's excluded the same way.
-export const NON_OPEN_STATUSES: InvoiceStatus[] = ['PAID', 'CLOSED', 'REJECTED']
+// Re-exported with the Prisma enum type so query builders can use it directly.
+// The list itself lives in invoiceStatus.ts — the client-safe module the
+// invoice list's overdue tag also reads, so the two can't drift apart.
+export const NON_OPEN_STATUSES = SETTLED_STATUSES as readonly string[] as InvoiceStatus[]
 
 // Display order for the per-stage lead-time widget — every stage appears even
 // when no invoice has reached it yet, so the pipeline reads as a fixed shape
@@ -159,17 +160,27 @@ export function applyInvoiceSearchFilters(
 
 export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
   const now = new Date()
-  // "Open" metrics (Total Payable, Overdue, Open count, Aging) narrow to
-  // non-accepted invoices only when the caller hasn't already picked a status —
-  // once they have, those cards reflect that filtered view instead, same as
-  // every other number on the dashboard.
-  const openFilter: Prisma.InvoiceWhereInput = filter.status
-    ? filter
-    : { ...filter, status: { notIn: NON_OPEN_STATUSES } }
 
-  const d30 = new Date(now.getTime() - 30 * 86400000)
-  const d60 = new Date(now.getTime() - 60 * 86400000)
-  const d90 = new Date(now.getTime() - 90 * 86400000)
+  // "Open" metrics (Total Payable, Overdue, Open count, Aging) ALWAYS exclude
+  // settled invoices, including when the caller has picked a status filter.
+  // Previously the exclusion was dropped as soon as any status was selected, so
+  // filtering to PAID reported already-paid invoices as "Overdue" and summed
+  // them into "Total Payable" — while the invoice list, filtered the same way,
+  // showed no overdue rows at all. One definition now drives both surfaces.
+  const openFilter: Prisma.InvoiceWhereInput = {
+    ...filter,
+    status: filter.status
+      ? { equals: filter.status as InvoiceStatus, notIn: NON_OPEN_STATUSES }
+      : { notIn: NON_OPEN_STATUSES },
+  }
+
+  // Overdue and aging are measured against the start of today in Jakarta, not
+  // "now": due dates are calendar dates stored at UTC midnight, so comparing
+  // them to an instant made an invoice overdue from 07:00 WIB on its due day.
+  const todayStart = jakartaDayStart(now)
+  const d30 = new Date(todayStart.getTime() - 30 * 86400000)
+  const d60 = new Date(todayStart.getTime() - 60 * 86400000)
+  const d90 = new Date(todayStart.getTime() - 90 * 86400000)
 
   // Trailing-12-month window (UTC) for the monthly trend charts. The window
   // start is the first UTC day of the month 11 months back, so every month key
@@ -185,13 +196,20 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
       prisma.invoice.count({ where: filter }),
       prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: filter }),
       prisma.invoice.aggregate({ where: openFilter, _sum: { totalAmount: true } }),
-      prisma.invoice.count({ where: { ...openFilter, dueDate: { lt: now } } }),
+      prisma.invoice.count({ where: { ...openFilter, dueDate: { lt: todayStart } } }),
       prisma.invoice.count({ where: openFilter }),
+      // Every open invoice lands in exactly one bucket, so the buckets sum to
+      // Total Payable. The old first bucket was unbounded above (`gte: d30`),
+      // which put invoices that aren't due yet — even ones due next year — in
+      // "0–30 hari"; invoices with no due date fell through all four and
+      // vanished from the panel while still counting toward the KPI.
       Promise.all([
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d30 } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: todayStart } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d30, lt: todayStart } }, _sum: { totalAmount: true } }),
         prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d60, lt: d30 } }, _sum: { totalAmount: true } }),
         prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d90, lt: d60 } }, _sum: { totalAmount: true } }),
         prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { lt: d90 } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: null }, _sum: { totalAmount: true } }),
       ]),
       prisma.invoice.findMany({
         where: { ...filter, createdAt: { gte: windowStart } },
@@ -229,7 +247,11 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
     monthlyTrend[i].totalAmount += inv.totalAmount.toNumber()
     monthlyTrend[i].count += 1
     if (inv.status === 'RECEIVED') statusByMonth[i].entered += 1
-    else if (inv.status === 'PAID') statusByMonth[i].accepted += 1
+    // CLOSED counts as accepted too: it's the status *after* PAID, so counting
+    // only PAID meant closing a paid invoice retroactively removed it from the
+    // accepted series and the line shrank as work was completed. prisma/seed.ts
+    // has always used this same PAID-or-CLOSED definition.
+    else if (inv.status === 'PAID' || inv.status === 'CLOSED') statusByMonth[i].accepted += 1
   }
 
   // Company names come from a second query — groupBy can't include a relation.
@@ -263,11 +285,17 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
     overdueCount,
     openCount,
     statusBreakdown: statusCounts.map((s) => ({ status: s.status, count: s._count.id })),
+    // `overdue` marks the buckets that are actually past due, so the panel's
+    // overdue total agrees with the Overdue KPI. It used to be derived
+    // positionally (`slice(1)`, i.e. only >30 days late), so an invoice 10 days
+    // overdue showed as "Overdue: 1" on the card and "Rp 0" in the panel.
     agingBuckets: [
-      { label: '0–30 hari', amount: Number(agingBuckets[0]._sum?.totalAmount ?? 0) },
-      { label: '31–60 hari', amount: Number(agingBuckets[1]._sum?.totalAmount ?? 0) },
-      { label: '61–90 hari', amount: Number(agingBuckets[2]._sum?.totalAmount ?? 0) },
-      { label: '> 90 hari', amount: Number(agingBuckets[3]._sum?.totalAmount ?? 0) },
+      { label: 'Belum jatuh tempo', amount: Number(agingBuckets[0]._sum?.totalAmount ?? 0), overdue: false },
+      { label: '0–30 hari', amount: Number(agingBuckets[1]._sum?.totalAmount ?? 0), overdue: true },
+      { label: '31–60 hari', amount: Number(agingBuckets[2]._sum?.totalAmount ?? 0), overdue: true },
+      { label: '61–90 hari', amount: Number(agingBuckets[3]._sum?.totalAmount ?? 0), overdue: true },
+      { label: '> 90 hari', amount: Number(agingBuckets[4]._sum?.totalAmount ?? 0), overdue: true },
+      { label: 'Tanpa jatuh tempo', amount: Number(agingBuckets[5]._sum?.totalAmount ?? 0), overdue: false },
     ],
     monthlyTrend,
     statusByMonth,

@@ -9,12 +9,17 @@ import { ChartEmpty } from './ChartEmpty'
 export interface AgingBucket {
   label: string
   amount: number
+  /** Past due. Set by the server so this panel and the Overdue KPI agree. */
+  overdue: boolean
 }
 
 /**
  * Horizontal aging bar list — one row per due-date bucket.
  * Row shows amount + share of open total; bars run teal → amber → orange → red
- * (healthy → danger). Buckets past 30 days are marked overdue, the last one "tertua".
+ * (healthy → danger). Overdue buckets are flagged by the server, not inferred
+ * from position — deriving it here as "every bucket after the first" meant the
+ * panel only counted invoices more than 30 days late, so a 10-day-overdue
+ * invoice showed "Overdue: 1" on the KPI card and "Rp 0" right below it.
  */
 export function AgingList({ data, openCount }: { data: AgingBucket[]; openCount: number }) {
   const { t } = useI18n()
@@ -33,8 +38,10 @@ export function AgingList({ data, openCount }: { data: AgingBucket[]; openCount:
     )
   }
 
-  // Buckets after the first (0–30 hari) are past the 30-day overdue threshold.
-  const overdueAmount = data.slice(1).reduce((sum, b) => sum + b.amount, 0)
+  const overdueAmount = data.filter(b => b.overdue).reduce((sum, b) => sum + b.amount, 0)
+  // The oldest bucket is the last *overdue* one (> 90 hari); the no-due-date
+  // bucket sits after it and must not inherit the "tertua" label.
+  const oldestOverdueIndex = data.map(b => b.overdue).lastIndexOf(true)
   const overdueShare = total > 0 ? Math.round((overdueAmount / total) * 100) : 0
 
   return (
@@ -52,8 +59,8 @@ export function AgingList({ data, openCount }: { data: AgingBucket[]; openCount:
       <div role="list" className="space-y-2.5">
         {data.map((bucket, i) => {
           const share = total > 0 ? Math.round((bucket.amount / total) * 100) : 0
-          const isOverdue = i > 0
-          const isOldest = i === data.length - 1
+          const isOverdue = bucket.overdue
+          const isOldest = i === oldestOverdueIndex
           const color = AGING_COLORS[i % AGING_COLORS.length]
           return (
             <div

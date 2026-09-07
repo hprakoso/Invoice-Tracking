@@ -3,6 +3,8 @@
  * Centralised here so locale/currency changes only need to be made once.
  */
 
+import { NON_OPEN_STATUSES } from './invoiceStatus'
+
 /** Format a number or numeric string as Indonesian Rupiah (e.g. "Rp 1.500.000"). */
 export function formatIDR(v: string | number | null | undefined): string {
   if (v == null || v === '') return '—'
@@ -48,11 +50,33 @@ export function timeAgo(dateStr: string): string {
   return `${days} hari lalu`
 }
 
-const NON_OPEN_STATUSES = new Set(['PAID', 'CLOSED', 'REJECTED'])
+/**
+ * Start of today in Jakarta (WIB = UTC+7, no DST), expressed as the UTC-midnight
+ * instant that `invoices.due_date` stores for that calendar date.
+ *
+ * Every overdue check goes through this instead of comparing a due date against
+ * `new Date()`. Due dates are stored as UTC midnight of a calendar day, so a
+ * raw `dueDate < now` comparison flipped an invoice to "overdue" at 00:00 UTC —
+ * 07:00 WIB **on its own due day**, mid-morning for the people using the app.
+ */
+export function jakartaDayStart(now: Date = new Date()): Date {
+  const wib = new Date(now.getTime() + 7 * 3_600_000)
+  return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate()))
+}
 
-/** Return true when an invoice's due date has passed and its status is still active. */
-export function isOverdue(dueDate: string | null | undefined, status?: string): boolean {
+/**
+ * Return true when an invoice's due date has passed and its status is still
+ * active. An invoice due *today* is not overdue.
+ *
+ * `status` is required: an omitted status used to fall through and tag settled
+ * invoices as overdue.
+ */
+export function isOverdue(
+  dueDate: string | Date | null | undefined,
+  status: string,
+  now: Date = new Date(),
+): boolean {
   if (!dueDate) return false
-  if (status && NON_OPEN_STATUSES.has(status)) return false
-  return new Date(dueDate) < new Date()
+  if ((NON_OPEN_STATUSES as readonly string[]).includes(status)) return false
+  return new Date(dueDate) < jakartaDayStart(now)
 }
