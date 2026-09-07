@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth } from '@/lib/auth/helpers'
+import { requireAuth, unlinkedVendorResponse } from '@/lib/auth/helpers'
 import { getDashboardStats, buildDashboardFilter } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
   if (error || !session) return error
+
+  // This route ships a full invoice sheet — the unlinked-vendor case has to
+  // fail closed here more than anywhere.
+  const unlinked = unlinkedVendorResponse(session)
+  if (unlinked) return unlinked
 
   const filter = buildDashboardFilter(req.nextUrl.searchParams, session)
 

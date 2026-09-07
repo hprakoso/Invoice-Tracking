@@ -1,6 +1,7 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth } from '@/lib/auth/helpers'
+import { requireInvoiceAccess } from '@/lib/auth/helpers'
+import { TERMINAL_STATUSES } from '@/lib/validations'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFileBuffer } from '@/lib/services/fileService'
 import { extractInvoiceFields } from '@/lib/services/geminiExtraction'
@@ -16,13 +17,25 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, session } = await requireAuth()
-  if (error || !session) return error
+  const { id } = await params
+
+  // This route REWRITES the invoice (dates, amounts, line items), so it needs
+  // the same ownership check its read-only siblings do — it had only
+  // requireAuth(), letting any signed-in user re-OCR any vendor's invoice.
+  const { error, session, invoice } = await requireInvoiceAccess(id)
+  if (error || !session || !invoice) return error
 
   const limit = rateLimit(`ocr:${session.user.id}`, 5, 60_000)
   if (limit) return limit
 
-  const { id } = await params
+  // PATCH refuses to edit a settled invoice; re-running OCR would edit it
+  // through the back door, so it stops at the same boundary.
+  if ((TERMINAL_STATUSES as readonly string[]).includes(invoice.status)) {
+    return NextResponse.json(
+      { error: 'Invoice sudah final dan tidak bisa diproses ulang' },
+      { status: 409 },
+    )
+  }
 
   const encoder = new TextEncoder()
 
@@ -33,9 +46,9 @@ export async function GET(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Fetch invoice
-        const invoice = await prisma.invoice.findUnique({ where: { id } })
-        if (!invoice || !invoice.filePath) {
+        // Ownership and status were already settled by requireInvoiceAccess
+        // above, so only the file's presence is left to check here.
+        if (!invoice.filePath) {
           controller.enqueue(emit('error', { message: 'Invoice or file not found' }))
           controller.close()
           return

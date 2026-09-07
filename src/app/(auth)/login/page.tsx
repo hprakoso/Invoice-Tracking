@@ -31,6 +31,22 @@ export default function LoginPage() {
     }
   }
 
+  // ponytail: dev-only convenience that fills in a seeded account's email, so
+  // the demo doesn't have to type it. Passwords are deliberately absent — this
+  // is a client component, so every literal in this file ships in the JS
+  // bundle, and the NODE_ENV guard on the markup below only hides the buttons.
+  // Remove this block (and seed-demo-users.ts) after the demo.
+  const demoAccounts = [
+    { label: 'admin', email: 'admin@vista.id' },
+    { label: 'ga_staff', email: 'gastaff@sip.id' },
+    { label: 'vendor', email: 'vendor@sip.id' },
+  ]
+
+  function fillDemoAccount(account: { email: string }) {
+    setEmail(account.email)
+    setError('')
+  }
+
   const fade = (y: number, delay: number) => ({
     initial: { opacity: reduceMotion ? 1 : 0, y: reduceMotion ? 0 : y },
     animate: { opacity: 1, y: 0 },
@@ -174,6 +190,25 @@ export default function LoginPage() {
               {loading ? t.login.submitting : t.login.submit}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </button>
+
+            {process.env.NODE_ENV === 'development' && (
+              <div className="space-y-2 rounded-2xl border border-dashed border-muted-foreground/40 p-3">
+                <p className="text-center text-xs font-medium text-muted-foreground">Dev — isi email</p>
+                <div className="flex gap-2">
+                  {demoAccounts.map(a => (
+                    <button
+                      key={a.label}
+                      type="button"
+                      onClick={() => fillDemoAccount(a)}
+                      disabled={loading}
+                      className="flex h-9 flex-1 items-center justify-center rounded-full border border-muted-foreground/30 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </form>
         </motion.div>
       </section>

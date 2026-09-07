@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import type { InvoiceDocumentType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
-import { requireRole } from '@/lib/auth/helpers'
+import { requireInvoiceAccess } from '@/lib/auth/helpers'
 import { saveUploadedFile } from '@/lib/services/fileService'
 import { classifyDocument } from '@/lib/services/geminiExtraction'
 
@@ -10,18 +10,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, session } = await requireRole(['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'])
-  if (error || !session) return error ?? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   const { id } = await params
 
-  // VENDOR can only upload to their own invoices
-  if (session.user.role === 'VENDOR') {
-    const invoice = await prisma.invoice.findUnique({ where: { id }, select: { vendorId: true } })
-    if (!invoice || invoice.vendorId !== session.user.vendorId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-  }
+  // VENDOR can only upload to their own invoices — same shared guard the file
+  // and OCR routes use.
+  const { error, session } = await requireInvoiceAccess(id, ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'])
+  if (error || !session) return error
 
   const formData = await req.formData()
   const file = formData.get('file') as File | null

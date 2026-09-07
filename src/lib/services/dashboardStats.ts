@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import type { Prisma, InvoiceStatus } from '@prisma/client'
+import { INVOICE_STATUSES } from '@/lib/invoiceStatus'
 
 // Settled/dead statuses — excluded from "open" KPI metrics (Total Payable,
 // Overdue, Open Count, Aging). A REJECTED invoice isn't payable any more
@@ -89,7 +90,14 @@ export function buildDashboardFilter(
 
   // VENDOR is always scoped to their own invoices — never client-controlled.
   if (session.user.role === 'VENDOR') {
-    where.vendorId = session.user.vendorId ?? undefined
+    // Callers reject an unlinked vendor up front (unlinkedVendorResponse in
+    // auth/helpers). This throws rather than falling back to `undefined`, which
+    // Prisma drops — that silently turned a broken vendor account into an
+    // unscoped query returning every vendor's invoices.
+    if (!session.user.vendorId) {
+      throw new Error('VENDOR session without vendorId reached buildDashboardFilter')
+    }
+    where.vendorId = session.user.vendorId
   } else {
     const vendorId = searchParams.get('vendorId')
     if (vendorId) where.vendorId = vendorId
@@ -98,8 +106,13 @@ export function buildDashboardFilter(
   const search = searchParams.get('search')
   if (search) where.invoiceNumber = { contains: search, mode: 'insensitive' }
 
+  // Validated instead of force-cast: an unknown status used to reach the
+  // driver and come back as a 500. Ignored when invalid, same as the
+  // amount filters below.
   const status = searchParams.get('status')
-  if (status) where.status = status as Prisma.EnumInvoiceStatusFilter['equals']
+  if (status && (INVOICE_STATUSES as readonly string[]).includes(status)) {
+    where.status = status as InvoiceStatus
+  }
 
   const companyId = searchParams.get('companyId')
   if (companyId) where.companyId = companyId

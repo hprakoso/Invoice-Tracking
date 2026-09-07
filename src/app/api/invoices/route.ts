@@ -1,50 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, requireRole } from '@/lib/auth/helpers'
-import { Prisma } from '@prisma/client'
+import { requireAuth, requireRole, unlinkedVendorResponse } from '@/lib/auth/helpers'
 import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
-import { applyInvoiceSearchFilters } from '@/lib/services/dashboardStats'
+import { buildDashboardFilter } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
   if (error || !session) return error
 
-  const { searchParams } = req.nextUrl
-  const status = searchParams.get('status')
-  const search = searchParams.get('search')
-  const from = searchParams.get('from')
-  const to = searchParams.get('to')
+  // VENDOR can only see their own invoices — server-enforced, never
+  // client-supplied. buildDashboardFilter applies the scoping itself.
+  const unlinked = unlinkedVendorResponse(session)
+  if (unlinked) return unlinked
 
-  const where: Prisma.InvoiceWhereInput = {}
-  if (status) where.status = status as Prisma.EnumInvoiceStatusFilter['equals']
-  if (search) where.invoiceNumber = { contains: search, mode: 'insensitive' }
-  if (from || to) {
-    where.dueDate = {}
-    if (from) where.dueDate.gte = new Date(from)
-    if (to) where.dueDate.lte = new Date(to)
-  }
-  // poNumber / picId / amountMin / amountMax — shared with the dashboard's
-  // filter builder so the two surfaces accept the same params.
-  applyInvoiceSearchFilters(searchParams, where)
-
-  // VENDOR can only see their own invoices — server-enforced, never client-supplied
-  if (session.user.role === 'VENDOR') {
-    if (!session.user.vendorId) {
-      return NextResponse.json({ error: 'Vendor account not linked' }, { status: 403 })
-    }
-    where.vendorId = session.user.vendorId
-  } else {
-    // Non-vendor users may filter by vendorId via query param
-    const vendorId = searchParams.get('vendorId')
-    if (vendorId) where.vendorId = vendorId
-  }
+  // The dashboard's filter builder, not a second copy of it: the hand-rolled
+  // block this replaces silently ignored companyId (which the dashboard
+  // honoured), so the same query string scoped one surface but not the other.
+  const where = buildDashboardFilter(req.nextUrl.searchParams, session)
 
   const invoices = await prisma.invoice.findMany({
     where,
+    // `items` is deliberately not included: the list page never renders line
+    // items, and including them serialised the whole invoice_items table on
+    // every filter change. Detail pages fetch their own items.
     include: {
       vendor: { select: { id: true, name: true } },
       createdBy: { select: { id: true, name: true } },
-      items: { orderBy: { sortOrder: 'asc' } },
     },
     orderBy: { createdAt: 'desc' },
   })

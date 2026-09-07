@@ -8,6 +8,26 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-07 — Review remediation 1/5: tenant isolation, cron guard, client-side credentials
+
+First of five batches from a whole-repo review (10 parallel finders → 8 adversarial verifiers, 32 confirmed findings). This batch is the security/tenant-isolation cluster.
+
+**`GET /api/invoices/[id]/ocr` had no ownership check at all — the one route of its family that *writes*.** It ran `requireAuth()` then `findUnique({ where: { id } })`, while its read-only siblings (`…/file`, `…/upload`) each hand-rolled a `vendorId` comparison. Any signed-in user could re-OCR any other vendor's invoice: the SSE stream returned that vendor's extracted fields, and the route then overwrote `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` and replaced every `invoice_items` row — on a `CLOSED` invoice too, since it had no status guard — with no `audit_logs` entry. The three hand-rolled copies are now one `requireInvoiceAccess(invoiceId, allowedRoles?)` in `src/lib/auth/helpers.ts`, used by the OCR, file and upload routes. It returns 403 to a VENDOR for a non-existent invoice as well as an unowned one, so invoice ids can't be probed for existence. The OCR route additionally refuses `TERMINAL_STATUSES` with 409 — `PATCH` already refuses to edit settled invoices, and re-running OCR was the back door around it.
+
+**An unlinked VENDOR (role VENDOR, `vendorId` null) got an unscoped dashboard and a full cross-vendor Excel export.** `buildDashboardFilter` wrote `where.vendorId = session.user.vendorId ?? undefined`, and Prisma drops `undefined` keys — so the vendor scoping vanished, while `GET /api/invoices` rejected the identical session with 403. The state isn't reachable through the app's own APIs (`createUserSchema` refines it, `PATCH /api/users/[id]` rejects it), but `users.vendor_id` is `ON DELETE SET NULL`, so deleting a vendor row directly in the DB produces it. Now `unlinkedVendorResponse()` (one definition, in `auth/helpers.ts`) guards `/api/dashboard`, `/api/dashboard/export` and `/api/invoices`, and `buildDashboardFilter` **throws** instead of falling back to `undefined` if a future caller forgets — it fails closed rather than silently unscoped.
+
+**`GET /api/cron/reminders` accepted `Authorization: Bearer undefined` when `CRON_SECRET` was unset**, because the guard interpolated the env var straight into the comparison string. `middleware.ts` deliberately exempts `/api/cron/` from session auth, so this was the only thing standing in front of it, and the email path has no dedupe (`alreadyNotifiedToday` guards only in-app notifications) — repeated calls re-send the whole digest. The secret's existence is now checked separately and a missing one returns 503.
+
+**Live admin password removed from the client bundle.** The uncommitted dev-bypass block in `src/app/(auth)/login/page.tsx` carried `dJLrXlooGsBsGcNJ` — the same string `prisma/seed.ts:71` uses as the bootstrap admin fallback — inside a `'use client'` component. The `NODE_ENV === 'development'` guard wrapped only the JSX, not the `const`, so removal from a production bundle relied on minifier dead-code elimination; the dev bundle shipped it outright. The buttons now prefill the **email only** and the password is typed. `seed-demo-users.ts` and `check-demo-users.ts` (untracked, both holding plaintext passwords, both self-described as delete-after-demo) are now gitignored so `git add .` can't sweep them in.
+
+**Two consistency fixes that fell out of the same files:** `GET /api/invoices` now builds its `where` with `buildDashboardFilter` instead of a near-copy that silently ignored `companyId` — the same query string scoped the dashboard but not the list. And the `?status=` param is validated against `INVOICE_STATUSES` rather than force-cast into Prisma's enum filter, so `?status=paid` is ignored (matching how the amount filters already treat junk input) instead of reaching the driver and returning a 500.
+
+**Data touched:** no schema or data changes in this batch — all edits are request-path guards. `GET /api/invoices` stopped including `items` (the list page never rendered them; it was serialising the whole `invoice_items` table on every filter change).
+
+**Not done here, deliberately:** the admin password itself still needs rotating — it has been in tracked git history at `prisma/seed.ts:71` since long before this change, so removing the copy above does not un-expose it. That's a deployment action, left to the maintainer. The two demo scripts are gitignored, not deleted.
+
+**Verified:** `tsc --noEmit` clean, 56/56 existing tests pass. Behavioural verification against the database is in batch 5/5's entry, which covers all five batches together.
+
 ### 2026-09-03 — Rebrand to SIP (Smart Invoice & Payment)
 
 **What:** App renamed **VISTA → SIP**, tagline "Vendor Invoice Submission & Tracking Assistant" → **"Smart Invoice & Payment"**. Changed in `src/app/layout.tsx` (page metadata/browser tab), both i18n dictionaries (`nav.brand`/`nav.brandTagline`, which drive the sidebar), `README.md`, and `docs/INDEX.md`.

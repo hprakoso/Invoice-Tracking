@@ -83,6 +83,12 @@ logs/
 tmp/
 temp/
 
+# Throwaway demo helpers at the repo root — they hold plaintext seed passwords
+# and are meant to be deleted once the demo is over, so they must never be
+# swept into a commit by `git add .`
+/seed-demo-users.ts
+/check-demo-users.ts
+
 # Design references (local input for a redesign pass, not part of the tracked
 # repo — same convention as the 2026-07-30 Liquid Intelligence brief, see
 # docs/CHANGELOG.md)
