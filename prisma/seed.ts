@@ -176,16 +176,42 @@ async function main() {
   // by construction (it deleteMany()s every table at the top) and must never be
   // pointed at production — see docs/UAT_AND_CUTOVER.md.
   const demoPassword = process.env.DEMO_PASSWORD ?? 'demo1234'
-  const demoUsers = [
+
+  // The four accounts a demo or UAT session actually runs on, all sharing
+  // DEMO_PASSWORD so one credential covers the whole walkthrough. The
+  // bootstrap admin above is deliberately NOT one of them — it carries
+  // ADMIN_PASSWORD, a different and much longer secret, which is why the login
+  // page's dev buttons used to offer an account whose password nobody running
+  // the demo had.
+  //
+  // Vendor A and Vendor B sit on DIFFERENT vendors on purpose: that pair is the
+  // only way to exercise cross-tenant isolation (open A's invoice id while
+  // signed in as B and confirm the 403).
+  type DemoAccount = {
+    email: string
+    name: string
+    role: Role
+    vendorId: string | null
+    isActive?: boolean
+    mustChangePassword?: boolean
+  }
+
+  const DEMO_ACCOUNTS: DemoAccount[] = [
+    { email: 'admin@sip.id', name: 'Admin (Demo)', role: Role.ADMIN, vendorId: null },
     { email: 'gastaff@sip.id', name: 'GA Staff (Demo)', role: Role.GA_STAFF, vendorId: null },
+    { email: 'vendor@sip.id', name: `Vendor A (${vendorSpecs[0].name})`, role: Role.VENDOR, vendorId: vendors[0].id },
+    { email: 'vendor2@sip.id', name: `Vendor B (${vendorSpecs[1].name})`, role: Role.VENDOR, vendorId: vendors[1].id },
+  ]
+
+  // Extra accounts that exist to give a UAT scenario a starting row, not to be
+  // logged into casually.
+  const EXTRA_UAT_ACCOUNTS: DemoAccount[] = [
     { email: 'gamanager@sip.id', name: 'GA Manager (Demo)', role: Role.GA_MANAGER, vendorId: null },
-    { email: 'vendor@sip.id', name: `Vendor (${vendorSpecs[0].name})`, role: Role.VENDOR, vendorId: vendors[0].id },
-    { email: 'vendor2@sip.id', name: `Vendor (${vendorSpecs[1].name})`, role: Role.VENDOR, vendorId: vendors[1].id },
-    // Two auth states that otherwise have no starting row: the inactive-account
-    // rejection and the forced password-change redirect.
     { email: 'nonaktif@sip.id', name: 'User Nonaktif (Demo)', role: Role.GA_STAFF, vendorId: null, isActive: false },
     { email: 'gantipassword@sip.id', name: 'Wajib Ganti Password (Demo)', role: Role.GA_STAFF, vendorId: null, mustChangePassword: true },
   ]
+
+  const demoUsers = [...DEMO_ACCOUNTS, ...EXTRA_UAT_ACCOUNTS]
   const createdDemoUsers: Record<string, { id: string }> = {}
   for (const u of demoUsers) {
     createdDemoUsers[u.email] = await prisma.user.create({
@@ -202,7 +228,8 @@ async function main() {
   }
   const gaStaff = createdDemoUsers['gastaff@sip.id']
   const gaManager = createdDemoUsers['gamanager@sip.id']
-  console.log(`Demo logins ready: ${demoUsers.map((u) => u.email).join(', ')}`)
+  console.log(`Demo accounts: ${DEMO_ACCOUNTS.map((u) => u.email).join(', ')}`)
+  console.log(`Extra UAT accounts: ${EXTRA_UAT_ACCOUNTS.map((u) => u.email).join(', ')}`)
 
   // One inactive vendor and one inactive company, so the isActive toggles, the
   // active-only vendor dropdown and the dashboard's includeInactive=true
@@ -529,10 +556,18 @@ async function main() {
 
   console.log(`UAT boundary invoices: ${uatCases.map((c) => c.n).join(', ')} (vendor: ${vendorSpecs[0].name})`)
   console.log('Dummy data created: 3 companies, 6 vendors, 100 invoices (2 items each), stage history')
+  const pad = Math.max(adminEmail.length, ...demoUsers.map((u) => u.email.length))
+  const row = (email: string, role: string, note: string) =>
+    `  ${email.padEnd(pad)}  ${role.padEnd(11)} ${note}`
   console.log(`
-Logins
-  ${adminEmail}  ADMIN        (password: ADMIN_PASSWORD env, or its default)
-${demoUsers.map((u) => `  ${u.email.padEnd(adminEmail.length)}  ${u.role.padEnd(12)} (password: DEMO_PASSWORD env, default "demo1234")`).join('\n')}
+Demo accounts — all four share DEMO_PASSWORD (default "demo1234")
+${DEMO_ACCOUNTS.map((u) => row(u.email, u.role, u.name)).join('\n')}
+
+Extra UAT accounts (same password, for specific scenarios)
+${EXTRA_UAT_ACCOUNTS.map((u) => row(u.email, u.role, u.name)).join('\n')}
+
+Bootstrap admin (separate secret)
+${row(adminEmail, 'ADMIN', 'password: ADMIN_PASSWORD env, or its default')}
   `)
 }
 

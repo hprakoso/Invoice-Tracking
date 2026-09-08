@@ -90,18 +90,29 @@ npm run db:seed
 
 ### 1.4 Akun dan data uji yang tersedia
 
-Seed menghasilkan **6 akun** (sebelumnya hanya 1, sehingga tidak ada satupun layar role-gated yang
-bisa diuji):
+Seed menghasilkan **8 akun** (sebelumnya hanya 1, sehingga tidak ada satupun layar role-gated yang
+bisa diuji). Empat pertama adalah set demo utama — semuanya memakai `DEMO_PASSWORD` yang sama, jadi
+satu kredensial cukup untuk seluruh walkthrough:
 
 | Email | Role | Untuk menguji |
 |---|---|---|
-| `admin@vista.id` | ADMIN | Bypass transition graph, koreksi status, hard delete |
+| `admin@sip.id` | ADMIN | Bypass transition graph, koreksi status, hard delete |
 | `gastaff@sip.id` | GA_STAFF | Antrian GA, PIC, cabang `isEditor` |
+| `vendor@sip.id` | VENDOR **A** (PT Maju Jaya Abadi) | Portal vendor, kunci edit vendor |
+| `vendor2@sip.id` | VENDOR **B** (CV Teknologi Nusantara) | **Isolasi lintas tenant** — buka id invoice milik Vendor A dari akun ini |
+
+Tiga akun tambahan, ada semata-mata supaya skenario tertentu punya baris awal:
+
+| Email | Role | Untuk menguji |
+|---|---|---|
 | `gamanager@sip.id` | GA_MANAGER | Log audit, cabang non-editor |
-| `vendor@sip.id` | VENDOR (PT Maju Jaya Abadi) | Portal vendor, kunci edit vendor |
-| `vendor2@sip.id` | VENDOR (CV Teknologi Nusantara) | **Isolasi lintas tenant** — buka id invoice milik vendor lain |
 | `nonaktif@sip.id` | GA_STAFF (isActive=false) | Penolakan login akun nonaktif |
 | `gantipassword@sip.id` | GA_STAFF (mustChangePassword) | Redirect ganti password wajib |
+
+Di luar itu ada `admin@vista.id`, admin bootstrap, yang memakai **`ADMIN_PASSWORD`** — rahasia yang
+berbeda dan jauh lebih panjang. Itulah sebabnya tombol dev di halaman login sekarang menawarkan
+`admin@sip.id`, bukan akun bootstrap: tombol yang paling mungkin diklik dulu justru mengisi akun
+yang password-nya tidak dipegang siapa pun yang menjalankan demo.
 
 Data invoice: **105 baris** — 100 acak + 5 kasus batas eksplisit.
 

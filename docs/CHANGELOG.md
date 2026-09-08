@@ -8,6 +8,20 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-08 — Demo account set: admin, GA staff, vendor A and vendor B
+
+Requested by the maintainer: a clear four-account demo set rather than an ad-hoc list.
+
+`prisma/seed.ts` now splits the accounts it creates into `DEMO_ACCOUNTS` — `admin@sip.id`, `gastaff@sip.id`, `vendor@sip.id` (Vendor **A**, PT Maju Jaya Abadi) and `vendor2@sip.id` (Vendor **B**, CV Teknologi Nusantara) — and `EXTRA_UAT_ACCOUNTS`, the three that exist only to give a specific scenario a starting row (GA_MANAGER, an inactive account, and one with `mustChangePassword`). All seven share `DEMO_PASSWORD`, so one credential covers the whole walkthrough.
+
+**The new piece is the demo ADMIN.** There was no admin on the demo password at all — the only ADMIN was the bootstrap `admin@vista.id`, which carries `ADMIN_PASSWORD`, a different and much longer secret. The login page's dev buttons offered exactly that account, so the button most likely to be clicked first filled in an email whose password nobody running the demo had. Those buttons now offer the four demo accounts (`admin`, `ga_staff`, `vendor A`, `vendor B`) and the bootstrap admin is kept out of them.
+
+Vendor A and B stay on **different vendors** deliberately: that pair is the only way to exercise cross-tenant isolation — open A's invoice id while signed in as B and confirm the 403.
+
+**Data touched:** `users` gains one row (`admin@sip.id`, role ADMIN, password from `DEMO_PASSWORD`). No schema change. The seed's closing summary now prints the three groups separately with their password source.
+
+**Verified:** `tsc` clean, `eslint` clean, 93/93 unit tests, 22/22 end-to-end checks, and the reseeded database confirmed to hold all 8 accounts with the right roles, vendor links, `is_active` and `must_change_password` values.
+
 ### 2026-09-07 — UAT data coverage and a production cutover runbook
 
 Follow-up to the Phase 24 remediation, driven by four parallel readiness audits (deploy surface, env-var matrix, migration readiness, UAT data coverage). The maintainer confirmed the admin password and the demo data are not production concerns yet, and asked for the data to be made UAT-ready plus a scenario for continuing to production.
@@ -826,6 +840,7 @@ Six batches from a cross-feature review (10 parallel finders → 8 adversarial v
 | `0a98636` | 2026-09-07 | fix: duplicate POST conflict, stale file mirror, dashboard stall, audit page guard |
 | `85fd149` | 2026-09-07 | docs: record review remediation phase in commit log and DB targeting gotcha |
 | `3efe40a` | 2026-09-07 | feat: make seed UAT-ready and add production cutover runbook |
+| `c049c76` | 2026-09-08 | feat: add demo admin and split seed accounts into a four-account demo set |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.

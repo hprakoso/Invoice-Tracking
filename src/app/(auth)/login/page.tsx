@@ -36,10 +36,16 @@ export default function LoginPage() {
   // is a client component, so every literal in this file ships in the JS
   // bundle, and the NODE_ENV guard on the markup below only hides the buttons.
   // Remove this block (and seed-demo-users.ts) after the demo.
+  // The four accounts prisma/seed.ts creates as DEMO_ACCOUNTS, which all share
+  // DEMO_PASSWORD. This used to offer admin@vista.id — the bootstrap admin,
+  // whose password is the entirely different ADMIN_PASSWORD, so the one button
+  // most likely to be clicked filled in an account nobody running the demo had
+  // the credentials for.
   const demoAccounts = [
-    { label: 'admin', email: 'admin@vista.id' },
+    { label: 'admin', email: 'admin@sip.id' },
     { label: 'ga_staff', email: 'gastaff@sip.id' },
-    { label: 'vendor', email: 'vendor@sip.id' },
+    { label: 'vendor A', email: 'vendor@sip.id' },
+    { label: 'vendor B', email: 'vendor2@sip.id' },
   ]
 
   function fillDemoAccount(account: { email: string }) {
