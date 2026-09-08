@@ -114,6 +114,13 @@ berbeda dan jauh lebih panjang. Itulah sebabnya tombol dev di halaman login seka
 `admin@sip.id`, bukan akun bootstrap: tombol yang paling mungkin diklik dulu justru mengisi akun
 yang password-nya tidak dipegang siapa pun yang menjalankan demo.
 
+**Tombol dev di halaman login** (`npm run dev` saja — markup-nya dipagari
+`NODE_ENV === 'development'`) melakukan sign-in sekali klik untuk keempat akun demo, tanpa mengetik.
+Password yang dikirimnya berasal dari `NEXT_PUBLIC_DEMO_PASSWORD`, default `demo1234`. Kalau Anda
+menyeed dengan `DEMO_PASSWORD` lain, setel `NEXT_PUBLIC_DEMO_PASSWORD` ke nilai yang sama atau
+tombolnya akan gagal login. Admin bootstrap sengaja tidak ikut — itu kredensial sungguhan dan tidak
+boleh masuk ke kode client.
+
 Data invoice: **105 baris** — 100 acak + 5 kasus batas eksplisit.
 
 | Invoice | Untuk menguji |

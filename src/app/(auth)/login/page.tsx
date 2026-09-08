@@ -36,11 +36,17 @@ export default function LoginPage() {
   // is a client component, so every literal in this file ships in the JS
   // bundle, and the NODE_ENV guard on the markup below only hides the buttons.
   // Remove this block (and seed-demo-users.ts) after the demo.
-  // The four accounts prisma/seed.ts creates as DEMO_ACCOUNTS, which all share
-  // DEMO_PASSWORD. This used to offer admin@vista.id — the bootstrap admin,
-  // whose password is the entirely different ADMIN_PASSWORD, so the one button
-  // most likely to be clicked filled in an account nobody running the demo had
-  // the credentials for.
+  // ponytail: dev-only one-click sign-in for the four accounts prisma/seed.ts
+  // creates as DEMO_ACCOUNTS. They all share DEMO_PASSWORD, so one literal
+  // covers every button.
+  //
+  // This is a client component, so the password below ships in the JS bundle —
+  // acceptable ONLY because it is a throwaway seed credential and the markup is
+  // gated on NODE_ENV === 'development'. The bootstrap admin (admin@vista.id,
+  // ADMIN_PASSWORD) is deliberately NOT in this list: that one is a real
+  // credential and must never appear in client code. Keep it that way.
+  // Remove this block, and seed-demo-users.ts, after the demo.
+  const demoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? 'demo1234'
   const demoAccounts = [
     { label: 'admin', email: 'admin@sip.id' },
     { label: 'ga_staff', email: 'gastaff@sip.id' },
@@ -48,9 +54,25 @@ export default function LoginPage() {
     { label: 'vendor B', email: 'vendor2@sip.id' },
   ]
 
-  function fillDemoAccount(account: { email: string }) {
+  async function handleDevBypass(account: { email: string }) {
     setEmail(account.email)
+    setPassword(demoPassword)
+    setLoading(true)
     setError('')
+    const result = await signIn('credentials', {
+      email: account.email,
+      password: demoPassword,
+      redirect: false,
+    })
+    setLoading(false)
+    if (result?.error) {
+      // Most likely cause: the database was seeded with a different
+      // DEMO_PASSWORD. Set NEXT_PUBLIC_DEMO_PASSWORD to match it.
+      setError(t.login.invalidCredentials)
+    } else {
+      router.push('/')
+      router.refresh()
+    }
   }
 
   const fade = (y: number, delay: number) => ({
@@ -199,15 +221,15 @@ export default function LoginPage() {
 
             {process.env.NODE_ENV === 'development' && (
               <div className="space-y-2 rounded-2xl border border-dashed border-muted-foreground/40 p-3">
-                <p className="text-center text-xs font-medium text-muted-foreground">Dev — isi email</p>
-                <div className="flex gap-2">
+                <p className="text-center text-xs font-medium text-muted-foreground">Dev — login sebagai</p>
+                <div className="flex flex-wrap gap-2">
                   {demoAccounts.map(a => (
                     <button
                       key={a.label}
                       type="button"
-                      onClick={() => fillDemoAccount(a)}
+                      onClick={() => handleDevBypass(a)}
                       disabled={loading}
-                      className="flex h-9 flex-1 items-center justify-center rounded-full border border-muted-foreground/30 text-xs font-medium text-muted-foreground hover:text-foreground"
+                      className="flex h-9 min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center rounded-full border border-muted-foreground/30 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
                       {a.label}
                     </button>

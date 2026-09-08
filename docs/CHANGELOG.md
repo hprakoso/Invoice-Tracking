@@ -18,9 +18,11 @@ Requested by the maintainer: a clear four-account demo set rather than an ad-hoc
 
 Vendor A and B stay on **different vendors** deliberately: that pair is the only way to exercise cross-tenant isolation — open A's invoice id while signed in as B and confirm the 403.
 
+**One-click sign-in restored on the dev buttons.** They filled the email only, so a demo still meant typing a password four times. They now call `signIn` directly with `NEXT_PUBLIC_DEMO_PASSWORD` (default `demo1234`), and the panel is relabelled "Dev — login sebagai". The password literal does ship in the client bundle — that is the whole reason the bootstrap admin is excluded from this list: `admin@vista.id` carries a real credential and must never appear in client code, whereas `demo1234` is a throwaway seed value behind a `NODE_ENV === 'development'` gate. **Verified empirically, not assumed:** `npm run build` then `grep -r demo1234 .next/static` returns nothing — the dev-only branch is dead-code-eliminated out of the production bundle. If the database is seeded with a different `DEMO_PASSWORD`, set `NEXT_PUBLIC_DEMO_PASSWORD` to match or the buttons stop working; both variables are now documented in `.env.example`, where neither appeared before.
+
 **Data touched:** `users` gains one row (`admin@sip.id`, role ADMIN, password from `DEMO_PASSWORD`). No schema change. The seed's closing summary now prints the three groups separately with their password source.
 
-**Verified:** `tsc` clean, `eslint` clean, 93/93 unit tests, 22/22 end-to-end checks, and the reseeded database confirmed to hold all 8 accounts with the right roles, vendor links, `is_active` and `must_change_password` values.
+**Verified:** `tsc` clean, `eslint` clean, 93/93 unit tests, 22/22 end-to-end checks, and the reseeded database confirmed to hold all 8 accounts with the right roles, vendor links, `is_active` and `must_change_password` values. The four dev buttons were checked against the stored hashes with `bcrypt.compare` — all four authenticate, none is inactive or flagged `mustChangePassword`, and the bootstrap admin does **not** accept the demo password.
 
 ### 2026-09-07 — UAT data coverage and a production cutover runbook
 
@@ -840,7 +842,7 @@ Six batches from a cross-feature review (10 parallel finders → 8 adversarial v
 | `0a98636` | 2026-09-07 | fix: duplicate POST conflict, stale file mirror, dashboard stall, audit page guard |
 | `85fd149` | 2026-09-07 | docs: record review remediation phase in commit log and DB targeting gotcha |
 | `3efe40a` | 2026-09-07 | feat: make seed UAT-ready and add production cutover runbook |
-| `c049c76` | 2026-09-08 | feat: add demo admin and split seed accounts into a four-account demo set |
+| `42ecc05` | 2026-09-08 | feat: add demo admin and split seed accounts into a four-account demo set |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
