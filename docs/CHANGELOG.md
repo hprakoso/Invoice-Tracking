@@ -843,6 +843,7 @@ Six batches from a cross-feature review (10 parallel finders → 8 adversarial v
 | `85fd149` | 2026-09-07 | docs: record review remediation phase in commit log and DB targeting gotcha |
 | `3efe40a` | 2026-09-07 | feat: make seed UAT-ready and add production cutover runbook |
 | `42ecc05` | 2026-09-08 | feat: add demo admin and split seed accounts into a four-account demo set |
+| `95c41be` | 2026-09-08 | feat: one-click dev sign-in for the four demo accounts |
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
