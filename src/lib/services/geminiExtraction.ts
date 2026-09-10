@@ -43,7 +43,17 @@ const EXTRACTION_SCHEMA = {
     document_type: { type: Type.STRING, enum: [...DOCUMENT_TYPES] },
     classification_confidence: { type: Type.NUMBER, description: 'Document-type certainty, 0-100' },
     vendor_name: FIELD_SCHEMA,
+    // The bill-to block. Sourced so the upload wizard no longer has to ask for
+    // the company before the document is read — resolved to a Company row by
+    // matchCompany() in src/lib/companyMatch.ts. NPWP is extracted alongside
+    // the name because it is the stronger of the two identifiers.
+    company_name: FIELD_SCHEMA,
+    company_npwp: FIELD_SCHEMA,
     invoice_number: FIELD_SCHEMA,
+    // Was never extracted: the wizard collected it by hand before upload, and
+    // its `po_number` entry in FIELD_DEFS only ever rendered on the
+    // OCR-failed fallback path.
+    po_number: FIELD_SCHEMA,
     invoice_date: FIELD_SCHEMA,
     due_date: FIELD_SCHEMA,
     currency: FIELD_SCHEMA,
@@ -54,7 +64,8 @@ const EXTRACTION_SCHEMA = {
   },
   required: [
     'document_type', 'classification_confidence',
-    'vendor_name', 'invoice_number', 'invoice_date', 'due_date',
+    'vendor_name', 'company_name', 'company_npwp', 'invoice_number', 'po_number',
+    'invoice_date', 'due_date',
     'currency', 'subtotal', 'tax_amount', 'total_amount', 'line_items',
   ],
 }
@@ -78,6 +89,13 @@ ${CLASSIFICATION_RULE}
 
 For Indonesian invoices: "Tanggal" = invoice date, "Jatuh Tempo" = due date, "Subtotal" = subtotal, "PPN" = tax (usually 11%), "Total"/"Total Bayar" = total amount.
 
+An invoice names TWO companies and they must not be confused:
+- vendor_name is the SENDER — the party issuing the invoice and being paid. Usually the letterhead, or labelled "Dari"/"From"/"Penjual"/"Pengusaha Kena Pajak".
+- company_name is the BILL-TO — the party being billed and who will pay. Labelled "Kepada"/"Kepada Yth"/"Bill To"/"Ditagihkan kepada"/"Pembeli"/"Customer". company_npwp is the NPWP printed inside that same bill-to block, NOT the sender's NPWP.
+If only one company appears and you cannot tell which role it plays, set company_name to null with confidence 0 rather than guessing — sending an invoice to the wrong company is worse than leaving it for the user to pick.
+
+po_number is the purchase-order reference the invoice quotes: "No. PO", "PO Number", "Nomor PO", "Purchase Order", or a PO reference in the header table. It is NOT the invoice number and NOT a delivery-order (DO/SJ) number. Null with confidence 0 if the document quotes no PO.
+
 Rules:
 - Dates must be formatted YYYY-MM-DD, or null if not present/legible.
 - All amounts are plain numeric strings with no currency symbol or thousand separators (Indonesian invoices often write 1.000.000 for one million — strip the dots).
@@ -100,7 +118,10 @@ export interface ExtractionResult {
   document_type: DocumentTypeKey
   classification_confidence: number
   vendor_name: ExtractedField
+  company_name: ExtractedField
+  company_npwp: ExtractedField
   invoice_number: ExtractedField
+  po_number: ExtractedField
   invoice_date: ExtractedField
   due_date: ExtractedField
   currency: ExtractedField
