@@ -1,5 +1,6 @@
 import NextAuth from 'next-auth'
 import { authConfig } from '@/lib/auth/auth.config'
+import { isVendorApiBlockedPendingPasswordChange } from '@/lib/auth/permissions'
 import { NextResponse } from 'next/server'
 
 const { auth } = NextAuth(authConfig)
@@ -27,6 +28,20 @@ export default auth((req) => {
   if (pathname.startsWith('/api/')) {
     if (!isLoggedIn) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    // A vendor still on its admin-issued initial password is redirected away
+    // from every page below, but the API used to be wide open to it — the
+    // forced change was enforced in the browser only. This closes that for
+    // every route at once, and only for VENDOR.
+    if (
+      req.auth?.user &&
+      isVendorApiBlockedPendingPasswordChange(
+        req.auth.user.role,
+        req.auth.user.mustChangePassword,
+        pathname,
+      )
+    ) {
+      return NextResponse.json({ error: 'Password change required' }, { status: 403 })
     }
     return NextResponse.next()
   }

@@ -66,6 +66,57 @@ export default function AdminUsersPage() {
     }
   }
 
+  // Vendors cannot change their own login email or rotate their own password —
+  // both are enforced server-side — so the admin is the only path for either.
+  // The password set here is always temporary: the API re-arms the account's
+  // forced change, so no admin ends up holding a live credential.
+  async function patchCredential(user: UserRow, body: Record<string, string>, successMsg: string, failMsg: string) {
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      toast.success(successMsg)
+      fetchUsers()
+      return
+    }
+    const data = await res.json().catch(() => ({}))
+    toast.error(res.status === 409 ? t.userManagement.emailInUse : (data.error ?? failMsg))
+  }
+
+  function resetPassword(user: UserRow) {
+    const next = window.prompt(t.userManagement.newPasswordPrompt.replace('{name}', user.name))
+    if (next === null) return
+    if (next.length < 8) {
+      toast.error(t.userManagement.passwordTooShort)
+      return
+    }
+    void patchCredential(
+      user,
+      { password: next },
+      t.userManagement.passwordReset.replace('{name}', user.name),
+      t.userManagement.passwordResetFailed,
+    )
+  }
+
+  function changeEmail(user: UserRow) {
+    const next = window.prompt(t.userManagement.newEmailPrompt.replace('{name}', user.name), user.email)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      toast.error(t.userManagement.invalidEmail)
+      return
+    }
+    if (trimmed === user.email) return
+    void patchCredential(
+      user,
+      { email: trimmed },
+      t.userManagement.emailChanged,
+      t.userManagement.emailChangeFailed,
+    )
+  }
+
   async function createUser() {
     setSaving(true)
     const res = await fetch('/api/users', {
@@ -136,6 +187,7 @@ export default function AdminUsersPage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colEmail}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colRole}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colActive}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.credentialsColumn}</th>
               </tr>
             </thead>
             <tbody>
@@ -162,6 +214,15 @@ export default function AdminUsersPage() {
                       }`}
                     >
                       {u.isActive ? t.userManagement.active : t.userManagement.inactive}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <button onClick={() => resetPassword(u)} className="text-xs text-blue-600 hover:underline">
+                      {t.userManagement.resetPassword}
+                    </button>
+                    <span className="mx-2 text-gray-300 dark:text-gray-600">|</span>
+                    <button onClick={() => changeEmail(u)} className="text-xs text-blue-600 hover:underline">
+                      {t.userManagement.changeEmail}
                     </button>
                   </td>
                 </tr>

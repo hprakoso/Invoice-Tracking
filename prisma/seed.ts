@@ -221,6 +221,15 @@ async function main() {
         role: u.role,
         vendorId: u.vendorId,
         passwordHash: await hashPassword(demoPassword),
+        // Demo/UAT accounts default to false — i.e. "already past first login"
+        // — so one shared credential covers the whole walkthrough without every
+        // sign-in being interrupted by a forced change. For a VENDOR that also
+        // means the seeded account sits in its normal steady state: unable to
+        // rotate its own password, which is the real rule (see
+        // canChangeOwnPassword). gantipassword@sip.id is the account that
+        // demonstrates the forced-change screen. Real vendor accounts are
+        // created through POST /api/users, where the schema default (true)
+        // applies, and migration 20260910000000 re-arms pre-existing ones.
         mustChangePassword: u.mustChangePassword ?? false,
         isActive: u.isActive ?? true,
       },

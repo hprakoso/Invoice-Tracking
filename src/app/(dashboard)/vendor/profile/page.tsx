@@ -151,6 +151,15 @@ export default function VendorProfilePage() {
           <label className="text-xs text-gray-400 flex items-center gap-1"><Lock className="h-3 w-3" /> {t.vendorProfile.npwp}</label>
           <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mt-1">{vendor.npwp ?? '—'}</p>
         </div>
+        {/* Login identity, as opposed to the contact email below: a vendor can
+            change neither its login email nor its password itself — both are
+            refused server-side — so the rule is stated where the vendor would
+            otherwise go looking for the setting. */}
+        <div>
+          <label className="text-xs text-gray-400 flex items-center gap-1"><Lock className="h-3 w-3" /> {t.vendorProfile.loginEmail}</label>
+          <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mt-1">{session?.user?.email ?? '—'}</p>
+          <p className="text-xs text-gray-400 mt-1">{t.vendorProfile.loginEmailNote}</p>
+        </div>
         <p className="text-xs text-gray-400">{t.vendorProfile.lockedNote}</p>
 
         <Separator />
