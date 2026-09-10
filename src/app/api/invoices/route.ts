@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { requireAuth, requireRole, unlinkedVendorResponse } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
-import { createInvoiceSchema, validationErrorResponse } from '@/lib/validations'
+import { createInvoiceSchema, validationErrorResponse, DRAFT_PO_PLACEHOLDER } from '@/lib/validations'
 import { buildDashboardFilter } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
@@ -64,7 +64,11 @@ export async function POST(req: NextRequest) {
       vendorId: effectiveVendorId as string,
       companyId: data.companyId ?? null,
       invoiceNumber: data.invoiceNumber,
-      poNumber: data.poNumber,
+      // po_number is NOT NULL, and the upload wizard's draft row is created
+      // before the document has been read. The schema only lets the PO be
+      // omitted for a draft, and PATCH refuses to promote a draft still
+      // carrying this marker — see validateReadyToGoLive.
+      poNumber: data.poNumber ?? DRAFT_PO_PLACEHOLDER,
       invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       currency: data.currency,

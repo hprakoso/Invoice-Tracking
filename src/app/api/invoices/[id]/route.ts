@@ -8,6 +8,7 @@ import {
   validateInvoiceDates,
   validationErrorResponse,
   isValidStatusTransition,
+  validateReadyToGoLive,
   TERMINAL_STATUSES,
 } from '@/lib/validations'
 import { canVendorEdit, NON_OPEN_STATUSES } from '@/lib/invoiceStatus'
@@ -115,7 +116,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     select: {
       status: true, sendDate: true, deliveredDate: true, vendorId: true,
       createdById: true, totalAmount: true, invoiceNumber: true, notes: true,
-      invoiceDate: true, dueDate: true,
+      invoiceDate: true, dueDate: true, poNumber: true, companyId: true, isDraft: true,
     },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -160,6 +161,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     )
     if (!orderCheck.valid) {
       return NextResponse.json({ error: orderCheck.message }, { status: 400 })
+    }
+  }
+
+  // Draft -> live gate. Scoped to the transition itself (not to every PATCH
+  // that happens to carry `isDraft: false`) so editing a legacy live invoice
+  // that predates the company requirement is never blocked by it.
+  if (filtered.isDraft === false && current.isDraft) {
+    const readyCheck = validateReadyToGoLive({
+      poNumber: filtered.poNumber ?? current.poNumber,
+      companyId: filtered.companyId !== undefined ? filtered.companyId : current.companyId,
+    })
+    if (!readyCheck.valid) {
+      return NextResponse.json({ error: readyCheck.message }, { status: 400 })
     }
   }
 

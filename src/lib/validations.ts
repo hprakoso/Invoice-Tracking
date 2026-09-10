@@ -61,6 +61,24 @@ export { INVOICE_STATUSES, TERMINAL_STATUSES, VALID_TRANSITIONS, isValidStatusTr
 // vendor uploads an invoice.
 export const PIC_STAGES = ['GA', 'BUDGET', 'PROC_LEGAL', 'SSU', 'TREASURY'] as const
 
+/**
+ * `invoices.po_number` is NOT NULL, but the document-first upload wizard has
+ * no PO to write when it creates the pre-OCR draft row — the PO is read off
+ * the document (or typed by the user) at the confirmation step, which happens
+ * after the row must already exist. Draft rows therefore carry this marker
+ * until then, and `assertReadyToGoLive` refuses to let one reach a live
+ * invoice.
+ *
+ * Deliberately not 'N/A': migration 20260901000000 backfilled real pre-PO rows
+ * with that string, so reusing it would make genuine historical data
+ * indistinguishable from an unfinished draft.
+ */
+export const DRAFT_PO_PLACEHOLDER = 'PENDING-OCR'
+
+export function isPlaceholderPoNumber(poNumber: string | null | undefined): boolean {
+  return !poNumber?.trim() || poNumber.trim() === DRAFT_PO_PLACEHOLDER
+}
+
 export const createInvoiceSchema = z.object({
   vendorId: z.string().uuid('Invalid vendor ID'),
   companyId: z.string().uuid('Invalid company ID').optional().nullable(),
@@ -68,7 +86,9 @@ export const createInvoiceSchema = z.object({
   // case-insensitive duplicate check and the lower() unique index treat padded
   // strings as distinct, so two live invoices could exist for one document.
   invoiceNumber: z.string().trim().min(1, 'Invoice number required').max(100),
-  poNumber: z.string().trim().min(1, 'PO number required').max(100),
+  // Optional ONLY for a draft — see the refine below and DRAFT_PO_PLACEHOLDER.
+  // A direct (non-draft) create still requires it exactly as before.
+  poNumber: z.string().trim().min(1, 'PO number required').max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
   currency: z.string().length(3).default('IDR'),
@@ -87,6 +107,13 @@ export const createInvoiceSchema = z.object({
   .refine((d) => validateInvoiceDates(d.invoiceDate, d.dueDate).valid, {
     message: 'dueDate cannot be earlier than invoiceDate',
     path: ['dueDate'],
+  })
+  // A draft may omit the PO (the wizard has not read the document yet); every
+  // other caller must still supply one, so the pre-existing contract for
+  // direct invoice creation is unchanged.
+  .refine((d) => d.isDraft === true || !!d.poNumber, {
+    message: 'PO number required',
+    path: ['poNumber'],
   })
   // Only checked on create, where all three figures come from one source at
   // once. PATCH deliberately does NOT block this: a user correcting a single
@@ -227,6 +254,35 @@ export const createUserSchema = z
     message: 'vendorId is required for VENDOR role',
     path: ['vendorId'],
   })
+
+/**
+ * The draft -> live boundary. Nothing used to guard it: `isDraft: false` had
+ * no precondition, so whatever placeholders the wizard created went live
+ * untouched.
+ *
+ * It matters more now that neither value is collected before upload. A
+ * placeholder PO is not inert — the dashboard and invoice list filter PO with
+ * a `contains` match, so a shared token returns whole batches, and the Excel
+ * export writes it verbatim. A null company is worse: the invoice still lists,
+ * but it is unreachable from every company-scoped filter, KPI breakdown,
+ * export and chatbot answer, with no queue anywhere flagging that it needs one.
+ *
+ * Both were already mandatory in practice — the old wizard hard-blocked on
+ * them before the file was even chosen. This keeps the rule and only moves
+ * where it is enforced, from the browser to the server.
+ */
+export function validateReadyToGoLive(invoice: {
+  poNumber?: string | null
+  companyId?: string | null
+}): { valid: boolean; message?: string } {
+  if (isPlaceholderPoNumber(invoice.poNumber)) {
+    return { valid: false, message: 'PO number is required before submitting this invoice' }
+  }
+  if (!invoice.companyId) {
+    return { valid: false, message: 'Bill-to company is required before submitting this invoice' }
+  }
+  return { valid: true }
+}
 
 // deliveredDate (GA Staff received the hardcopy) can never predate sendDate (vendor sent it)
 export function validateDeliveryDates(

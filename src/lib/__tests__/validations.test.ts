@@ -5,17 +5,59 @@ import {
   updateInvoiceStageSchema,
   validateDeliveryDates,
   validateInvoiceDates,
+  validateReadyToGoLive,
+  isPlaceholderPoNumber,
+  DRAFT_PO_PLACEHOLDER,
 } from '../validations'
 
 describe('createInvoiceSchema', () => {
+  const base = {
+    vendorId: '00000000-0000-4000-8000-000000000000',
+    invoiceNumber: 'INV-2026-0001',
+    totalAmount: 1000000,
+  }
+
   it('requires poNumber', () => {
-    const base = {
-      vendorId: '00000000-0000-4000-8000-000000000000',
-      invoiceNumber: 'INV-2026-0001',
-      totalAmount: 1000000,
-    }
     expect(createInvoiceSchema.safeParse(base).success).toBe(false)
     expect(createInvoiceSchema.safeParse({ ...base, poNumber: 'PO-2026-0001' }).success).toBe(true)
+  })
+
+  // The document-first wizard creates its row before the document has been
+  // read, so it has no PO yet. Only a draft gets that exemption.
+  it('exempts a draft from the poNumber requirement', () => {
+    expect(createInvoiceSchema.safeParse({ ...base, isDraft: true }).success).toBe(true)
+    expect(createInvoiceSchema.safeParse({ ...base, isDraft: false }).success).toBe(false)
+  })
+})
+
+describe('validateReadyToGoLive', () => {
+  const ready = { poNumber: 'PO-2026-0001', companyId: '00000000-0000-4000-8000-000000000000' }
+
+  it('accepts a draft carrying a real PO and a company', () => {
+    expect(validateReadyToGoLive(ready).valid).toBe(true)
+  })
+
+  it('refuses the placeholder PO the draft row was created with', () => {
+    expect(validateReadyToGoLive({ ...ready, poNumber: DRAFT_PO_PLACEHOLDER }).valid).toBe(false)
+    expect(validateReadyToGoLive({ ...ready, poNumber: ` ${DRAFT_PO_PLACEHOLDER} ` }).valid).toBe(false)
+  })
+
+  it('refuses a blank PO', () => {
+    expect(validateReadyToGoLive({ ...ready, poNumber: '' }).valid).toBe(false)
+    expect(validateReadyToGoLive({ ...ready, poNumber: '   ' }).valid).toBe(false)
+    expect(validateReadyToGoLive({ ...ready, poNumber: null }).valid).toBe(false)
+  })
+
+  it('refuses an unresolved company', () => {
+    expect(validateReadyToGoLive({ ...ready, companyId: null }).valid).toBe(false)
+    expect(validateReadyToGoLive({ ...ready, companyId: undefined }).valid).toBe(false)
+  })
+
+  // 'N/A' is what migration 20260901000000 backfilled onto real pre-PO rows,
+  // so it must stay a legitimate value rather than reading as an unfinished draft.
+  it("does not treat the historical 'N/A' backfill as a placeholder", () => {
+    expect(isPlaceholderPoNumber('N/A')).toBe(false)
+    expect(validateReadyToGoLive({ ...ready, poNumber: 'N/A' }).valid).toBe(true)
   })
 })
 
