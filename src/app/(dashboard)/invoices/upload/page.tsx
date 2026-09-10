@@ -203,7 +203,11 @@ export default function UploadPage() {
       accepted.push(f)
     }
     setStagedFiles((prev) => {
-      const room = MAX_DOCUMENTS_PER_INVOICE - prev.length
+      // Counts documents already stored on the draft, not just what is staged:
+      // a retry after a partial upload has rows on the server that the route's
+      // own cap will count, so ignoring them here would let the user stage
+      // files that are then rejected one by one.
+      const room = MAX_DOCUMENTS_PER_INVOICE - prev.length - docs.length
       if (accepted.length > room) {
         toast.error(t.upload.tooManyFiles.replace('{max}', String(MAX_DOCUMENTS_PER_INVOICE)))
       }
@@ -230,6 +234,16 @@ export default function UploadPage() {
     setFields((prev) =>
       prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ key: f.key, label: t.upload[f.labelKey], value: null, confidence: 0 })),
     )
+  }
+
+  // The invoice's documents as the server actually holds them. Reuses the
+  // detail endpoint rather than adding a list route — it already returns
+  // `documents[]` ordered by creation.
+  async function refreshDocs(id: string) {
+    const res = await fetch(`/api/invoices/${id}`)
+    if (!res.ok) return
+    const invoice: { documents?: UploadedDoc[] } = await res.json()
+    if (Array.isArray(invoice.documents)) setDocs(invoice.documents)
   }
 
   /**
@@ -289,7 +303,15 @@ export default function UploadPage() {
       // a single file, and for the handful a submission carries, N requests
       // beats a new batch endpoint. Sequential so a partial failure is
       // attributable to a named file.
-      const uploaded: UploadedDoc[] = []
+      //
+      // Each file is isolated in its own try: a thrown fetch (offline, reset
+      // connection, restarted server) must not abort the files after it. Every
+      // failure is kept in `failed`, and only those stay staged — retrying
+      // then re-uploads exactly what is missing instead of duplicating the
+      // documents that already landed, since the route has no idempotency key
+      // and would happily create a second row per file.
+      let uploadedCount = 0
+      const failed: File[] = []
       for (const [i, f] of stagedFiles.entries()) {
         setStatusMsg(
           t.upload.uploadingProgress
@@ -298,21 +320,34 @@ export default function UploadPage() {
         )
         const fd = new FormData()
         fd.append('file', f)
-        const res = await fetch(`/api/invoices/${id}/upload`, { method: 'POST', body: fd })
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}))
-          toast.error(`${f.name}: ${data.error ?? t.upload.uploadFailed}`)
-          continue
+        try {
+          const res = await fetch(`/api/invoices/${id}/upload`, { method: 'POST', body: fd })
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}))
+            toast.error(`${f.name}: ${data.error ?? t.upload.uploadFailed}`)
+            failed.push(f)
+            continue
+          }
+          await res.json()
+          uploadedCount++
+        } catch {
+          toast.error(`${f.name}: ${t.upload.uploadFailed}`)
+          failed.push(f)
         }
-        uploaded.push(await res.json())
       }
+      setStagedFiles(failed)
 
-      if (uploaded.length === 0) throw new Error(t.upload.uploadFailed)
-      setDocs(uploaded)
+      if (uploadedCount === 0) throw new Error(t.upload.uploadFailed)
+
+      // Read the document list back from the server rather than trusting what
+      // this run happened to upload. A previous partially-failed attempt can
+      // have left rows on the same draft, and a list built only from this
+      // attempt's responses would hide them — leaving documents the user
+      // cannot see, relabel or remove, which then surface after submit.
+      await refreshDocs(id)
       // Everything that follows is post-upload: the files are safely stored, so
       // any failure from here falls back to manual entry on the review step and
       // never back to the file picker.
-      setStagedFiles([])
       runExtraction(id)
     } catch (err) {
       const msg = err instanceof Error ? err.message : t.common.unknownError
@@ -490,6 +525,10 @@ export default function UploadPage() {
     // The confirmation step is the last place these can be corrected, and the
     // server rejects the draft->live transition without them. Checked here too
     // so the user gets a pointed message instead of a generic 400.
+    if (docs.length === 0) {
+      toast.error(t.upload.noDocumentsAttached)
+      return
+    }
     const invoiceNumber = editableValues['invoice_number']?.trim()
     if (!invoiceNumber) {
       toast.error(t.upload.invoiceNumberRequiredConfirm)
@@ -972,7 +1011,7 @@ export default function UploadPage() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-2">
-            <Button onClick={confirmAndSubmit} disabled={uploadingExtra || submitting} className="flex-1 gap-2">
+            <Button onClick={confirmAndSubmit} disabled={uploadingExtra || submitting || docs.length === 0} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
               {t.upload.confirmAndSubmit}
             </Button>

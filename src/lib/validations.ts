@@ -274,7 +274,19 @@ export const createUserSchema = z
 export function validateReadyToGoLive(invoice: {
   poNumber?: string | null
   companyId?: string | null
+  /**
+   * Documents currently attached. Required rather than optional so a caller
+   * cannot forget it: before the document-first flow a file had to exist
+   * before the row was even created, so "a live invoice with no document" was
+   * unreachable. It is reachable now — the review step lets the user delete
+   * documents — and such an invoice gives GA nothing to verify while still
+   * carrying figures extracted from a file that no longer exists.
+   */
+  documentCount: number
 }): { valid: boolean; message?: string } {
+  if (invoice.documentCount < 1) {
+    return { valid: false, message: 'At least one document is required before submitting this invoice' }
+  }
   if (isPlaceholderPoNumber(invoice.poNumber)) {
     return { valid: false, message: 'PO number is required before submitting this invoice' }
   }

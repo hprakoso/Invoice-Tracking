@@ -328,6 +328,7 @@ const en: Dictionary = {
     removeStagedFile: 'Remove file',
     processDocuments: 'Upload & process documents',
     noFilesSelected: 'Attach at least one document first',
+    noDocumentsAttached: 'Attach at least one document before submitting',
     tooManyFiles: 'Maximum {max} documents per submission',
     fileTooLarge: '{name} exceeds the {max} limit',
     fileTypeRejected: '{name} is not a PDF, JPG or PNG',

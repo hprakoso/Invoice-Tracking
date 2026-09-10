@@ -171,6 +171,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const readyCheck = validateReadyToGoLive({
       poNumber: filtered.poNumber ?? current.poNumber,
       companyId: filtered.companyId !== undefined ? filtered.companyId : current.companyId,
+      documentCount: await prisma.invoiceDocument.count({ where: { invoiceId: id } }),
     })
     if (!readyCheck.valid) {
       return NextResponse.json({ error: readyCheck.message }, { status: 400 })

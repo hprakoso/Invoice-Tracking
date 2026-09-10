@@ -326,6 +326,7 @@ const id = {
     removeStagedFile: 'Hapus file',
     processDocuments: 'Unggah & proses dokumen',
     noFilesSelected: 'Lampirkan minimal satu dokumen terlebih dahulu',
+    noDocumentsAttached: 'Lampirkan minimal satu dokumen sebelum mengirim',
     tooManyFiles: 'Maksimal {max} dokumen per pengajuan',
     fileTooLarge: '{name} melebihi batas {max}',
     fileTypeRejected: '{name} bukan file PDF, JPG atau PNG',
