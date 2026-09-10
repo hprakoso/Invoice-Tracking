@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { useSession } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft, ArrowRight, Plus } from 'lucide-react'
+import { Upload, FileText, Image as ImageIcon, CheckCircle, AlertTriangle, Loader2, ArrowLeft, Plus, X, Lock, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
@@ -14,6 +14,13 @@ import { useRouter } from 'next/navigation'
 import { useI18n } from '@/hooks/useI18n'
 import type { Dictionary } from '@/lib/i18n'
 import { formatIDR, parseAmountID } from '@/lib/format'
+import {
+  ACCEPTED_MIME_TYPES,
+  DROPZONE_ACCEPT,
+  MAX_DOCUMENTS_PER_INVOICE,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_LABEL,
+} from '@/lib/uploadLimits'
 
 interface ExtractedField {
   key: string
@@ -30,8 +37,9 @@ interface LineItem {
 }
 
 // Matches the server's field order in GET /api/invoices/[id]/ocr — used to
-// populate 8 empty, manually-fillable fields when OCR fails entirely (no
-// 'field' events ever arrive), so review never shows a blank form.
+// populate empty, manually-fillable fields when OCR produces nothing (either
+// it failed outright, or no uploaded document could be identified as the
+// invoice), so review never shows a blank form.
 const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
   { key: 'vendor_name', labelKey: 'fieldVendorName' },
   { key: 'invoice_number', labelKey: 'fieldInvoiceNumber' },
@@ -44,17 +52,28 @@ const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
   { key: 'total_amount', labelKey: 'fieldTotalAmount' },
 ]
 
-type UploadStage = 'select' | 'drop' | 'uploading' | 'ocr' | 'review' | 'done'
+// STEP 1 upload -> STEP 2 processing (uploading + ocr) -> STEP 3 review -> STEP 4 done.
+type UploadStage = 'upload' | 'uploading' | 'ocr' | 'review' | 'done'
 
 const DOC_TYPE_KEYS = ['INVOICE', 'TAX_INVOICE', 'BAST', 'OTHER'] as const
 
-// One row of the supporting-documents list on the review step. Mirrors the
-// InvoiceDocument the upload route returns.
+// One row of the documents list. Mirrors the InvoiceDocument the upload route
+// returns.
 interface UploadedDoc {
   id: string
   type: string
   originalName: string
   classificationConfidence: number | null
+}
+
+// The server's bill-to resolution: what it read off the document, and which
+// Company row (if any) that resolved to.
+interface CompanyMatch {
+  companyId: string | null
+  status: 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS'
+  matchedOn: 'npwp' | 'name' | null
+  extractedName: string | null
+  extractedNpwp: string | null
 }
 
 function ConfidenceBar({ confidence }: { confidence: number }) {
@@ -105,22 +124,28 @@ export default function UploadPage() {
   const canAssignPic = isGaStaff || role === 'GA_MANAGER'
   const sessionVendorId = (session?.user as { vendorId?: string | null })?.vendorId
 
-  const [stage, setStage] = useState<UploadStage>('select')
+  const [stage, setStage] = useState<UploadStage>('upload')
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
   const [companyIdValue, setCompanyIdValue] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState('')
-  const [poNumberValue, setPoNumberValue] = useState('')
+  const [sessionVendorName, setSessionVendorName] = useState('')
 
-  const [file, setFile] = useState<File | null>(null)
-  // Supporting documents (tax invoice, BAST, ...) uploaded alongside the
-  // invoice. The invoice file itself stays in `file` — it's the one that
-  // drives OCR and the review form.
-  const [extraDocs, setExtraDocs] = useState<UploadedDoc[]>([])
+  // Files staged in the browser before anything is sent. The whole set is
+  // uploaded in one action, so nothing reaches the server until the user is
+  // done attaching.
+  const [stagedFiles, setStagedFiles] = useState<File[]>([])
+  const [docs, setDocs] = useState<UploadedDoc[]>([])
   const [uploadingExtra, setUploadingExtra] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [fields, setFields] = useState<ExtractedField[]>([])
   const [ocrFailed, setOcrFailed] = useState(false)
+  // No uploaded document could be confidently identified as the invoice, so
+  // extraction never ran. Distinct from ocrFailed: nothing went wrong, the
+  // set just doesn't say which file to read.
+  const [needsInvoiceSelection, setNeedsInvoiceSelection] = useState(false)
+  const [drivingDocumentId, setDrivingDocumentId] = useState<string | null>(null)
+  const [companyMatch, setCompanyMatch] = useState<CompanyMatch | null>(null)
   const [lineItems, setLineItems] = useState<LineItem[]>([])
   const [overallConfidence, setOverallConfidence] = useState(0)
   const [invoiceId, setInvoiceId] = useState<string | null>(null)
@@ -128,6 +153,7 @@ export default function UploadPage() {
   const [sendDateValue, setSendDateValue] = useState('')
   const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
   const [picIdValue, setPicIdValue] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -140,71 +166,103 @@ export default function UploadPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role])
 
-  // Resolved once the user leaves the 'select' stage: the vendor's own id for
-  // VENDOR callers, or whichever vendor a GA/Admin picked. Never defaults to
-  // "the first vendor in the list" — that was a real bug (wrong vendor billed).
-  const effectiveVendorId = isVendor ? sessionVendorId : selectedVendorId
+  // A vendor never picks their vendor — it comes from the account. Fetched only
+  // to display the name; the id that matters is the one the server derives from
+  // the session, never this.
+  useEffect(() => {
+    if (!isVendor || !sessionVendorId) return
+    fetch(`/api/vendors/${sessionVendorId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { name?: string } | null) => {
+        if (d?.name) setSessionVendorName(d.name)
+      })
+      .catch(() => {})
+  }, [isVendor, sessionVendorId])
 
-  function continueFromSelect() {
-    if (!companyIdValue) {
-      toast.error(t.upload.companyRequired)
+  // The vendor's own id for VENDOR callers, or whichever vendor a GA/Admin
+  // picked. Never defaults to "the first vendor in the list" — that was a real
+  // bug (wrong vendor billed). For a VENDOR the server ignores whatever is sent
+  // and uses the session's vendor regardless, so this is display/guard only.
+  const effectiveVendorId = isVendor ? sessionVendorId : selectedVendorId
+  const selectedVendorName = isVendor
+    ? sessionVendorName
+    : vendors.find((v) => v.id === selectedVendorId)?.name
+
+  function addFiles(incoming: File[]) {
+    if (incoming.length === 0) return
+    const accepted: File[] = []
+    for (const f of incoming) {
+      if (!(ACCEPTED_MIME_TYPES as readonly string[]).includes(f.type)) {
+        toast.error(t.upload.fileTypeRejected.replace('{name}', f.name))
+        continue
+      }
+      if (f.size > MAX_FILE_SIZE_BYTES) {
+        toast.error(t.upload.fileTooLarge.replace('{name}', f.name).replace('{max}', MAX_FILE_SIZE_LABEL))
+        continue
+      }
+      accepted.push(f)
+    }
+    setStagedFiles((prev) => {
+      const room = MAX_DOCUMENTS_PER_INVOICE - prev.length
+      if (accepted.length > room) {
+        toast.error(t.upload.tooManyFiles.replace('{max}', String(MAX_DOCUMENTS_PER_INVOICE)))
+      }
+      return [...prev, ...accepted.slice(0, Math.max(0, room))]
+    })
+  }
+
+  // Not useCallback: react-dropzone re-subscribes fine on a new callback each
+  // render, and a memoized-with-[] version froze this closure's state at its
+  // initial value forever.
+  function onDrop(accepted: File[]) {
+    addFiles(accepted)
+  }
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: DROPZONE_ACCEPT,
+    multiple: true,
+    maxFiles: MAX_DOCUMENTS_PER_INVOICE,
+    disabled: stage !== 'upload',
+  })
+
+  function fallbackToManualFields() {
+    setFields((prev) =>
+      prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ key: f.key, label: t.upload[f.labelKey], value: null, confidence: 0 })),
+    )
+  }
+
+  /**
+   * STEP 2. Creates the draft row, uploads every staged file, then streams the
+   * OCR result. The row has to exist before the uploads (each file attaches to
+   * its id), but it isn't an invoice until the review step is confirmed — until
+   * then `isDraft` keeps it out of every KPI, list, export and reminder, so
+   * abandoning the wizard leaves nothing behind that anyone has to chase.
+   */
+  async function processDocuments() {
+    if (stagedFiles.length === 0) {
+      toast.error(t.upload.noFilesSelected)
       return
     }
     if (!isVendor && !selectedVendorId) {
       toast.error(t.upload.vendorRequired)
       return
     }
-    if (!poNumberValue.trim()) {
-      toast.error(t.upload.poRequired)
-      return
-    }
-    setStage('drop')
-  }
 
-  // Not useCallback: react-dropzone re-subscribes fine on a new callback each
-  // render, and a memoized-with-[] version froze this closure's companyIdValue
-  // at its initial '' forever, so every drop sent companyId: '' regardless of
-  // what the user picked in the select stage.
-  async function onDrop(accepted: File[]) {
-    const f = accepted[0]
-    if (!f) return
-    setFile(f)
-    await runOCR(f)
-  }
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'application/pdf': ['.pdf'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png'],
-    },
-    maxFiles: 1,
-    disabled: stage !== 'drop',
-  })
-
-  function fallbackToManualFields() {
-    setOcrFailed(true)
-    setFields((prev) =>
-      prev.length > 0 ? prev : FIELD_DEFS.map((f) => ({ key: f.key, label: t.upload[f.labelKey], value: null, confidence: 0 })),
-    )
-  }
-
-  async function runOCR(uploadFile: File) {
     setStage('uploading')
     setStatusMsg(t.upload.creatingRecord)
     setFields([])
     setLineItems([])
     setOcrFailed(false)
+    setNeedsInvoiceSelection(false)
 
     try {
       if (!effectiveVendorId) throw new Error(t.upload.vendorNotSelected)
 
-      // 1. Create the invoice record — but only once. Retrying after a failed
-      // upload/OCR reuses the row created by the previous attempt instead of
-      // orphaning it: this catch block leaves `invoiceId` set on purpose, and
-      // re-POSTing here would leave a stray placeholder invoice behind on
-      // every retry. Cleared only by resetWizard().
+      // Created once. Retrying after a failed upload/OCR reuses the row from
+      // the previous attempt instead of orphaning it — re-POSTing here would
+      // leave a stray placeholder invoice behind on every retry. Cleared only
+      // by resetWizard().
       let id = invoiceId
       if (!id) {
         const createRes = await fetch('/api/invoices', {
@@ -212,15 +270,12 @@ export default function UploadPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             vendorId: effectiveVendorId,
-            companyId: companyIdValue,
             invoiceNumber: `DRAFT-${Date.now()}`,
-            poNumber: poNumberValue.trim(),
             totalAmount: 0,
-            // The row has to exist before OCR (the file attaches to its id),
-            // but it isn't an invoice until the review step is confirmed.
-            // Until then it stays out of every KPI, list, export and reminder,
-            // so abandoning the wizard leaves nothing behind that anyone has to
-            // chase or clean up.
+            // No companyId and no poNumber: both are read off the documents (or
+            // typed at the confirmation step) and neither exists yet. The
+            // server fills a PO placeholder and refuses to let the draft go
+            // live still carrying it.
             isDraft: true,
           }),
         })
@@ -230,83 +285,150 @@ export default function UploadPage() {
         setInvoiceId(id)
       }
 
-      // 2. Upload file
-      setStatusMsg(t.upload.uploadingFile)
-      const formData = new FormData()
-      formData.append('file', uploadFile)
-      // The invoice file itself: skip the standalone classify call, the OCR
-      // extraction below classifies it in the same request it already makes.
-      formData.append('primary', 'true')
-      const uploadRes = await fetch(`/api/invoices/${id}/upload`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (!uploadRes.ok) throw new Error(t.upload.uploadFailed)
-
-      // 3. SSE OCR stream — the upload itself already succeeded at this point,
-      // so any failure from here on falls back to manual entry (review stage
-      // with empty fields), never back to 'drop'. The file stays uploaded.
-      setStage('ocr')
-      setStatusMsg(t.upload.startingOcr)
-
-      const es = new EventSource(`/api/invoices/${id}/ocr`)
-
-      es.addEventListener('status', (e) => {
-        const d = JSON.parse((e as MessageEvent).data)
-        setStatusMsg(d.message)
-      })
-
-      es.addEventListener('field', (e) => {
-        const d: ExtractedField = JSON.parse((e as MessageEvent).data)
-        setFields((prev) => [...prev, d])
-        setEditableValues((prev) => ({ ...prev, [d.key]: d.value ?? '' }))
-      })
-
-      es.addEventListener('line_items', (e) => {
-        const d = JSON.parse((e as MessageEvent).data)
-        setLineItems(d.items ?? [])
-      })
-
-      es.addEventListener('done', (e) => {
-        const d = JSON.parse((e as MessageEvent).data)
-        setOverallConfidence(d.overallConfidence ?? 0)
-        setStatusMsg(d.message)
-        setStage('review')
-        es.close()
-        toast.success(t.upload.ocrComplete)
-      })
-
-      es.addEventListener('error', (e) => {
-        try {
-          const d = JSON.parse((e as MessageEvent).data ?? '{}')
-          setStatusMsg(d.message ?? t.upload.ocrFailedStatus)
-        } catch {
-          setStatusMsg(t.upload.ocrFailedStatus)
+      // Uploaded one request each — the route already validates and classifies
+      // a single file, and for the handful a submission carries, N requests
+      // beats a new batch endpoint. Sequential so a partial failure is
+      // attributable to a named file.
+      const uploaded: UploadedDoc[] = []
+      for (const [i, f] of stagedFiles.entries()) {
+        setStatusMsg(
+          t.upload.uploadingProgress
+            .replace('{current}', String(i + 1))
+            .replace('{total}', String(stagedFiles.length)),
+        )
+        const fd = new FormData()
+        fd.append('file', f)
+        const res = await fetch(`/api/invoices/${id}/upload`, { method: 'POST', body: fd })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          toast.error(`${f.name}: ${data.error ?? t.upload.uploadFailed}`)
+          continue
         }
-        setStage('review')
-        fallbackToManualFields()
-        es.close()
-        toast.error(t.upload.ocrFailedToast)
-      })
-
-      es.onerror = () => {
-        setStage('review')
-        fallbackToManualFields()
-        es.close()
-        toast.error(t.upload.connectionLost)
+        uploaded.push(await res.json())
       }
+
+      if (uploaded.length === 0) throw new Error(t.upload.uploadFailed)
+      setDocs(uploaded)
+      // Everything that follows is post-upload: the files are safely stored, so
+      // any failure from here falls back to manual entry on the review step and
+      // never back to the file picker.
+      setStagedFiles([])
+      runExtraction(id)
     } catch (err) {
       const msg = err instanceof Error ? err.message : t.common.unknownError
       toast.error(msg)
-      setStage('drop')
+      setStage('upload')
     }
   }
 
-  // Supporting documents are uploaded one request each — the existing route
-  // already validates and classifies a single file, and for the handful of
-  // documents a submission carries, N requests beats a new batch endpoint.
-  async function uploadExtraDocs(files: File[]) {
+  /**
+   * Opens the OCR stream. With no documentId the server picks the document it
+   * classified as the invoice; with one, it reads exactly that document — the
+   * path taken when the user resolves an unidentified set on the review step.
+   */
+  function runExtraction(id: string, documentId?: string) {
+    setStage('ocr')
+    setStatusMsg(documentId ? t.upload.reExtracting : t.upload.classifyingDocuments)
+    setOcrFailed(false)
+    setNeedsInvoiceSelection(false)
+    setFields([])
+    setLineItems([])
+
+    const url = documentId
+      ? `/api/invoices/${id}/ocr?documentId=${encodeURIComponent(documentId)}`
+      : `/api/invoices/${id}/ocr`
+    const es = new EventSource(url)
+
+    es.addEventListener('status', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setStatusMsg(d.message)
+    })
+
+    es.addEventListener('driving_document', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setDrivingDocumentId(d.documentId)
+    })
+
+    // No document could be identified as the invoice. Nothing was extracted on
+    // purpose — reading the bill-to and PO off a faktur pajak or a BAST would
+    // produce confidently wrong data. The review step asks the user which file
+    // is the invoice and re-runs against it.
+    es.addEventListener('needs_invoice_selection', () => {
+      setNeedsInvoiceSelection(true)
+      setDrivingDocumentId(null)
+      fallbackToManualFields()
+      setStage('review')
+      es.close()
+    })
+
+    es.addEventListener('document_type', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setDocs((prev) =>
+        prev.map((doc) =>
+          doc.id === d.documentId
+            ? { ...doc, type: d.type, classificationConfidence: d.confidence }
+            : doc,
+        ),
+      )
+    })
+
+    es.addEventListener('company', (e) => {
+      const d: CompanyMatch = JSON.parse((e as MessageEvent).data)
+      setCompanyMatch(d)
+      // Pre-selection only — the user can still change it below.
+      if (d.companyId) setCompanyIdValue(d.companyId)
+    })
+
+    es.addEventListener('field', (e) => {
+      const d: ExtractedField = JSON.parse((e as MessageEvent).data)
+      setFields((prev) => [...prev, d])
+      setEditableValues((prev) => ({ ...prev, [d.key]: d.value ?? '' }))
+    })
+
+    es.addEventListener('line_items', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setLineItems(d.items ?? [])
+    })
+
+    es.addEventListener('done', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setOverallConfidence(d.overallConfidence ?? 0)
+      setStatusMsg(d.message)
+      setStage('review')
+      es.close()
+      toast.success(t.upload.ocrComplete)
+    })
+
+    es.addEventListener('error', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data ?? '{}')
+        setStatusMsg(d.message ?? t.upload.ocrFailedStatus)
+      } catch {
+        setStatusMsg(t.upload.ocrFailedStatus)
+      }
+      setStage('review')
+      setOcrFailed(true)
+      fallbackToManualFields()
+      es.close()
+      toast.error(t.upload.ocrFailedToast)
+    })
+
+    es.onerror = () => {
+      setStage('review')
+      setOcrFailed(true)
+      fallbackToManualFields()
+      es.close()
+      toast.error(t.upload.connectionLost)
+    }
+  }
+
+  // Adding a document from the review step, after the initial batch.
+  async function uploadMoreDocs(files: File[]) {
     if (!invoiceId || files.length === 0) return
+    if (docs.length + files.length > MAX_DOCUMENTS_PER_INVOICE) {
+      toast.error(t.upload.tooManyFiles.replace('{max}', String(MAX_DOCUMENTS_PER_INVOICE)))
+      return
+    }
     setUploadingExtra(true)
     for (const f of files) {
       const fd = new FormData()
@@ -318,7 +440,7 @@ export default function UploadPage() {
         continue
       }
       const doc: UploadedDoc = await res.json()
-      setExtraDocs((prev) => [...prev, doc])
+      setDocs((prev) => [...prev, doc])
     }
     setUploadingExtra(false)
   }
@@ -334,8 +456,9 @@ export default function UploadPage() {
       return
     }
     // Confidence is cleared server-side once a human sets the type, so the
-    // row stops rendering as an AI guess.
-    setExtraDocs((prev) =>
+    // row stops rendering as an AI guess — and the OCR route treats that null
+    // as "a person decided this" and won't overwrite it.
+    setDocs((prev) =>
       prev.map((d) => (d.id === documentId ? { ...d, type, classificationConfidence: null } : d)),
     )
   }
@@ -346,20 +469,53 @@ export default function UploadPage() {
       toast.error(t.upload.docRemoveFailed)
       return
     }
-    setExtraDocs((prev) => prev.filter((d) => d.id !== documentId))
+    setDocs((prev) => prev.filter((d) => d.id !== documentId))
+    if (drivingDocumentId === documentId) setDrivingDocumentId(null)
+  }
+
+  // Resolves the "which file is the invoice?" state: extraction re-runs against
+  // whichever document the user marked INVOICE.
+  function extractFromSelectedInvoice() {
+    const target = docs.find((d) => d.type === 'INVOICE')
+    if (!invoiceId || !target) {
+      toast.error(t.upload.noInvoiceSelected)
+      return
+    }
+    runExtraction(invoiceId, target.id)
   }
 
   async function confirmAndSubmit() {
     if (!invoiceId) return
+
+    // The confirmation step is the last place these can be corrected, and the
+    // server rejects the draft->live transition without them. Checked here too
+    // so the user gets a pointed message instead of a generic 400.
+    const invoiceNumber = editableValues['invoice_number']?.trim()
+    if (!invoiceNumber) {
+      toast.error(t.upload.invoiceNumberRequiredConfirm)
+      return
+    }
+    const poNumber = editableValues['po_number']?.trim()
+    if (!poNumber) {
+      toast.error(t.upload.poRequiredConfirm)
+      return
+    }
+    if (!companyIdValue) {
+      toast.error(t.upload.companyRequiredConfirm)
+      return
+    }
+
     const vendorNameField = editableValues['vendor_name']
     const totalField = editableValues['total_amount']
 
+    setSubmitting(true)
     const res = await fetch(`/api/invoices/${invoiceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        invoiceNumber: editableValues['invoice_number'] || `INV-${Date.now()}`,
-        poNumber: editableValues['po_number'] || poNumberValue.trim() || undefined,
+        invoiceNumber,
+        poNumber,
+        companyId: companyIdValue,
         invoiceDate: editableValues['invoice_date'] || null,
         dueDate: editableValues['due_date'] || null,
         // parseAmountID, not parseFloat: '1.500.000' is one and a half million
@@ -376,6 +532,7 @@ export default function UploadPage() {
         isDraft: false,
       }),
     })
+    setSubmitting(false)
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
@@ -398,24 +555,31 @@ export default function UploadPage() {
   }
 
   function resetWizard() {
-    setStage('select')
-    setFile(null)
+    setStage('upload')
+    setStagedFiles([])
+    setDocs([])
     setFields([])
     setOcrFailed(false)
+    setNeedsInvoiceSelection(false)
+    setDrivingDocumentId(null)
+    setCompanyMatch(null)
     setLineItems([])
     setInvoiceId(null)
     setEditableValues({})
     setOverallConfidence(0)
     setCompanyIdValue('')
     setSelectedVendorId('')
-    setPoNumberValue('')
-    setExtraDocs([])
   }
 
-  const selectedCompanyName = companies.find((c) => c.id === companyIdValue)?.name
-  const selectedVendorName = isVendor
-    ? undefined
-    : vendors.find((v) => v.id === selectedVendorId)?.name
+  const companyHint = !companyMatch
+    ? null
+    : companyMatch.status === 'MATCHED'
+      ? companyMatch.matchedOn === 'npwp'
+        ? t.upload.companyMatchedNpwp
+        : t.upload.companyMatchedName
+      : companyMatch.status === 'AMBIGUOUS'
+        ? t.upload.companyAmbiguous
+        : t.upload.companyUnmatched
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -432,30 +596,20 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* Step 1: Select company + vendor */}
-      {stage === 'select' && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 p-5 sm:p-6 space-y-4"
-        >
+      {/* STEP 1: attach documents. No company, vendor or PO is asked for here —
+          they come from the documents themselves (or from the account, for a
+          vendor's own identity). The vendor picker below is shown only to staff
+          uploading a hardcopy on a vendor's behalf, who have no vendor of their
+          own on the session. */}
+      {stage === 'upload' && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.selectHeading}</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.selectSubheading}</p>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.companyLabel}</label>
-            <select
-              value={companyIdValue}
-              onChange={(e) => setCompanyIdValue(e.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">{t.upload.selectCompany}</option>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
+
           {!isVendor && (
-            <div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4">
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.vendorLabel}</label>
               <select
                 value={selectedVendorId}
@@ -467,38 +621,7 @@ export default function UploadPage() {
               </select>
             </div>
           )}
-          <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.poLabel}</label>
-            <Input
-              value={poNumberValue}
-              onChange={(e) => setPoNumberValue(e.target.value)}
-              placeholder={t.upload.poPlaceholder}
-              className="h-10 text-sm"
-            />
-          </div>
-          <Button onClick={continueFromSelect} className="w-full gap-2">
-            {t.upload.continue} <ArrowRight className="h-4 w-4" />
-          </Button>
-        </motion.div>
-      )}
 
-      {/* Drop Zone */}
-      {stage === 'drop' && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3 py-2">
-            <span>{t.upload.billTo}: <strong className="text-gray-700 dark:text-gray-200">{selectedCompanyName}</strong></span>
-            {selectedVendorName && <span>· {t.upload.vendorTag}: <strong className="text-gray-700 dark:text-gray-200">{selectedVendorName}</strong></span>}
-            {/* Going back to change company/vendor/PO invalidates any invoice
-                row a previous failed attempt already created — vendorId isn't
-                PATCH-writable, so it can't be corrected in place; drop the
-                reference and let the next attempt create a fresh one. */}
-            <button
-              onClick={() => { setInvoiceId(null); setStage('select') }}
-              className="ml-auto text-blue-600 hover:underline"
-            >
-              {t.upload.change}
-            </button>
-          </div>
           <div
             {...getRootProps()}
             className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
@@ -534,10 +657,42 @@ export default function UploadPage() {
               ))}
             </div>
           </div>
+
+          {stagedFiles.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {t.upload.stagedFilesTitle} ({stagedFiles.length}/{MAX_DOCUMENTS_PER_INVOICE})
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.stagedFilesHint}</p>
+              </div>
+              <ul className="space-y-2">
+                {stagedFiles.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-lg border dark:border-gray-700 px-3 py-2">
+                    <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{f.name}</span>
+                    <span className="text-xs text-gray-400 tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
+                    <button
+                      onClick={() => setStagedFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                      aria-label={t.upload.removeStagedFile}
+                      className="text-gray-400 hover:text-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <Button onClick={processDocuments} disabled={stagedFiles.length === 0} className="w-full gap-2">
+            <Sparkles className="h-4 w-4" />
+            {t.upload.processDocuments}
+          </Button>
         </motion.div>
       )}
 
-      {/* Processing State */}
+      {/* STEP 2: upload + AI processing */}
       {(stage === 'uploading' || stage === 'ocr') && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -549,12 +704,16 @@ export default function UploadPage() {
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{statusMsg}</p>
           </div>
 
-          {file && (
-            <div className="flex items-center gap-2 mb-6 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded-lg px-3 py-2">
-              <FileText className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate">{file.name}</span>
-              <span className="ml-auto text-xs">{(file.size / 1024).toFixed(0)} KB</span>
-            </div>
+          {docs.length > 0 && (
+            <ul className="space-y-1 mb-6">
+              {docs.map((doc) => (
+                <li key={doc.id} className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded-lg px-3 py-2">
+                  <CheckCircle className="h-4 w-4 flex-shrink-0 text-green-500" />
+                  <span className="truncate">{doc.originalName}</span>
+                  <span className="ml-auto text-xs">{t.documentType[doc.type as keyof typeof t.documentType]}</span>
+                </li>
+              ))}
+            </ul>
           )}
 
           {fields.length > 0 && (
@@ -572,15 +731,32 @@ export default function UploadPage() {
         </motion.div>
       )}
 
-      {/* Review Stage */}
+      {/* STEP 3: review & confirm */}
       {stage === 'review' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="space-y-4"
         >
-          {/* Overall confidence / OCR-failed banner */}
-          {ocrFailed ? (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.reviewStepTitle}</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.reviewStepSubtitle}</p>
+          </div>
+
+          {/* Banner: unidentified invoice > OCR failure > confidence */}
+          {needsInvoiceSelection ? (
+            <div className="rounded-xl px-4 py-3 flex items-start gap-3 bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {t.upload.needsInvoiceTitle}
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                  {t.upload.needsInvoiceBody}
+                </p>
+              </div>
+            </div>
+          ) : ocrFailed ? (
             <div className="rounded-xl px-4 py-3 flex items-center gap-3 bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800">
               <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
               <div>
@@ -616,17 +792,122 @@ export default function UploadPage() {
             </div>
           )}
 
-          {/* Editable Fields */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.reviewAndEdit}</h3>
-              <span className="text-xs text-gray-400 dark:text-gray-500">{t.upload.billTo}: {selectedCompanyName}</span>
+          {/* Documents + their classification. Shown before the fields because
+              which document is the invoice determines where the fields came
+              from — and, when unidentified, has to be resolved first. */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t.upload.documentsTitle}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.documentsHint}</p>
             </div>
+
+            {docs.length > 0 && (
+              <ul className="space-y-2">
+                {docs.map((doc) => (
+                  <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-lg border dark:border-gray-700 px-3 py-2">
+                    <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{doc.originalName}</span>
+                    {doc.id === drivingDocumentId && (
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        {t.upload.drivingDocumentTag}
+                      </span>
+                    )}
+                    <select
+                      value={doc.type}
+                      onChange={(e) => changeDocType(doc.id, e.target.value)}
+                      aria-label={t.upload.docTypeLabel}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {DOC_TYPE_KEYS.map((k) => (
+                        <option key={k} value={k}>{t.documentType[k]}</option>
+                      ))}
+                    </select>
+                    {doc.classificationConfidence !== null && (
+                      <span className="text-[10px] text-gray-400 tabular-nums" title={t.upload.docTypeAiHint}>
+                        AI {Math.round(doc.classificationConfidence)}%
+                      </span>
+                    )}
+                    <button
+                      onClick={() => removeDoc(doc.id)}
+                      aria-label={t.upload.docRemove}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      {t.common.delete}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed dark:border-gray-600 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+                <Plus className="h-3.5 w-3.5" />
+                {uploadingExtra ? t.upload.docUploading : t.upload.addSupportingDoc}
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  disabled={uploadingExtra}
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? [])
+                    e.target.value = '' // let the same file be re-picked after a failure
+                    void uploadMoreDocs(files)
+                  }}
+                />
+              </label>
+
+              {needsInvoiceSelection && (
+                <Button size="sm" onClick={extractFromSelectedInvoice} className="gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t.upload.runExtraction}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Company (from OCR, correctable) + vendor (from the account) */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5 space-y-4">
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                {t.upload.companySectionTitle} <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={companyIdValue}
+                onChange={(e) => setCompanyIdValue(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">{t.upload.selectCompany}</option>
+                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                {companyMatch?.extractedName
+                  ? t.upload.companyDetected.replace('{name}', companyMatch.extractedName)
+                  : t.upload.companyNotDetected}
+                {companyHint && ` · ${companyHint}`}
+              </p>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mb-1">
+                {isVendor && <Lock className="h-3 w-3" />} {t.upload.vendorSectionTitle}
+              </label>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{selectedVendorName ?? '—'}</p>
+              {isVendor && <p className="text-xs text-gray-400 mt-0.5">{t.upload.vendorFromAccount}</p>}
+            </div>
+          </div>
+
+          {/* Extracted / manual fields */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 sm:p-5 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.reviewAndEdit}</h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {fields.map((field) => (
                 <div key={field.key}>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{field.label}</label>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    {field.label}
+                    {(field.key === 'po_number' || field.key === 'invoice_number') && <span className="text-red-500"> *</span>}
+                  </label>
                   <Input
                     value={editableValues[field.key] ?? ''}
                     onChange={(e) =>
@@ -634,7 +915,7 @@ export default function UploadPage() {
                     }
                     className="h-10 text-sm"
                   />
-                  {!ocrFailed && <ConfidenceBar confidence={field.confidence} />}
+                  {!ocrFailed && !needsInvoiceSelection && <ConfidenceBar confidence={field.confidence} />}
                 </div>
               ))}
             </div>
@@ -689,69 +970,9 @@ export default function UploadPage() {
             )}
           </div>
 
-          {/* Supporting documents — tax invoice, BAST, etc. Type is
-              AI-detected but always correctable, since a wrong label is worse
-              than no label. */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 p-4 space-y-3">
-            <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t.upload.supportingDocsTitle}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.upload.supportingDocsHint}</p>
-            </div>
-
-            {extraDocs.length > 0 && (
-              <ul className="space-y-2">
-                {extraDocs.map((doc) => (
-                  <li key={doc.id} className="flex flex-wrap items-center gap-2 rounded-lg border dark:border-gray-700 px-3 py-2">
-                    <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{doc.originalName}</span>
-                    <select
-                      value={doc.type}
-                      onChange={(e) => changeDocType(doc.id, e.target.value)}
-                      aria-label={t.upload.docTypeLabel}
-                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                    >
-                      {DOC_TYPE_KEYS.map((k) => (
-                        <option key={k} value={k}>{t.documentType[k]}</option>
-                      ))}
-                    </select>
-                    {doc.classificationConfidence !== null && (
-                      <span className="text-[10px] text-gray-400 tabular-nums" title={t.upload.docTypeAiHint}>
-                        AI {Math.round(doc.classificationConfidence)}%
-                      </span>
-                    )}
-                    <button
-                      onClick={() => removeDoc(doc.id)}
-                      aria-label={t.upload.docRemove}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      {t.common.delete}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed dark:border-gray-600 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
-              <Plus className="h-3.5 w-3.5" />
-              {uploadingExtra ? t.upload.docUploading : t.upload.addSupportingDoc}
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.jpg,.jpeg,.png"
-                disabled={uploadingExtra}
-                className="hidden"
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? [])
-                  e.target.value = '' // let the same file be re-picked after a failure
-                  void uploadExtraDocs(files)
-                }}
-              />
-            </label>
-          </div>
-
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-2">
-            <Button onClick={confirmAndSubmit} disabled={uploadingExtra} className="flex-1 gap-2">
+            <Button onClick={confirmAndSubmit} disabled={uploadingExtra || submitting} className="flex-1 gap-2">
               <CheckCircle className="h-4 w-4" />
               {t.upload.confirmAndSubmit}
             </Button>
@@ -762,7 +983,7 @@ export default function UploadPage() {
         </motion.div>
       )}
 
-      {/* Done */}
+      {/* STEP 4: done */}
       {stage === 'done' && (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
