@@ -71,6 +71,10 @@ export async function requireInvoiceAccess(invoiceId: string, allowedRoles?: Rol
       totalAmount: true,
       invoiceDate: true,
       dueDate: true,
+      // The document routes let a VENDOR relabel its own documents only while
+      // the submission is still a draft, so callers need this alongside the
+      // ownership check they already get here.
+      isDraft: true,
     },
   })
 

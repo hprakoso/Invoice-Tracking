@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireRole } from '@/lib/auth/helpers'
+import { requireInvoiceAccess } from '@/lib/auth/helpers'
+import { canMutateDocuments } from '@/lib/auth/permissions'
 import { updateDocumentTypeSchema, validationErrorResponse } from '@/lib/validations'
+
+const DOCUMENT_ROLES = ['ADMIN', 'VENDOR', 'GA_STAFF', 'GA_MANAGER'] as const
 
 // Manual document-type override. This is the actual guarantee that a
 // misclassified document gets corrected — the AI's label is a starting point,
@@ -11,10 +14,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; documentId: string }> },
 ) {
-  const { error, session } = await requireRole(['ADMIN', 'GA_STAFF', 'GA_MANAGER'])
-  if (error || !session) return error
-
   const { id, documentId } = await params
+
+  const { error, session, invoice } = await requireInvoiceAccess(id, [...DOCUMENT_ROLES])
+  if (error || !session || !invoice) return error
+  if (!canMutateDocuments(session.user.role, invoice.isDraft)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const body = await req.json()
 
   const parsed = updateDocumentTypeSchema.safeParse(body)
@@ -54,10 +61,13 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; documentId: string }> },
 ) {
-  const { error, session } = await requireRole(['ADMIN', 'GA_STAFF', 'GA_MANAGER'])
-  if (error || !session) return error
-
   const { id, documentId } = await params
+
+  const { error, session, invoice } = await requireInvoiceAccess(id, [...DOCUMENT_ROLES])
+  if (error || !session || !invoice) return error
+  if (!canMutateDocuments(session.user.role, invoice.isDraft)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const existing = await prisma.invoiceDocument.findFirst({
     where: { id: documentId, invoiceId: id },
