@@ -5,6 +5,7 @@ import { TERMINAL_STATUSES } from '@/lib/validations'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFileBuffer, mimeTypeFor } from '@/lib/services/fileService'
 import { extractInvoiceFields, buildOcrUpdate } from '@/lib/services/geminiExtraction'
+import { matchCompany } from '@/lib/companyMatch'
 
 export async function GET(
   req: NextRequest,
@@ -30,6 +31,10 @@ export async function GET(
     )
   }
 
+  // Set when the user picks which document is the invoice on the confirmation
+  // step — the re-run path below.
+  const requestedDocumentId = req.nextUrl.searchParams.get('documentId')
+
   const encoder = new TextEncoder()
 
   function emit(event: string, data: object) {
@@ -40,37 +45,144 @@ export async function GET(
     async start(controller) {
       try {
         // Ownership and status were already settled by requireInvoiceAccess
-        // above, so only the file's presence is left to check here.
-        if (!invoice.filePath) {
+        // above, so only document selection is left to decide here.
+        //
+        // Selection order: a type a human set wins over any AI guess
+        // (classificationConfidence is nulled when a person assigns the type,
+        // so nulls sort first), then the most confident AI label, then upload
+        // order as a stable tiebreak.
+        const documents = await prisma.invoiceDocument.findMany({
+          where: { invoiceId: id },
+          orderBy: [
+            { classificationConfidence: { sort: 'desc', nulls: 'first' } },
+            { createdAt: 'asc' },
+          ],
+          select: {
+            id: true,
+            type: true,
+            filePath: true,
+            fileType: true,
+            originalName: true,
+            classificationConfidence: true,
+          },
+        })
+
+        if (documents.length === 0) {
           controller.enqueue(emit('error', { message: 'Invoice or file not found' }))
           controller.close()
           return
         }
 
+        // Every file was classified at upload time. Extraction reads exactly
+        // one of them, and which one is not a free choice: pulling the bill-to
+        // company and the PO out of a faktur pajak or a BAST produces
+        // confidently wrong data, which is worse than none.
+        //
+        // So there is deliberately no "just use the first file" fallback. Only
+        // a document actually classified INVOICE qualifies, and
+        // normalizeClassification has already refused to apply that label below
+        // CLASSIFICATION_CONFIDENCE_FLOOR — so "is INVOICE" already means
+        // "confident enough". When nothing qualifies, the stream reports that
+        // and stops; the confirmation step asks the user which document is the
+        // invoice and re-runs this route with ?documentId=.
+        const document = requestedDocumentId
+          ? documents.find((d) => d.id === requestedDocumentId)
+          : documents.find((d) => d.type === 'INVOICE')
+
+        if (requestedDocumentId && !document) {
+          controller.enqueue(emit('error', { message: 'Document not found on this invoice' }))
+          controller.close()
+          return
+        }
+
+        if (!document) {
+          controller.enqueue(
+            emit('needs_invoice_selection', {
+              message: 'Dokumen invoice belum teridentifikasi',
+              documents: documents.map((d) => ({
+                id: d.id,
+                originalName: d.originalName,
+                type: d.type,
+                classificationConfidence: d.classificationConfidence,
+              })),
+            }),
+          )
+          controller.close()
+          return
+        }
+
         controller.enqueue(emit('status', { step: 'started', message: 'Memulai OCR...' }))
+        controller.enqueue(
+          emit('driving_document', {
+            documentId: document.id,
+            originalName: document.originalName,
+            type: document.type,
+            classificationConfidence: document.classificationConfidence,
+          }),
+        )
         controller.enqueue(emit('status', { step: 'ocr', message: 'Membaca dokumen...' }))
 
-        const buffer = await getFileBuffer(invoice.filePath)
-        const mimeType = mimeTypeFor(invoice.fileType, 'application/pdf')
+        const buffer = await getFileBuffer(document.filePath)
+        const mimeType = mimeTypeFor(document.fileType, 'application/pdf')
+
+        // The legacy single-file columns follow whichever document extraction
+        // actually read — three read paths still go through them (the /file
+        // endpoint, the detail page's fallback preview, and this route's own
+        // pre-multi-file history).
+        if (invoice.filePath !== document.filePath) {
+          await prisma.invoice.update({
+            where: { id },
+            data: { filePath: document.filePath, fileType: document.fileType },
+          })
+        }
 
         controller.enqueue(emit('status', { step: 'extracting', message: 'Mengekstrak data...' }))
 
         const extracted = await extractInvoiceFields(buffer, mimeType)
 
-        // The extraction call classifies the document as a side effect, so
-        // the primary document's type comes from here rather than a second
-        // Gemini request. Matched by file_path — that's what this route read.
-        await prisma.invoiceDocument.updateMany({
-          where: { invoiceId: id, filePath: invoice.filePath },
-          data: {
-            type: extracted.document_type,
-            classificationConfidence: extracted.classification_confidence,
-          },
+        // The extraction call classifies as a side effect, which refines the
+        // cheap classify-only label the upload made. It must never overwrite a
+        // type a human assigned: a user who marked this file as the invoice
+        // would otherwise see it demoted back to OTHER, and the next run would
+        // again find no invoice document. A null confidence is exactly the
+        // marker for "a person set this".
+        if (document.classificationConfidence !== null) {
+          await prisma.invoiceDocument.update({
+            where: { id: document.id },
+            data: {
+              type: extracted.document_type,
+              classificationConfidence: extracted.classification_confidence,
+            },
+          })
+          controller.enqueue(
+            emit('document_type', {
+              documentId: document.id,
+              type: extracted.document_type,
+              confidence: extracted.classification_confidence,
+            }),
+          )
+        }
+
+        // Bill-to resolution. The wizard no longer asks which company an
+        // invoice is for, so it is matched here against the active companies
+        // and reported with the raw strings alongside the verdict — the
+        // confirmation step shows what was read versus what it matched, and
+        // lets the user correct either outcome. Inactive companies are excluded
+        // for the same reason the old dropdown never listed them.
+        const companies = await prisma.company.findMany({
+          where: { isActive: true },
+          select: { id: true, name: true, npwp: true },
         })
+        const companyMatch = matchCompany(
+          { name: extracted.company_name?.value, npwp: extracted.company_npwp?.value },
+          companies,
+        )
         controller.enqueue(
-          emit('document_type', {
-            type: extracted.document_type,
-            confidence: extracted.classification_confidence,
+          emit('company', {
+            ...companyMatch,
+            extractedName: extracted.company_name?.value ?? null,
+            extractedNpwp: extracted.company_npwp?.value ?? null,
+            confidence: extracted.company_name?.confidence ?? 0,
           }),
         )
 
@@ -78,6 +190,7 @@ export async function GET(
         const fieldOrder = [
           { key: 'vendor_name', label: 'Nama Vendor' },
           { key: 'invoice_number', label: 'Nomor Invoice' },
+          { key: 'po_number', label: 'Nomor PO' },
           { key: 'invoice_date', label: 'Tanggal Invoice' },
           { key: 'due_date', label: 'Jatuh Tempo' },
           { key: 'currency', label: 'Mata Uang' },
@@ -120,6 +233,12 @@ export async function GET(
         //      an SSE error — silently discarding every other extracted field.
         // The client still receives the number via the `field` events above and
         // submits it through PATCH, which duplicate-checks it properly.
+        //
+        // `poNumber` and `companyId` are held back for the same reason: both
+        // are gated by validateReadyToGoLive when the draft goes live, and
+        // writing them straight from OCR would satisfy that gate with data no
+        // human has confirmed. They travel to the client as events and come
+        // back through PATCH.
         //
         // Everything below goes through the same rules PATCH enforces. This
         // write used to bypass zod entirely: amounts went in via bare
