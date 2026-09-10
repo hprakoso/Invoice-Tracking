@@ -1,6 +1,8 @@
 # API Reference
 
-All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` or `requireRole([...])` from `src/lib/auth/helpers.ts` first (401/403 on failure) unless noted. Response fields are traced to their source per `CLAUDE.md` — `table.column` for stored data, `formula` for computed values, `Not Stored` for pass-through/ephemeral data.
+All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` or `requireRole([...])` from `src/lib/auth/helpers.ts` first (401/403 on failure) unless noted.
+
+**Two gates run in `src/middleware.ts` before any handler.** Unauthenticated `/api/*` gets 401. And a `VENDOR` that has not completed its forced initial password change gets **403 `{ error: 'Password change required' }` on every `/api/*` route** except `/api/auth/*` and `/api/users/me/password` (`isVendorApiBlockedPendingPasswordChange()`, `src/lib/auth/permissions.ts`). That obligation used to be a page-route redirect only, so a vendor still on the admin-issued password could drive the entire API from `curl` without ever changing it. The rule is scoped to `VENDOR`; no other role's access is affected. Response fields are traced to their source per `CLAUDE.md` — `table.column` for stored data, `formula` for computed values, `Not Stored` for pass-through/ephemeral data.
 
 ## Invoices
 
@@ -18,11 +20,20 @@ Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `
 | `items[]` | `invoice_items.*` where `invoice_id = invoices.id`, ordered by `sort_order` |
 
 ### `POST /api/invoices`
-Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`) — `poNumber` is required. `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value; other roles pick the vendor explicitly from a dropdown in the wizard's first step — there is deliberately no "default to the first vendor" fallback (that was a real bug: an invoice could get attributed to the wrong vendor). `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`. `companyId` (which PT/entity the invoice bills) is schema-optional but the upload wizard always collects it upfront, before the file is even chosen — it's sent in this same `POST` call, not deferred to the later `PATCH` review step.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER`. Body validated by `createInvoiceSchema` (Zod, `src/lib/validations.ts`) — `poNumber` is required **unless `isDraft: true`**, the one exemption (see below). `VENDOR` role: `vendorId` is forced to `session.user.vendorId`, ignoring any client-supplied value; other roles pick the vendor explicitly from a dropdown in the wizard's first step — there is deliberately no "default to the first vendor" fallback (that was a real bug: an invoice could get attributed to the wrong vendor). A `VENDOR` therefore cannot submit for another vendor by any route: `vendorId` is not in `updateInvoiceSchema` either, so PATCH silently drops it for every role including ADMIN. `GA_STAFF`: `picId` defaults to the creating user (they're the hardcopy's first handler), overridable via `data.picId`.
+
+**Draft creation, since the document-first upload flow.** The wizard no longer knows the PO or the bill-to company when it creates the row — both are read off the uploaded documents (or typed at the confirmation step), which happens after the row must exist, because every upload is addressed by invoice id. So a draft `POST` may omit both:
+
+| Body field | Behaviour for `isDraft: true` |
+|---|---|
+| `poNumber` | May be omitted. The route writes `DRAFT_PO_PLACEHOLDER` (`'PENDING-OCR'`, `src/lib/validations.ts`) into `invoices.po_number`, which is `NOT NULL`. Deliberately **not** `'N/A'` — migration `20260901000000` backfilled genuine pre-PO rows with that string, so reusing it would make real history indistinguishable from an unfinished draft |
+| `companyId` | May be omitted/null (the column is nullable) |
+
+Both are then required by `validateReadyToGoLive` before the draft can go live — see `PATCH /api/invoices/[id]`. A non-draft `POST` is unchanged and still requires `poNumber`.
 
 Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default `'GA'`, `send_date` from body, `pic_id` per above, `created_by` = session user id), `invoice_items` rows, one `invoice_stage_history` row (`stage = picStage`, `changed_by_id` = session user id), `audit_logs` row (`action: 'invoice.created'`, `metadata: { invoiceNumber }`).
 
-> **Known gap:** the row created here is immediately live and visible everywhere — there's no "invisible until confirmed" draft state — so a user abandoning the upload wizard mid-flow leaves a real `RECEIVED` invoice behind carrying a `DRAFT-<timestamp>` placeholder number. The related *orphaned duplicate on retry* bug is fixed (the wizard now reuses the existing row instead of re-POSTing), but a genuinely abandoned session still leaves one row behind.
+> **Abandoned drafts.** A user who abandons the wizard leaves an `isDraft: true` row behind carrying a `DRAFT-<timestamp>` invoice number and a `PENDING-OCR` PO. It is excluded from every KPI, list, export and reminder until the review step is confirmed, so nothing has to be chased or cleaned up — but the row does persist, and only `ADMIN` can delete it (`DELETE /api/invoices/[id]`).
 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
@@ -34,7 +45,7 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 
 | Role | Writable fields | When |
 |---|---|---|
-| `VENDOR` (own invoice only) | `invoiceNumber`, `poNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `companyId`, `sendDate` | while `status` is not terminal (`CLOSED`/`REJECTED`) |
+| `VENDOR` (own invoice only) | `invoiceNumber`, `poNumber`, `invoiceDate`, `dueDate`, `subtotal`, `taxAmount`, `totalAmount`, `notes`, `companyId`, `isDraft`, `sendDate` | while `status` is `VENDOR`-editable (`canVendorEdit()`) |
 | `GA_STAFF`, `GA_MANAGER` (any invoice) | `deliveredDate`, `picId`, `sendDate`, `status`, `paidDate`, `paidAmount` | always |
 | `GA_STAFF`, `GA_MANAGER` (invoice they created) | + the same core fields as `VENDOR` above | while `status` is not terminal |
 | `ADMIN` | all fields, bypasses both `allowedFields()` and the `VALID_TRANSITIONS` table | — |
@@ -42,6 +53,20 @@ Auth: any authenticated user — authorization is field- and status-aware, not a
 `VENDOR` cannot change `status` at all — there is no self-service resubmit flow (unlike the old `REVISION → SUBMITTED` model, removed with the 2026-09-01 status overhaul).
 
 Any `status` change is checked against `isValidStatusTransition()` (`src/lib/invoiceStatus.ts::VALID_TRANSITIONS`, skipped for `ADMIN`) — 400 with `{ error: 'Invalid status transition', from, to }` if not a valid edge. See [ARCHITECTURE.md](./ARCHITECTURE.md#invoice-status-lifecycle) for the full graph. Any `sendDate`/`deliveredDate` change is checked against `validateDeliveryDates()` (deliveredDate ≥ sendDate).
+
+**Draft → live gate.** When a `PATCH` flips `isDraft` from true to false — the confirmation step's submit — `validateReadyToGoLive()` (`src/lib/validations.ts`) must pass or the request 400s:
+
+| Precondition | Checked against | Rejection |
+|---|---|---|
+| A real PO number | `filtered.poNumber ?? invoices.po_number`, refusing blank or `DRAFT_PO_PLACEHOLDER` | `PO number is required before submitting this invoice` |
+| A resolved bill-to company | `filtered.companyId` if present, else `invoices.company_id` | `Bill-to company is required before submitting this invoice` |
+| At least one attached document | `count(invoice_documents WHERE invoice_id = ...)` | `At least one document is required before submitting this invoice` |
+
+Both values were already mandatory — the pre-document-first wizard hard-blocked on them before the file was even chosen. This moves the rule from the browser to the server, which it has to be now that neither is collected up front. Neither is inert if it leaks: `poNumber` is a `contains` filter shared by the dashboard and the invoice list and is written verbatim into the Excel export, so a shared placeholder would return whole batches; a null `company_id` still lists, but is unreachable from every company-scoped filter, KPI breakdown, export and chatbot answer, with nothing anywhere flagging that it needs one.
+
+The document check exists because that state only became reachable with this flow: a file previously had to exist before the row was created, whereas the review step can now delete documents. Without it an invoice could go live with none — nothing for GA to verify, a null `invoices.file_path`, and figures extracted from a file that no longer exists.
+
+The gate is scoped to the **transition**, not to every `PATCH` that happens to carry `isDraft: false`, so editing a legacy live invoice that predates the company requirement is never blocked by it. It applies to `ADMIN` too — this is data integrity, not a permission.
 
 **Duplicate auto-rejection.** When this `PATCH` changes `invoiceNumber`, the server first looks for another invoice with the same `vendorId` + `invoiceNumber` (case-insensitive, excluding `status = 'REJECTED'`). This is the only point a duplicate can be detected — at `POST /api/invoices` the number is still a `DRAFT-<timestamp>` placeholder, so a failed upload retried against the same row is never mistaken for a duplicate.
 
@@ -66,36 +91,65 @@ Fires the **`stage_assigned`** reminder trigger when the stage actually changes 
 Auth: `ADMIN` only. **Hard delete** — the row is actually removed (there is no `CANCELLED` status in the current `InvoiceStatus` enum to soft-cancel into). Writes `audit_logs` (`action: 'invoice.deleted'`) before the delete.
 
 ### `POST /api/invoices/[id]/upload`
-Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Validates: MIME type allowlist (`pdf`/`jpeg`/`jpg`/`png`), magic-byte signature check against the claimed extension (prevents MIME spoofing), 10MB max size.
+Auth: `ADMIN`, `VENDOR`, `GA_STAFF`, `GA_MANAGER` (vendor scoped to own invoices — 403 otherwise). Rate-limited **30 requests/min/user** (`MAX_DOCUMENTS_PER_INVOICE * 3`), sized so one full legitimate submission never rate-limits itself partway through. Before this, classification was the only unmetered paid-AI path behind plain authentication.
 
-Optional form field `primary=true` marks the file the upload wizard drives OCR from. It changes two things: the file is **not** sent through the standalone classifier (the OCR extraction call classifies it anyway, so a second Gemini request would be wasted), and the legacy `invoices.file_path`/`file_type` columns are pointed at it. Everything else defaults to a supporting document.
+Validates, all from `src/lib/uploadLimits.ts` so the browser and this route enforce identical rules:
 
-Writes: file to storage via `saveUploadedFile()` (`src/lib/services/fileService.ts`) at `{invoiceId}/{documentId}.{ext}`, one `invoice_documents` row (`type`/`classification_confidence` from `classifyDocument()` for non-primary files, `OTHER`/null for primary until OCR runs), `invoices.file_path`/`file_type` when `primary=true`, and `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { documentId, fileName, fileType, type, classificationConfidence }`). Returns the created `invoice_documents` row (**not** the invoice, unlike before this became multi-file).
+| Rule | Constant | Failure |
+|---|---|---|
+| MIME allowlist (`pdf`/`jpeg`/`jpg`/`png`) | `ACCEPTED_MIME_TYPES` | 400 |
+| Magic-byte signature vs. the claimed extension (prevents MIME spoofing) | `hasValidSignature()` / `MAGIC_SIGNATURES` | 400 |
+| Max file size 10MB | `MAX_FILE_SIZE_BYTES` | 400 |
+| Max documents already on this invoice | `MAX_DOCUMENTS_PER_INVOICE` (10) | 400 |
+
+`MAX_DOCUMENTS_PER_INVOICE` is the single knob for the file count — nothing else in the codebase hardcodes one. It is an initial technical limit, not a business rule: raise it in that one file.
+
+**Every file is classified**, including the first. The `primary=true` form field is **gone**: it used to skip classification (the extraction call that immediately followed classified it for free) and point the legacy mirror at that file. Extraction no longer follows immediately — it runs after all uploads, and it is the classification of *all* files that decides which document it reads, so every label must exist before then.
+
+Writes: file to storage via `saveUploadedFile()` (`src/lib/services/fileService.ts`) at `{invoiceId}/{documentId}.{ext}`, one `invoice_documents` row (`type`/`classification_confidence` from `classifyDocument()`), `invoices.file_path`/`file_type` **only when currently null** (seeding the legacy mirror so an invoice whose OCR never ran still has a readable file; the OCR route repoints it at whichever document it actually reads), and `audit_logs` (`action: 'invoice.file_uploaded'`, `metadata: { documentId, fileName, fileType, type, classificationConfidence }`). Returns the created `invoice_documents` row (**not** the invoice, unlike before this became multi-file).
 
 **Multiple files per invoice** — each call creates a new document rather than overwriting, so the client posts once per file. Classification failure (Gemini down, no API key) is caught and falls back to `OTHER`: a classification problem must never lose a user's upload.
 
+> **No idempotency key.** Two identical POSTs create two document rows. The wizard compensates by keeping only the *failed* files staged after a batch, so a retry uploads exactly what is missing, and by reading the document list back from `GET /api/invoices/[id]` rather than from its own responses — otherwise rows left by a partially failed attempt would be invisible in the review step, and so impossible to relabel or remove.
+
 ### `PATCH /api/invoices/[id]/documents/[documentId]`
-Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`. Body `{ type }` validated by `updateDocumentTypeSchema` (one of `INVOICE`/`TAX_INVOICE`/`BAST`/`OTHER`). 404 if the document doesn't belong to this invoice.
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, plus `VENDOR` **for their own invoice while `is_draft` is true** (`canMutateDocuments()`, `src/lib/auth/permissions.ts`; ownership proven by `requireInvoiceAccess`). The vendor grant exists because the confirmation step asks the uploader to check the AI's classification, and the uploader was previously the one role that could not act on it — the review UI rendered the type picker and remove button for vendors and every click 403'd. Scoped to a draft so a vendor can never relabel documents on an invoice already in GA or finance review. Body `{ type }` validated by `updateDocumentTypeSchema` (one of `INVOICE`/`TAX_INVOICE`/`BAST`/`OTHER`). 404 if the document doesn't belong to this invoice.
 
 This is the manual override that actually guarantees a misclassified document gets corrected — the AI label is a starting point, not the final word, and the control is offered on every document, not only low-confidence ones. Writes: `invoice_documents.type`, and **clears `classification_confidence` to null** (it described certainty in a label that no longer applies; leaving it would make a human-assigned type render as a machine guess). Writes `audit_logs` (`action: 'invoice.document_reclassified'`, `metadata: { documentId, from, to }`).
 
 ### `DELETE /api/invoices/[id]/documents/[documentId]`
-Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`. Removes a document attached by mistake. Hard-deletes the row; the **storage object is deliberately left in place** (orphaned but harmless) so an accidental click stays recoverable — every read path goes through the row, not the blob. Writes `audit_logs` (`action: 'invoice.document_removed'`, `metadata: { documentId, originalName, type }`).
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER`, plus `VENDOR` for their own draft (same `canMutateDocuments()` rule as the PATCH above). Removes a document attached by mistake. Hard-deletes the row; the **storage object is deliberately left in place** (orphaned but harmless) so an accidental click stays recoverable — every read path goes through the row, not the blob. Writes `audit_logs` (`action: 'invoice.document_removed'`, `metadata: { documentId, originalName, type }`).
 
 ### `GET /api/invoices/[id]/documents/[documentId]/file`
 Auth: any authenticated user; `VENDOR` gets 403 unless the document's invoice belongs to their vendor. The lookup is scoped by `invoiceId` **and** `documentId`, so a document id from another invoice can't be read by pairing it with an invoice the caller is allowed to see. **Not Stored** — streams the raw bytes at `invoice_documents.file_path`. The older `GET /api/invoices/[id]/file` still serves the legacy single `invoices.file_path` and is unchanged.
 
 ### `GET /api/invoices/[id]/ocr` (SSE stream)
-Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Streams `status`, `field`, `line_items`, `done`/`error` events.
+Auth: any authenticated user, rate-limited **5 requests/min/user** (`src/lib/rate-limit.ts`). Optional query param **`?documentId=`** forces extraction to read exactly that document (404-style error event if it isn't on this invoice); without it the route chooses — see below.
+
+**Which document is read.** Every file was already classified at upload time. Extraction reads exactly one of them, and the choice is not free: pulling a bill-to company or a PO out of a faktur pajak or a BAST produces confidently wrong data, which is worse than none. So:
+
+1. Only a document whose `invoice_documents.type` is `INVOICE` qualifies. `normalizeClassification()` has already refused to apply that label below `CLASSIFICATION_CONFIDENCE_FLOOR` (70), so "is INVOICE" already means "confident enough" — there is no second threshold here.
+2. Among those, a type a **human** assigned wins over any AI guess (`classification_confidence IS NULL` marks a human decision, so `nulls: 'first'`), then the highest AI confidence, then upload order as a stable tiebreak.
+3. If nothing qualifies, the route emits **`needs_invoice_selection`** and closes **without extracting anything**. There is deliberately no "use the first file" fallback. The confirmation step then asks the user which document is the invoice and re-runs with `?documentId=`.
+
+Streams `status`, `driving_document`, `needs_invoice_selection`, `document_type`, `company`, `field`, `line_items`, `warning`, `done`/`error` events.
 
 | Streamed field | Source |
 |---|---|
+| `driving_document.{documentId,originalName,type,classificationConfidence}` | `invoice_documents.*` for the document selected above — **Not Stored** as an API field, it identifies which row the rest of the stream came from |
+| `needs_invoice_selection.documents[]` | `invoice_documents.{id,original_name,type,classification_confidence}` for every document on the invoice — **Not Stored**, a prompt for the user to resolve |
+| `company.{companyId,status,matchedOn}` | `formula` — `matchCompany()` (`src/lib/companyMatch.ts`) over `companies` rows where `is_active = true`, keyed on `companies.npwp` then normalized `companies.name`. `status` is `MATCHED`/`UNMATCHED`/`AMBIGUOUS`; two or more hits is `AMBIGUOUS` and resolves to `companyId: null`, never a pick (`companies.name` has no unique constraint). **Not Stored** — the client sends the confirmed id back via `PATCH` |
+| `company.{extractedName,extractedNpwp,confidence}` | Gemini `company_name` / `company_npwp` fields (the invoice's bill-to block) — **Not Stored**. Surfaced alongside the verdict so the confirmation page can show what was *read* versus what it *matched* |
 | `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
 | Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
 | `invoiceNumber` | **Streamed but deliberately NOT persisted here.** It's the field the duplicate check keys on, and that check lives only in `PATCH /api/invoices/[id]` — writing it here would slip past it. The client receives it via the `field` event and submits it through `PATCH`, which duplicate-checks it properly. See the note in the route for the two failures this caused when OCR did write it |
-| `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 core fields that came back non-null (same formula the old Python service used) |
-| `document_type` SSE event, and persisted | `invoice_documents.type` / `.classification_confidence` for the document this OCR ran against, matched by `file_path`. The extraction call classifies the document in the same request it already makes, so the primary document costs no extra Gemini call — the standalone `classifyDocument()` is only for supporting files |
+| `po_number` (new), and `companyId` | **Streamed but deliberately NOT persisted here**, for the same class of reason: both gate the draft→live transition in `validateReadyToGoLive`, and writing them straight from OCR would satisfy that gate with data no human confirmed. They return through `PATCH` |
+| `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 `CORE_FIELDS` that came back non-null (same formula the old Python service used). Unchanged by the new fields — `company_name`, `company_npwp` and `po_number` are deliberately **not** in `CORE_FIELDS`, so this metric means the same thing it always did |
+| `document_type` SSE event, and persisted | `invoice_documents.type` / `.classification_confidence` for the document this OCR ran against, refining the cheap classify-only label from upload. **Skipped entirely when `classification_confidence IS NULL`** — that marks a human-assigned type, and overwriting it would demote the very file the user just marked as the invoice, leaving the next run with nothing to read again |
 | Line items | `invoice_items.*` — existing rows for the invoice are deleted and replaced from `line_items[]` in the Gemini response |
+| `warning.fields[]` | `formula` — extraction keys rejected by `buildOcrUpdate()` validation; **Not Stored** |
+
+Side effect: `invoices.file_path`/`file_type` are repointed at the document that was read, keeping the legacy mirror consistent with the three read paths still using it.
 
 OCR never changes `invoices.status` on success or error — the invoice stays `RECEIVED` (its status at creation) throughout; the frontend review step (`PATCH /api/invoices/[id]`) is what persists corrected data. Advancing `status` from there is a separate GA/ADMIN-only action (`VENDOR` cannot write `status` at all).
 
@@ -216,10 +270,36 @@ Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail
 Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` defaults to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
 
 ### `PATCH /api/users/[id]`
-Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Writes: `users` row (partial update), `audit_logs` (`action: 'user.role_updated'`, `metadata: { from, to }`). The admin users page's Active/Inactive badge is a toggle button wired to this with `{ isActive }` — deactivated users fail login at `authorize()` (`!user.isActive` check in `auth.ts`).
+Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
+
+`email` and `password` are the **admin-side counterpart to the vendor credential lockdown**: a vendor may change neither its own login email nor (after the forced first change) its own password, so this route is the only path for either. Without it the restriction would be a dead end.
+
+| Body field | Writes | Notes |
+|---|---|---|
+| `role` | `users.role`, and `users.vendor_id` forced to null for non-VENDOR | unchanged |
+| `isActive` | `users.is_active` | unchanged; deactivated users fail login at `authorize()` (`!user.isActive` in `auth.ts`) |
+| `vendorId` | `users.vendor_id` | unchanged |
+| `email` | `users.email` | the login identity |
+| `password` | `users.password_hash` = `bcrypt.hash(password, 12)` **and `users.must_change_password = true`** | applies to every role. The value an admin types is always a handover secret, never the account's live credential — the recipient is forced to replace it at their next sign-in, so no admin ends up holding a working vendor password |
+
+Audit rows are now per credential event rather than one blanket `user.role_updated` (which previously described a password reset as a role change). The password itself is never logged.
+
+| Condition | `audit_logs.action` | `metadata` |
+|---|---|---|
+| role actually changed | `user.role_updated` | `{ from, to }` |
+| email actually changed | `user.email_changed` | `{ from, to }` |
+| `password` supplied | `user.password_reset` | `{ role, mustChangePassword: true }` |
+| `isActive` supplied | `user.active_changed` | `{ isActive }` |
+| none of the above (e.g. `vendorId` only) | `user.updated` | `{ fields }` |
+
+> **A reset does not evict a live session.** Sessions are stateless JWTs with no revocation mechanism, so an existing browser session keeps working until the token expires. To cut off access immediately, deactivate the account (`{ isActive: false }`) and then reset the password.
 
 ### `PATCH /api/users/me/password`
-Auth: any authenticated user, changing their own password only (no `id` param — always `session.user.id`). Body validated by `changePasswordSchema` (`{ currentPassword, newPassword }`). Verifies `currentPassword` against `users.password_hash` first (400 if wrong) — this isn't gated behind `mustChangePassword`, so it doubles as the general "change my password" endpoint, not just the first-login flow. Writes: `users.password_hash` (rehashed), `users.must_change_password = false`, `audit_logs` (`action: 'user.password_changed'`). The `/change-password` page calls NextAuth's client-side `update()` after a successful response to refresh the JWT (`trigger: 'update'` branch in `auth.ts`'s `jwt` callback re-reads `must_change_password` from the DB) — otherwise the stateless JWT would keep gating the user until natural token expiry.
+Auth: any authenticated user, changing their own password only (no `id` param — always `session.user.id`). Body validated by `changePasswordSchema` (`{ currentPassword, newPassword }`). Verifies `currentPassword` against `users.password_hash` first (400 if wrong).
+
+**403 for a `VENDOR` whose `must_change_password` is already false** (`canChangeOwnPassword()`, `src/lib/auth/permissions.ts`). A vendor account gets exactly one self-service change — the forced one at first login — after which only an admin can issue a new password, which re-arms the flag and grants another single forced change. So every vendor password change is admin-initiated, and no admin ever holds a vendor's live password. The flag is read **from the database, not the session**: the JWT is stateless and its copy can lag an admin reset by the token's lifetime. Every other role keeps unrestricted self-service, exactly as before.
+
+Writes: `users.password_hash` (rehashed), `users.must_change_password = false`, `audit_logs` (`action: 'user.password_changed'` — the row migration `20260910000000` keys on to tell who has genuinely completed a change). The `/change-password` page calls NextAuth's client-side `update()` after a successful response to refresh the JWT (`trigger: 'update'` branch in `auth.ts`'s `jwt` callback re-reads `must_change_password` from the DB) — otherwise the stateless JWT would keep gating the user until natural token expiry.
 
 ## Reminder settings
 
