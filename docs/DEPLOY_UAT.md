@@ -1,6 +1,6 @@
 # Deploy UAT — Render + Supabase (gratis)
 
-**Dibuat:** 2026-09-11 · **Status:** image terbukti jalan end-to-end, menunggu kredensial · **Biaya:** $0
+**Dibuat:** 2026-09-11 · **Status:** ✅ LIVE di <https://invoice-tracking-uat.onrender.com> · **Biaya:** $0
 
 Dokumen ini melengkapi [`UAT_AND_CUTOVER.md`](./UAT_AND_CUTOVER.md), yang tetap jadi sumber kebenaran
 untuk **matriks variabel environment**, **akun uji**, dan **8 skenario UAT wajib**. Di sini hanya
@@ -178,6 +178,33 @@ Postgres lokal yang terisi penuh — 12 tabel, 8 akun, 107 invoice:
 
 Yang **belum** terbukti dan hanya bisa diuji setelah deploy: persistensi Supabase Storage (butuh
 kredensial Supabase) dan perilaku 512 MB / cold start di free tier Render.
+
+---
+
+## 4.6 Hasil verifikasi terhadap deployment sungguhan
+
+Dijalankan terhadap `https://invoice-tracking-uat.onrender.com` setelah deploy pertama — **12 dari 12
+lulus**, lalu 3 pemeriksaan storage terpisah.
+
+| Pemeriksaan | Hasil |
+|---|---|
+| `GET /api/health` | `200 {"status":"ok","app":"ok","db":"ok"}` |
+| Tombol demo di build produksi | marker + label `ga_staff` / `vendor A` / `vendor B` ada |
+| Login kredensial | sesi `admin@sip.id ADMIN` terbentuk |
+| `/api/dashboard` `/api/invoices` `/api/vendors` `/api/companies` `/api/audit` | semua `200` |
+| `totalInvoices` | `104` (107 baris seed dikurangi draft) |
+| Cron tanpa token | `401` — gagal tertutup |
+| Isolasi lintas tenant | `vendor2@sip.id` → invoice Vendor A = **403** |
+| **Upload → Supabase Storage** | objek `<invoiceId>/<documentId>.pdf` muncul di bucket, 125 bytes |
+| **Baca balik lewat aplikasi** | `200`, `application/pdf`, magic bytes `%PDF-1.4` utuh |
+| Hard delete + pembersihan | invoice uji terhapus, jumlah kembali `104` |
+
+Upload diuji lengkap meski `GOOGLE_API_KEY` belum diset: `upload/route.ts:74` menyimpan file **sebelum**
+klasifikasi, dan klasifikasi di `:85` dibungkus `try/catch` di `:88` — jadi ketiadaan Gemini menurunkan
+dokumen ke tipe `OTHER` tanpa menggagalkan unggahan. Itu membuktikan jalur storage berdiri sendiri.
+
+**Belum aktif dan sengaja:** `GOOGLE_API_KEY` (OCR + chat) dan `RESEND_API_KEY` (email). Kunci berbiaya
+tidak disalin dari `.env.local` tanpa permintaan eksplisit. Aktifkan dengan menambah env var di Render.
 
 ---
 
