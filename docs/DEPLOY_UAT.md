@@ -120,15 +120,23 @@ set `NEXTAUTH_URL` → deploy ulang sekali.
 Image runtime **tidak** memuat CLI Prisma (standalone sengaja ramping), jadi 15 migrasi dijalankan
 dari mesin lokal terhadap Supabase:
 
+⚠️ **Migrasi harus lewat port 5432, bukan 6543.** Ini bukan preferensi — `prisma migrate deploy`
+terhadap transaction pooler (6543) **menggantung tanpa pesan error** dan tidak membuat satu tabel pun;
+dikonfirmasi saat menyiapkan lingkungan ini. Transaction pooler tidak mendukung operasi session-level
+dan advisory lock yang dipakai Prisma. Port 5432 pada host pooler yang sama adalah **session pooler**
+dan bekerja normal. Runtime aplikasi tetap memakai 6543, yang memang tepat untuk koneksi pendek.
+
 ```bash
-UAT_DB='postgresql://postgres.<ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres'
+# 5432 = session pooler → untuk migrasi & seed
+UAT_DIRECT='postgresql://postgres.<ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres'
+# 6543 = transaction pooler → untuk DATABASE_URL runtime di Render
 
 DATABASE_SSL_REJECT_UNAUTHORIZED=false \
-DIRECT_URL="$UAT_DB" DATABASE_URL="$UAT_DB" npx prisma migrate deploy
+DIRECT_URL="$UAT_DIRECT" DATABASE_URL="$UAT_DIRECT" npx prisma migrate deploy
 
 # ⚠️ MENGHAPUS seluruh tabel lebih dulu. Guard host non-lokal ada di seed.ts:57.
 SEED_ALLOW_REMOTE=yes-i-know DATABASE_SSL_REJECT_UNAUTHORIZED=false \
-DIRECT_URL="$UAT_DB" DATABASE_URL="$UAT_DB" \
+DIRECT_URL="$UAT_DIRECT" DATABASE_URL="$UAT_DIRECT" \
 ADMIN_PASSWORD='<rahasia-uat>' DEMO_PASSWORD='<sama-dengan-NEXT_PUBLIC_DEMO_PASSWORD>' \
 npm run db:seed
 ```
@@ -136,9 +144,8 @@ npm run db:seed
 `ADMIN_PASSWORD` **harus** diisi: default-nya literal di `prisma/seed.ts:89` yang sudah ada di riwayat
 git repo publik ini. Mengisinya membuat default itu tidak pernah terpakai.
 
-> Gunakan **pooler** (port 6543) untuk migrasi maupun runtime, dan sertakan
-> `DATABASE_SSL_REJECT_UNAUTHORIZED=false` — `prisma.ts` membuang `sslmode` dari URL dan hanya mengatur
-> TLS lewat flag itu.
+> Sertakan `DATABASE_SSL_REJECT_UNAUTHORIZED=false` pada kedua perintah — `prisma.ts` membuang
+> `sslmode` dari URL dan hanya mengatur TLS lewat flag itu.
 
 ### 4.4 Verifikasi setelah deploy
 
