@@ -8,6 +8,64 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-11 — Hosting UAT: image container, dan tombol demo yang bertahan di build produksi
+
+Tujuan maintainer: aplikasi online secepatnya untuk dicoba beberapa penguji, dengan perubahan
+seminimal mungkin. Didahului audit enam dimensi (runtime, environment, build, database/storage,
+auth, higiene rahasia) plus riset lima platform secara paralel.
+
+**Kondisi awal ternyata sudah sehat.** `tsc --noEmit` bersih, 125/125 tes lulus, `next build`
+berhasil, dan **ke-29 rute terkompilasi dinamis** — tidak ada halaman yang menyentuh Prisma saat
+build, jadi build Docker tidak membutuhkan database hidup. Yang kurang murni lapisan hosting.
+
+**Platform: Railway.** Dipilih dari enam kandidat. Alasan yang menentukan: region Singapura
+(~25–40 ms dari Jakarta), tidak ada plafon timeout request sehingga SSE OCR yang bisa jalan 60 detik+
+tidak perlu dipikirkan, dan volume yang membuat jalur fallback disk di `fileService.ts` menjadi
+persisten **tanpa perubahan kode**. DigitalOcean App Platform dicoret karena timeout 100 detik yang
+tidak bisa diubah dan tidak adanya volume persisten; Cloudflare Workers karena Prisma 7 di sana masih
+kena bug terbuka; Fly.io karena Managed Postgres mulai $38/bln; Render karena RAM mentok 512 MB di
+Starter, realistis OOM untuk `exceljs` + `react-pdf` + SDK Gemini. Perbandingan lengkap dan urutan
+perintahnya ada di [`DEPLOY_RAILWAY.md`](./DEPLOY_RAILWAY.md).
+
+**`output: "standalone"` di `next.config.ts`**, sehingga stage runtime image tidak perlu
+`node_modules`. Diabaikan `next dev`/`next start`, jadi alur kerja lokal tidak berubah. `Dockerfile`
+sengaja Dockerfile biasa dan bukan buildpack Railway: image yang sama jalan di Render, Fly, Cloud Run
+atau VM mana pun, supaya pilihan UAT tidak mengunci pilihan produksi. Stage runner menyalin `public/`
+dan `.next/static` secara manual — `output: standalone` memang tidak menyertakan keduanya, dan tanpa
+salinan itu semua aset statis 404.
+
+**Tombol login sekali-klik butuh perubahan kode, bukan variabel.** `login/page.tsx` memagari blok
+tombol dengan `process.env.NODE_ENV === 'development'`. Next.js menyulih nilai itu saat **build**, jadi
+pada build produksi ekspresinya terlipat menjadi `false` dan markup-nya dibuang dead-code elimination
+— diverifikasi terhadap build produksi repo ini sendiri: `.next/static/` tidak memuat `gastaff@sip.id`
+maupun `demo1234` sama sekali. Tidak ada variabel runtime yang bisa menghidupkannya kembali. Gerbangnya
+kini menerima `NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'` sebagai alternatif, dan label "Dev" menjadi
+"Demo" karena sekarang memang bisa tampil di luar `next dev`. **Perilaku produksi tidak berubah selama
+variabel itu tidak diset.** Mekanisme login, provider, hash password dan middleware tidak disentuh.
+
+Konsekuensi yang mudah terlewat: `NEXT_PUBLIC_*` disulih saat build, jadi di host container ia harus
+jadi **build argument**. Docker mengisolasi build dari environment host, sehingga variabel service
+Railway hanya masuk kalau dideklarasikan `ARG` di stage yang memakainya — keduanya sudah dideklarasikan
+di stage `builder`. Menyetelnya hanya sebagai variabel runtime tidak melakukan apa-apa, tanpa error.
+
+**Satu jebakan lama ikut diperbaiki di `.env.example`.** Baris `AUTH_TRUST_HOST=` (kosong) lebih buruk
+daripada tidak ada: NextAuth menghitung `!!(AUTH_URL ?? AUTH_TRUST_HOST ?? VERCEL ?? CF_PAGES ?? NODE_ENV !== "production")`,
+dan `??` hanya melompati `null`/`undefined`. String kosong bukan keduanya, jadi rantainya berhenti di
+situ dan menghasilkan `false` — mematikan `trustHost` bahkan di development, di mana nilai yang tidak
+diset justru menyalakannya. Placeholder-nya kini `AUTH_TRUST_HOST=true`.
+
+**Data touched:** tidak ada. Tidak ada perubahan skema, migrasi, maupun rute API. `railway.json`
+mengarahkan healthcheck ke `/api/health` yang sudah ada.
+
+**Sengaja tidak dikerjakan:** cron harian (cron Railway menjalankan perintah, bukan URL — rute ini
+dipicu manual selama UAT); migrasi otomatis saat deploy (butuh CLI Prisma di image runtime);
+memindahkan `bcryptjs` dari `devDependencies` (salah tempat, tapi build ini aman karena `npm ci`
+memasang dev deps dan output tracing menelusuri impor sungguhan). Ketiganya tercatat di §6
+`DEPLOY_RAILWAY.md`.
+
+**Verified:** `tsc --noEmit` bersih, 125/125 tes lulus, `eslint` bersih kecuali satu peringatan lama di
+`src/app/api/notifications/route.ts` yang tidak disentuh perubahan ini.
+
 ### 2026-09-10 — Document-first upload, AI document classification, and vendor credential lockdown
 
 Branch `feat/document-first-upload`, cut fresh from `main` at the maintainer's instruction. Preceded by an analysis pass over the FE, API, schema, migrations, auth and OCR pipeline (7 parallel readers → 4 decision agents), which surfaced four business decisions the maintainer confirmed before any code was written, plus six implementation defaults they reviewed and adjusted.

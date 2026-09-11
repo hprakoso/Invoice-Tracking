@@ -11,6 +11,7 @@ Technical reference for SIP. The root [`README.md`](../README.md) is the pitch/q
 | [CHANGELOG.md](./CHANGELOG.md) | Commit Log (full project history by phase) + Code Changes Made (running log for future work) |
 | [PRODUCTION_PLAN.md](./PRODUCTION_PLAN.md) | Plan to take the demo MVP to production on Vercel + Supabase: what breaks in serverless, the AI-service replacement, the five new features, and effort estimates. Roadmap, partly historical — for the operational steps see the runbook below |
 | [UAT_AND_CUTOVER.md](./UAT_AND_CUTOVER.md) | Operational runbook: env-var matrix and what breaks when each is missing, the two live wrong-environment traps, UAT accounts and boundary test data, the 8 required UAT scenarios, and the production cutover — pre-flight SQL, apply options, rollback, smoke tests |
+| [DEPLOY_RAILWAY.md](./DEPLOY_RAILWAY.md) | Hosting UAT di Railway: perbandingan enam platform dan alasan pilihannya, lima file yang berubah, variabel environment khas Railway, urutan perintah deploy + migrasi + seed, dan daftar yang sengaja ditunda |
 
 ## Other project docs (root)
 
