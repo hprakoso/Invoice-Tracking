@@ -8,6 +8,40 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-11 (revisi) — Target hosting UAT diubah ke Render + Supabase, sepenuhnya gratis
+
+Maintainer meminta opsi gratis, menyebut Netlify, Render atau Cloudflare. Rekomendasi berbayar
+(Railway) diganti; konfigurasi containernya tidak berubah sama sekali karena image-nya sama.
+
+**Dua dari tiga tidak muat secara arsitektural, bukan soal harga.** Netlify menjalankan Next.js sebagai
+serverless function: batas payload ~6 MB mematikan unggahan 10 MB × 10 file yang diizinkan
+`uploadLimits.ts`, dan batas durasi function memutus stream SSE rute OCR yang dirancang jalan 60 detik+.
+Cloudflare Workers bukan runtime Node penuh — Prisma 7 di sana masih kena bug Wasm codegen terbuka, dan
+D1 adalah SQLite sementara skema ini `provider = "postgresql"` dengan 15 migrasi. **Render** satu-satunya
+yang menjalankan container Docker dengan proses Node hidup terus, jadi Dockerfile yang sudah ada jalan
+apa adanya.
+
+**Database dan storage sengaja tidak di Render.** Postgres gratis Render **kedaluwarsa 30 hari setelah
+dibuat** lalu dihapus permanen setelah 14 hari grace — UAT tidak boleh mati di tengah jalan. Free tier
+juga tidak punya disk persisten. Keduanya diambil dari satu project Supabase gratis: `fileService.ts`
+sudah memilih Supabase Storage begitu `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` terisi, jadi **nol
+perubahan kode** untuk keduanya.
+
+**`render.yaml` baru.** Web service Docker, plan free, region Singapura, healthcheck ke `/api/health`
+yang sudah ada. `NEXTAUTH_SECRET` dan `CRON_SECRET` memakai `generateValue: true` sehingga dibangkitkan
+Render dan tidak pernah menyentuh git; seluruh rahasia lain `sync: false`, diminta lewat dashboard saat
+deploy pertama. Terkonfirmasi dari dokumentasi Render: **setiap env var service otomatis diterjemahkan
+menjadi Docker build arg**, sehingga `ARG NEXT_PUBLIC_*` di stage `builder` menerima nilainya tanpa
+konfigurasi tambahan — syarat mutlak karena `NEXT_PUBLIC_*` disulih saat build, bukan runtime.
+
+**Batas yang diterima sadar:** 512 MB RAM / 0.1 CPU, dan tidur setelah ~15 menit idle (cold start
+~50 detik). Risiko nyata yang dicatat, bukan disembunyikan: `exceljs` menyusun XLSX di memori, jadi
+export daftar panjang bisa OOM. `railway.json` **sengaja dipertahankan** sebagai jalan keluar
+terdokumentasi untuk kasus itu — image-nya sama, jadi pindah tidak butuh perubahan kode.
+
+`docs/DEPLOY_RAILWAY.md` → `docs/DEPLOY_UAT.md`, ditulis ulang dengan Render sebagai jalur utama dan
+Railway sebagai upgrade berbayar di §6.
+
 ### 2026-09-11 — Hosting UAT: image container, dan tombol demo yang bertahan di build produksi
 
 Tujuan maintainer: aplikasi online secepatnya untuk dicoba beberapa penguji, dengan perubahan

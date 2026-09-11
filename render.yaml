@@ -1,0 +1,54 @@
+# Render Blueprint — UAT, sepenuhnya di free tier.
+#
+# Database dan file storage SENGAJA tidak di Render:
+#   - Postgres gratis Render kedaluwarsa 30 hari setelah dibuat, lalu dihapus
+#     permanen setelah 14 hari grace. UAT tidak boleh mati di tengah jalan.
+#   - Disk persisten tidak tersedia di free tier, jadi unggahan harus ke object
+#     storage. fileService.ts sudah memilih Supabase Storage begitu SUPABASE_URL
+#     dan SUPABASE_SERVICE_ROLE_KEY terisi — nol perubahan kode.
+# Keduanya diambil dari satu project Supabase gratis (region Singapura).
+services:
+  - type: web
+    name: invoice-tracking-uat
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # Render menerjemahkan setiap env var di sini menjadi Docker build arg,
+      # jadi yang NEXT_PUBLIC_* ikut ter-inline ke bundle klien saat build —
+      # syarat mutlak, karena keduanya dibaca saat build, bukan saat runtime.
+      - key: NEXT_PUBLIC_ENABLE_DEMO_LOGIN
+        value: "true"
+
+      # Tanpa ini setiap request auth gagal UntrustedHost sejak boot pertama.
+      - key: AUTH_TRUST_HOST
+        value: "true"
+
+      # Supabase pooler memakai rantai sertifikat yang tidak terverifikasi.
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: "false"
+
+      # Dibangkitkan Render, tidak pernah menyentuh git.
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+
+      # sync: false = Render meminta nilainya lewat dashboard saat deploy
+      # pertama. Tidak ada rahasia yang tersimpan di repo.
+      - key: DATABASE_URL
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: NEXT_PUBLIC_DEMO_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
