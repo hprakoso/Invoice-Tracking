@@ -203,16 +203,19 @@ Upload diuji lengkap meski `GOOGLE_API_KEY` belum diset: `upload/route.ts:74` me
 klasifikasi, dan klasifikasi di `:85` dibungkus `try/catch` di `:88` — jadi ketiadaan Gemini menurunkan
 dokumen ke tipe `OTHER` tanpa menggagalkan unggahan. Itu membuktikan jalur storage berdiri sendiri.
 
-**Belum aktif dan sengaja:** `GOOGLE_API_KEY` (OCR + chat) dan `RESEND_API_KEY` (email). Kunci berbiaya
-tidak disalin dari `.env.local` tanpa permintaan eksplisit. Aktifkan dengan menambah env var di Render.
+Saat §4.6 dijalankan, `GOOGLE_API_KEY` dan `RESEND_API_KEY` belum diset — kunci berbiaya tidak disalin
+dari `.env.local` tanpa permintaan eksplisit. Keduanya kemudian diaktifkan; lihat §4.7.
 
 ---
 
-## 4.7 OCR, chat dan email — diaktifkan dan diuji (2026-09-11)
+## 4.7 OCR dan chat aktif; email diuji lalu dimatikan (2026-09-11)
 
-`GOOGLE_API_KEY`, `GEMINI_MODEL`, `RESEND_API_KEY` dan `RESEND_FROM_EMAIL` dipasang di Render (total 14
-variabel). Kedua kunci divalidasi dengan panggilan sungguhan **sebelum** dipasang; keempat domain Resend
-berstatus `verified`, jadi email terkirim ke penerima mana pun, bukan hanya pemilik akun.
+`GOOGLE_API_KEY`, `GEMINI_MODEL`, `RESEND_API_KEY` dan `RESEND_FROM_EMAIL` dipasang di Render. Kedua
+kunci divalidasi dengan panggilan sungguhan **sebelum** dipasang; keempat domain Resend berstatus
+`verified`, jadi email terkirim ke penerima mana pun, bukan hanya pemilik akun.
+
+`RESEND_API_KEY` kemudian **dicabut lagi** setelah email terbukti bekerja (lihat akhir bagian ini), jadi
+environment akhir berisi **13 variabel**.
 
 | Fitur | Bukti |
 |---|---|
@@ -220,7 +223,7 @@ berstatus `verified`, jadi email terkirim ke penerima mana pun, bukan hanya pemi
 | **Klasifikasi dokumen** | PDF invoice diunggah → tipe `INVOICE`, confidence **100** |
 | **OCR (SSE)** | 17 event dalam **11,4 detik**, `overallConfidence` 96,3. Semua nilai tepat: subtotal 15.000.000, PPN 1.650.000, total 16.650.000, 2 line item |
 | **Resolusi company** | Blok bill-to → `MATCHED` ke `PT Nusantara Gemilang Sejahtera` lewat nama |
-| **Email** | Digest "17 invoice sudah jatuh tempo" → status `delivered` di Resend |
+| **Email** | Digest "17 invoice sudah jatuh tempo" → status `delivered` di Resend. **Kini dimatikan** — lihat di bawah |
 
 **Stream SSE 11 detik berjalan utuh di Render** — inilah yang tidak bisa dilakukan Netlify (batas durasi
 function) maupun Vercel (60 detik di `vercel.json`).
@@ -234,20 +237,31 @@ kegagalan nyata (2026-09-03). `poNumber` dan `companyId` ditahan karena keduanya
 `validateReadyToGoLive` — menulisnya dari OCR akan memuaskan gerbang itu dengan data yang belum
 dikonfirmasi manusia. Ketiganya kembali lewat `PATCH` dari langkah konfirmasi.
 
-### ⚠️ Penerima email masih alamat palsu
+### Email: terbukti jalan, lalu dimatikan atas permintaan maintainer
 
-`reminder_settings.email_enabled` kini `true` untuk `due_soon` dan `overdue` (sebelumnya seed menyetel
-`false` untuk semua — itulah kenapa cron membuat notifikasi tapi tidak mengirim email). Penerimanya
-diambil dari role `GA_STAFF`/`GA_MANAGER`, yaitu `gastaff@sip.id`, `gamanager@sip.id`,
-`gantipassword@sip.id` — **domain seed yang tidak nyata**.
+Email **tidak urgen untuk UAT**, dan penerima reminder masih alamat seed yang tidak nyata
+(`gastaff@sip.id`, `gamanager@sip.id`, `gantipassword@sip.id`). Mengirim ke sana menghasilkan bounce,
+dan domain pengirim `ai-dev.tech` juga dipakai untuk email bisnis sungguhan — bounce berulang merusak
+reputasi pengirimnya. Jadi setelah dibuktikan bekerja, email dimatikan.
 
-Memicu cron sekarang akan menghasilkan **bounce**, dan domain pengirim `ai-dev.tech` juga dipakai untuk
-email bisnis sungguhan, jadi bounce berulang merusak reputasi pengirimnya. Sebelum menjalankan cron:
-ubah email ketiga akun itu ke alamat nyata lewat `PATCH /api/users/[id]`, **atau** isi `extraEmails`
-pada `/admin/reminders` dengan alamat yang Anda kendalikan dan kosongkan `recipientRoles`.
+Dimatikan **dua lapis**, karena satu lapis saja tidak cukup di UAT ini:
 
-Pengujian di atas memakai `delivered@resend.dev` — alamat uji resmi Resend yang selalu sukses — justru
-untuk menghindari bounce itu.
+1. **`reminder_settings.email_enabled = false`** untuk `due_soon` dan `overdue` (kembali ke keadaan
+   seed). Keempat jalur pengirim email digerbangi flag per-tipe ini —
+   `reminderScheduler.ts:46,81`, `stage/route.ts:92` (`stage_assigned`) dan
+   `invoices/[id]/route.ts:406` (`status_changed`) — dan dua yang terakhir sudah `false`.
+2. **`RESEND_API_KEY` dicabut dari environment Render.** Lapis pertama saja tidak cukup: halaman
+   `/admin/reminders` bisa menyalakan flag itu lagi, dan di UAT **setiap penguji bisa masuk sebagai
+   ADMIN lewat tombol sekali-klik**. Tanpa kunci, `email.ts:11` keluar lebih awal apa pun setelannya.
+
+`RESEND_FROM_EMAIL` sengaja ditinggal — bukan rahasia, dan menyalakan email lagi cukup satu variabel.
+
+**Menyalakan kembali:** pasang `RESEND_API_KEY` di Render, lalu nyalakan `email_enabled` pada tipe yang
+diinginkan di `/admin/reminders`. Sebelum itu, arahkan penerimanya ke alamat nyata — ubah email akun
+lewat `PATCH /api/users/[id]`, atau isi `extraEmails` dan kosongkan `recipientRoles`.
+
+Catatan pengujian: pembuktian di atas memakai `delivered@resend.dev`, alamat uji resmi Resend yang
+selalu sukses, justru supaya tidak ada bounce ke alamat palsu.
 
 ---
 
