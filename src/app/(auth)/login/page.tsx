@@ -47,6 +47,12 @@ export default function LoginPage() {
   // credential and must never appear in client code. Keep it that way.
   // Remove this block, and seed-demo-users.ts, after the demo.
   const demoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? 'demo1234'
+  // UAT builds run with NODE_ENV=production, which would strip the buttons
+  // below — testers are meant to click straight in. Opt in explicitly per
+  // deployment; unset (the default) keeps production behaving as before.
+  const demoLoginEnabled =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'
   const demoAccounts = [
     { label: 'admin', email: 'admin@sip.id' },
     { label: 'ga_staff', email: 'gastaff@sip.id' },
@@ -219,9 +225,9 @@ export default function LoginPage() {
               {!loading && <ArrowRight className="h-4 w-4" />}
             </button>
 
-            {process.env.NODE_ENV === 'development' && (
+            {demoLoginEnabled && (
               <div className="space-y-2 rounded-2xl border border-dashed border-muted-foreground/40 p-3">
-                <p className="text-center text-xs font-medium text-muted-foreground">Dev — login sebagai</p>
+                <p className="text-center text-xs font-medium text-muted-foreground">Demo — login sebagai</p>
                 <div className="flex flex-wrap gap-2">
                   {demoAccounts.map(a => (
                     <button
