@@ -1,6 +1,6 @@
 # Deploy UAT — Render + Supabase (gratis)
 
-**Dibuat:** 2026-09-11 · **Status:** konfigurasi siap, menunggu kredensial · **Biaya:** $0
+**Dibuat:** 2026-09-11 · **Status:** image terbukti jalan end-to-end, menunggu kredensial · **Biaya:** $0
 
 Dokumen ini melengkapi [`UAT_AND_CUTOVER.md`](./UAT_AND_CUTOVER.md), yang tetap jadi sumber kebenaran
 untuk **matriks variabel environment**, **akun uji**, dan **8 skenario UAT wajib**. Di sini hanya
@@ -150,6 +150,27 @@ git repo publik ini. Mengisinya membuat default itu tidak pernah terpakai.
 4. Unggah satu dokumen, lalu buka lagi setelah deploy ulang — membuktikan file ada di Supabase Storage,
    bukan disk ephemeral.
 5. Jalankan 8 skenario di §1.5 `UAT_AND_CUTOVER.md`.
+
+---
+
+## 4.5 Bukti: image ini sudah diuji end-to-end secara lokal
+
+Dijalankan sebelum menyentuh Render sama sekali, supaya kegagalan build tidak ketahuan setelah akun
+dibuat. Image yang sama persis (`docker build`, exit 0, 443 MB) dijalankan sebagai container terhadap
+Postgres lokal yang terisi penuh — 12 tabel, 8 akun, 107 invoice:
+
+| Yang diuji | Hasil |
+|---|---|
+| Container boot + koneksi database | `GET /api/health` → `200 {"status":"ok","app":"ok","db":"ok"}` |
+| **Tombol demo selamat di build produksi** | Penanda "Demo — login sebagai" dan label `ga_staff` / `vendor A` / `vendor B` ada di HTML — inilah yang dulu hilang terbuang dead-code elimination |
+| Login kredensial sungguhan | `POST /api/auth/callback/credentials` → 302, cookie `authjs.session-token` terpasang, sesi `role: ADMIN` |
+| Enam endpoint terautentikasi | `/api/dashboard`, `/api/invoices`, `/api/notifications`, `/api/vendors`, `/api/companies`, `/api/audit` → semua 200 |
+| Dashboard ter-render | 33.9 KB HTML, `totalInvoices: 104` (107 baris dikurangi draft — sesuai desain) |
+| Cron gagal tertutup | Tanpa token → **401**; dengan `Bearer` benar → `200 {"ok":true,...,"notificationsCreated":78}` |
+| **Isolasi lintas tenant** | `vendor2@sip.id` membuka invoice milik Vendor A → **403** |
+
+Yang **belum** terbukti dan hanya bisa diuji setelah deploy: persistensi Supabase Storage (butuh
+kredensial Supabase) dan perilaku 512 MB / cold start di free tier Render.
 
 ---
 
