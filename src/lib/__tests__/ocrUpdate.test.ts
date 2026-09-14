@@ -123,6 +123,22 @@ describe('buildOcrUpdate — amounts', () => {
   })
 })
 
+// Shares toIsoDateOnly with the confirmation form, so OCR can no longer store
+// a day the review step would have refused to show.
+describe('buildOcrUpdate — ambiguous dates are refused, not guessed', () => {
+  it('rejects a slashed date instead of reinterpreting it', () => {
+    const { data, rejected } = buildOcrUpdate(extraction({ invoice_date: field('03/04/2026') }), noCurrent)
+    expect(rejected).toContain('invoice_date')
+    expect(data.invoiceDate).toBeUndefined()
+  })
+
+  it('still accepts the ISO form the prompt asks for', () => {
+    const { data, rejected } = buildOcrUpdate(extraction({ invoice_date: field('2026-04-03') }), noCurrent)
+    expect(rejected).not.toContain('invoice_date')
+    expect(data.invoiceDate?.toISOString().slice(0, 10)).toBe('2026-04-03')
+  })
+})
+
 describe('buildOcrUpdate — currency', () => {
   it('accepts a 3-letter code and normalises case', () => {
     expect(buildOcrUpdate(extraction({ currency: field('usd') }), noCurrent).data.currency).toBe('USD')

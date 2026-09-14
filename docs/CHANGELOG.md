@@ -8,6 +8,31 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #5: field tanggal pada konfirmasi upload memakai date picker
+
+**Akar masalah.** Langkah review merender setiap field hasil ekstraksi lewat satu `<Input>` teks
+generik, dan nilai yang diisikan adalah string mentah dari model — bukan nilai yang sudah
+dinormalkan untuk database. `confirmAndSubmit` lalu meneruskannya apa adanya.
+
+**Required vs optional ditentukan dari schema, bukan dari asumsi.** `invoices.invoice_date` dan
+`invoices.due_date` keduanya `DateTime?` (nullable), keduanya `.optional().nullable()` di
+`createInvoiceSchema` dan `updateInvoiceSchema`, dan `validateReadyToGoLive` — gerbang draft→live —
+hanya mewajibkan dokumen, PO dan company. Jadi **keduanya opsional**: null tetap boleh, dan aturan
+bisnis field tidak diubah untuk task ini. Audit juga menegaskan `po_number`/`invoice_number` terbaca
+seperti tanggal bagi manusia tetapi bertipe string, jadi tidak diubah; `sendDate` sudah date input.
+
+**Perubahan.** Kedua field memakai `<input type="date">`. Helper baru `toIsoDateOnly()` diletakkan di
+`src/lib/format.ts` — tempat semua helper tanggal/angka bersama sudah tinggal, dan sudah diimpor oleh
+kedua konsumennya — lalu `parseExtractedDate()` di `geminiExtraction.ts` ditulis ulang untuk
+memanggilnya, sehingga form konfirmasi dan penulis OCR tidak mungkin berbeda pendapat soal apa yang
+dianggap tanggal valid. `validations.ts` tidak bisa dipakai langsung karena mengimpor `next/server`.
+
+**Tanggal ambigu tidak ditebak.** Hanya bentuk ISO `YYYY-MM-DD` yang diterima. `03/04/2026` ditolak —
+`new Date()` membacanya 4 Maret sementara invoice Indonesia berarti 3 April. Nilai yang tidak terbaca
+**tidak dibuang diam-diam**: teks aslinya tetap ditampilkan dengan peringatan bahwa koreksi
+diperlukan, picker dibiarkan kosong, dan yang dikirim ke API adalah `null` (legal, karena kolomnya
+nullable). `due_date` juga mendapat `min` = `invoice_date`, sesuai aturan server dan CHECK constraint.
+
 ### 2026-09-14 — Feedback PM #4: KPI dihapus dari export Excel
 
 Worksheet `KPI Summary` (total, hitungan per status, bucket aging) dihapus di generatornya, bukan

@@ -290,6 +290,7 @@ const en: Dictionary = {
     ocrFailedTitle: 'OCR failed to read the document',
     ocrFailedBody: 'The document is still saved — please fill in the invoice data manually below.',
     reviewAndEdit: 'Verify & Edit Data',
+    dateUnreadable: 'The extracted value "{value}" could not be read as a date — please pick the correct date.',
     invoiceItems: 'Invoice Items',
     sendDateLabel: 'Date the hardcopy was sent to the office',
     picLabel: 'PIC (GA Staff handling this invoice)',

@@ -288,6 +288,7 @@ const id = {
     ocrFailedTitle: 'OCR gagal membaca dokumen',
     ocrFailedBody: 'Dokumen tetap tersimpan — silakan isi data invoice secara manual di bawah ini.',
     reviewAndEdit: 'Periksa & Edit Data',
+    dateUnreadable: 'Hasil ekstraksi "{value}" tidak dapat dibaca sebagai tanggal — silakan pilih tanggal yang benar.',
     invoiceItems: 'Item Invoice',
     sendDateLabel: 'Tanggal hardcopy dikirim ke kantor',
     picLabel: 'PIC (GA Staff yang menangani invoice ini)',
