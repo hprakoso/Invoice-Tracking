@@ -69,6 +69,37 @@ export function parseAmountID(raw: string | number | null | undefined): number |
   return Number.isFinite(value) ? value : null
 }
 
+/**
+ * Normalise a date to the `YYYY-MM-DD` an `<input type="date">` needs, or ''
+ * when it cannot be trusted.
+ *
+ * Only the unambiguous ISO form is accepted — the shape the extraction prompt
+ * asks Gemini for. A slashed date is deliberately NOT parsed: `new Date()`
+ * reads '03/04/2026' as 4 March, while an Indonesian invoice means 3 April, so
+ * guessing would store a different day than the document shows. The caller is
+ * expected to surface the unreadable value rather than drop it silently.
+ *
+ * The year window matches `isoDateString` in validations.ts, so anything this
+ * accepts is a value the API will accept too. Lives here rather than in
+ * validations.ts because that module imports `next/server` and cannot be
+ * pulled into a client component.
+ */
+export function toIsoDateOnly(raw: string | Date | null | undefined): string {
+  if (!raw) return ''
+  const text = raw instanceof Date ? raw.toISOString() : String(raw).trim()
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return ''
+
+  const iso = `${match[1]}-${match[2]}-${match[3]}`
+  const year = Number(match[1])
+  if (year < 2000 || year > new Date().getUTCFullYear() + 10) return ''
+
+  // Round-trip rejects a date that does not exist ('2026-02-31'), which Date
+  // would otherwise roll forward into a different day.
+  const parsed = new Date(`${iso}T00:00:00Z`)
+  return !isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : ''
+}
+
 /** Format an ISO date string as a localised Indonesian date (e.g. "15 Jan 2026"). */
 export function formatDate(d: string | null | undefined): string {
   if (!d) return '—'

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isOverdue, jakartaDayStart, parseAmountID } from '../format'
+import { isOverdue, jakartaDayStart, parseAmountID, toIsoDateOnly } from '../format'
 
 // The bug this guards: the OCR review screen parsed edited amounts with
 // `parseFloat(raw.replace(/[^0-9.]/g, ''))`, which keeps the dots — so typing
@@ -105,5 +105,57 @@ describe('isOverdue — due-day boundary in Jakarta', () => {
 
   it('stays not-overdue for a settled invoice past its due day', () => {
     expect(isOverdue(dueToday, 'PAID', new Date('2026-09-30T00:00:00Z'))).toBe(false)
+  })
+})
+
+// Feeds the date pickers on the upload confirmation step and, via
+// parseExtractedDate, the OCR writer. The rule that matters: an extracted date
+// is either recognised exactly or refused — never "best effort" parsed into a
+// different day than the document shows.
+describe('toIsoDateOnly', () => {
+  it('passes a plain ISO date through', () => {
+    expect(toIsoDateOnly('2026-09-30')).toBe('2026-09-30')
+  })
+
+  it('takes the date part of a stored timestamp', () => {
+    expect(toIsoDateOnly('2026-09-30T00:00:00.000Z')).toBe('2026-09-30')
+  })
+
+  it('accepts a Date object', () => {
+    expect(toIsoDateOnly(new Date('2026-09-30T00:00:00Z'))).toBe('2026-09-30')
+  })
+
+  it('trims surrounding whitespace', () => {
+    expect(toIsoDateOnly('  2026-09-30 ')).toBe('2026-09-30')
+  })
+
+  it('returns empty for nothing at all', () => {
+    for (const empty of [null, undefined, '']) {
+      expect(toIsoDateOnly(empty)).toBe('')
+    }
+  })
+
+  // The case the PM called out by name: 03/04/2026 is 4 March to Date() and
+  // 3 April on an Indonesian invoice, so it must not be guessed either way.
+  it('refuses an ambiguous slashed date rather than picking a day', () => {
+    for (const raw of ['03/04/2026', '30/09/2026', '9/30/2026', '03-04-2026']) {
+      expect(toIsoDateOnly(raw)).toBe('')
+    }
+  })
+
+  it('refuses free text the model can emit', () => {
+    for (const raw of ['N/A', '-', 'Jatuh Tempo', '30 September 2026']) {
+      expect(toIsoDateOnly(raw)).toBe('')
+    }
+  })
+
+  it('refuses an implausible year, matching the API validator', () => {
+    expect(toIsoDateOnly('0202-09-30')).toBe('')
+    expect(toIsoDateOnly('2205-09-30')).toBe('')
+  })
+
+  it('refuses a calendar date that does not exist instead of rolling it forward', () => {
+    expect(toIsoDateOnly('2026-02-31')).toBe('')
+    expect(toIsoDateOnly('2026-13-01')).toBe('')
   })
 })

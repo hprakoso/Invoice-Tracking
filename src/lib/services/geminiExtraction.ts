@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai'
-import { parseAmountID } from '@/lib/format'
+import { parseAmountID, toIsoDateOnly } from '@/lib/format'
 
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 
@@ -132,16 +132,17 @@ export interface ExtractionResult {
   overall_confidence: number
 }
 
-/** A date the model returned is only accepted if it's parseable and plausible. */
+/**
+ * A date the model returned is only accepted if it is unambiguous and
+ * plausible. Delegates to toIsoDateOnly so the OCR writer and the confirmation
+ * form agree on exactly which strings count as a date — this used to be
+ * `new Date(raw)`, which happily turned '03/04/2026' into 4 March even though
+ * an Indonesian invoice means 3 April. An unrecognised value now lands in
+ * `rejected` instead of being stored as a different day.
+ */
 function parseExtractedDate(raw: string | null | undefined): Date | null {
-  if (!raw) return null
-  const parsed = new Date(raw)
-  if (isNaN(parsed.getTime())) return null
-  const year = parsed.getUTCFullYear()
-  // Guards year misreads ('0202', '2205'), which otherwise park an invoice in
-  // the wrong aging bucket permanently and never stop generating reminders.
-  if (year < 2000 || year > new Date().getUTCFullYear() + 10) return null
-  return parsed
+  const iso = toIsoDateOnly(raw)
+  return iso ? new Date(`${iso}T00:00:00Z`) : null
 }
 
 const AMOUNT_COLUMNS = [
@@ -207,8 +208,13 @@ export function buildOcrUpdate(
     rejected.push('due_date')
   }
 
+  // IDR is the only currency the business bills in, so a code read off a
+  // document is stored only when it agrees. Anything else — including a
+  // well-formed 'USD' — is reported as rejected and the column keeps its
+  // existing value, which is also what makes this non-destructive for the
+  // legacy rows that hold another code.
   const currency = extracted.currency?.value?.trim().toUpperCase()
-  if (currency && /^[A-Z]{3}$/.test(currency)) data.currency = currency
+  if (currency === 'IDR') data.currency = currency
   else if (currency) rejected.push('currency')
 
   for (const [key, column] of AMOUNT_COLUMNS) {

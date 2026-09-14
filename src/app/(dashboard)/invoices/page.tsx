@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Plus, ChevronRight, ChevronsUpDown } from 'lucide-react'
+import { Search, Plus, ChevronLeft, ChevronRight, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -59,6 +59,21 @@ export default function InvoicesPage() {
   const [amountMin, setAmountMin] = useState('')
   const [amountMax, setAmountMax] = useState('')
   const [gaStaff, setGaStaff] = useState<{ id: string; name: string }[]>([])
+  // Server-side paging. The body is still a bare array, so `total`/`pages` come
+  // from the response headers — the table only ever holds one page and neither
+  // figure can be derived from it.
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pages, setPages] = useState(1)
+
+  // A filter change invalidates the page number: page 4 of the unfiltered list
+  // is not page 4 of the filtered one, and is usually past its end. Done in the
+  // setters rather than an effect so the narrowed query is fetched once instead
+  // of fetched-then-refetched.
+  const onFilter = <T,>(set: (v: T) => void) => (value: T) => {
+    set(value)
+    setPage(1)
+  }
 
   // PIC is internal-only (scrubbed from vendor-facing invoice responses), so
   // vendors don't get a filter for it either.
@@ -74,11 +89,16 @@ export default function InvoicesPage() {
     if (picId) params.set('picId', picId)
     if (amountMin) params.set('amountMin', amountMin)
     if (amountMax) params.set('amountMax', amountMax)
+    params.set('page', String(page))
     const res = await fetch(`/api/invoices?${params}`)
     const data = await res.json()
     setInvoices(Array.isArray(data) ? data : [])
+    const headerTotal = Number(res.headers.get('X-Total-Count'))
+    const headerPages = Number(res.headers.get('X-Total-Pages'))
+    setTotal(Number.isFinite(headerTotal) ? headerTotal : 0)
+    setPages(Number.isFinite(headerPages) && headerPages > 0 ? headerPages : 1)
     setLoading(false)
-  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax])
+  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax, page])
 
   useEffect(() => {
     fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
@@ -118,7 +138,7 @@ export default function InvoicesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{t.invoices.title}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{invoices.length} {t.invoices.countFound}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{total} {t.invoices.countFound}</p>
         </div>
         {canUpload && (
           <Link href="/invoices/upload">
@@ -138,20 +158,20 @@ export default function InvoicesPage() {
             <Input
               placeholder={t.invoices.searchPlaceholder}
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => onFilter(setSearch)(e.target.value)}
               className="pl-9"
             />
           </div>
           <select
             value={status}
-            onChange={e => setStatus(e.target.value)}
+            onChange={e => onFilter(setStatus)(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
           <select
             value={vendorId}
-            onChange={e => setVendorId(e.target.value)}
+            onChange={e => onFilter(setVendorId)(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">{t.dashboard.allVendors}</option>
@@ -163,13 +183,13 @@ export default function InvoicesPage() {
           <Input
             placeholder={t.invoices.poFilterPlaceholder}
             value={poNumber}
-            onChange={e => setPoNumber(e.target.value)}
+            onChange={e => onFilter(setPoNumber)(e.target.value)}
             className="sm:max-w-[180px]"
           />
           {canFilterByPic && (
             <select
               value={picId}
-              onChange={e => setPicId(e.target.value)}
+              onChange={e => onFilter(setPicId)(e.target.value)}
               aria-label={t.invoices.picFilterLabel}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -184,7 +204,7 @@ export default function InvoicesPage() {
               min={0}
               placeholder={t.invoices.amountMinPlaceholder}
               value={amountMin}
-              onChange={e => setAmountMin(e.target.value)}
+              onChange={e => onFilter(setAmountMin)(e.target.value)}
               aria-label={t.invoices.amountMinPlaceholder}
               className="w-full sm:w-[140px]"
             />
@@ -195,7 +215,7 @@ export default function InvoicesPage() {
               min={0}
               placeholder={t.invoices.amountMaxPlaceholder}
               value={amountMax}
-              onChange={e => setAmountMax(e.target.value)}
+              onChange={e => onFilter(setAmountMax)(e.target.value)}
               aria-label={t.invoices.amountMaxPlaceholder}
               className="w-full sm:w-[140px]"
             />
@@ -297,6 +317,25 @@ export default function InvoicesPage() {
           </table>
         </div>
       </div>
+
+      {/* Pagination — same controls as the audit log's */}
+      {pages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t.invoices.pageOf.replace('{page}', String(page)).replace('{pages}', String(pages))}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || loading} className="gap-1">
+              <ChevronLeft className="h-4 w-4" />
+              {t.invoices.previous}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(pages, p + 1))} disabled={page >= pages || loading} className="gap-1">
+              {t.invoices.next}
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

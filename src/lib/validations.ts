@@ -44,6 +44,19 @@ export function validateInvoiceDates(
   return { valid: true }
 }
 
+/**
+ * The business bills in Rupiah only, so this is the one currency any new
+ * invoice or edit may carry. It was `z.string().length(3)`, which accepted any
+ * code — and nothing anywhere converts between currencies, so a USD total would
+ * have been summed straight into Total Payable next to IDR ones.
+ *
+ * Scoped to WRITES on purpose. The column is untouched and there is no
+ * migration: rows written before this keep whatever they hold, and every read
+ * path (detail page, Excel export, chatbot) still renders them as stored.
+ */
+export const SUPPORTED_CURRENCIES = ['IDR'] as const
+const currencySchema = z.enum(SUPPORTED_CURRENCIES)
+
 const itemSchema = z.object({
   description: z.string().min(1, 'Item description required'),
   quantity: z.number().positive().optional(),
@@ -91,7 +104,7 @@ export const createInvoiceSchema = z.object({
   poNumber: z.string().trim().min(1, 'PO number required').max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
-  currency: z.string().length(3).default('IDR'),
+  currency: currencySchema.default('IDR'),
   subtotal: z.number().nonnegative().optional().nullable(),
   taxAmount: z.number().nonnegative().optional().nullable(),
   totalAmount: z.number().min(0, 'Total amount must be non-negative'),
@@ -132,7 +145,7 @@ export const updateInvoiceSchema = z.object({
   poNumber: z.string().trim().min(1).max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
-  currency: z.string().length(3).optional(),
+  currency: currencySchema.optional(),
   subtotal: z.number().nonnegative().optional().nullable(),
   taxAmount: z.number().nonnegative().optional().nullable(),
   totalAmount: z.number().min(0).optional(),

@@ -8,6 +8,235 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #6: currency hanya IDR untuk flow input baru
+
+**Kondisi awal.** Currency sebenarnya sudah IDR di setiap tempat yang disentuh manusia — wizard
+upload **tidak pernah mengirim** `currency` sama sekali (`confirmAndSubmit` tidak punya key itu),
+sehingga `.default('IDR')` di `createInvoiceSchema` yang selalu berlaku. Kotak currency di langkah
+review karena itu dekoratif: mengeditnya tidak berefek apa pun. Yang benar-benar bisa menembus
+adalah dua jalur: `buildOcrUpdate` menulis kode 3 huruf apa pun yang dibaca model dari dokumen, dan
+`z.string().length(3)` di kedua schema menerima kode apa pun dari pemanggil API langsung.
+
+**Perubahan.** `SUPPORTED_CURRENCIES = ['IDR']` menutup `createInvoiceSchema` dan
+`updateInvoiceSchema` — perubahan validasi input yang diminta secara eksplisit oleh pemilik repo —
+dan `buildOcrUpdate` kini hanya menerima `IDR`; kode lain dilaporkan sebagai `rejected` dan kolom
+dibiarkan pada nilainya. Di UI, currency berhenti menjadi field yang bisa diedit (dihapus dari
+`FIELD_DEFS` dan dari urutan field yang dikirim rute OCR) dan ditampilkan sebagai nilai tetap IDR.
+
+**Tidak ada migrasi dan tidak ada penulisan ulang data historis.** Kolomnya tidak disentuh; baris
+lama menyimpan apa yang sudah ada dan tetap tampil apa adanya di halaman detail, export Excel dan
+chatbot. Sebuah edit yang tidak menyebut `currency` tetap valid, jadi baris non-IDR lama masih bisa
+diperbaiki lewat field lain.
+
+### 2026-09-14 — Feedback PM #5: field tanggal pada konfirmasi upload memakai date picker
+
+**Akar masalah.** Langkah review merender setiap field hasil ekstraksi lewat satu `<Input>` teks
+generik, dan nilai yang diisikan adalah string mentah dari model — bukan nilai yang sudah
+dinormalkan untuk database. `confirmAndSubmit` lalu meneruskannya apa adanya.
+
+**Required vs optional ditentukan dari schema, bukan dari asumsi.** `invoices.invoice_date` dan
+`invoices.due_date` keduanya `DateTime?` (nullable), keduanya `.optional().nullable()` di
+`createInvoiceSchema` dan `updateInvoiceSchema`, dan `validateReadyToGoLive` — gerbang draft→live —
+hanya mewajibkan dokumen, PO dan company. Jadi **keduanya opsional**: null tetap boleh, dan aturan
+bisnis field tidak diubah untuk task ini. Audit juga menegaskan `po_number`/`invoice_number` terbaca
+seperti tanggal bagi manusia tetapi bertipe string, jadi tidak diubah; `sendDate` sudah date input.
+
+**Perubahan.** Kedua field memakai `<input type="date">`. Helper baru `toIsoDateOnly()` diletakkan di
+`src/lib/format.ts` — tempat semua helper tanggal/angka bersama sudah tinggal, dan sudah diimpor oleh
+kedua konsumennya — lalu `parseExtractedDate()` di `geminiExtraction.ts` ditulis ulang untuk
+memanggilnya, sehingga form konfirmasi dan penulis OCR tidak mungkin berbeda pendapat soal apa yang
+dianggap tanggal valid. `validations.ts` tidak bisa dipakai langsung karena mengimpor `next/server`.
+
+**Tanggal ambigu tidak ditebak.** Hanya bentuk ISO `YYYY-MM-DD` yang diterima. `03/04/2026` ditolak —
+`new Date()` membacanya 4 Maret sementara invoice Indonesia berarti 3 April. Nilai yang tidak terbaca
+**tidak dibuang diam-diam**: teks aslinya tetap ditampilkan dengan peringatan bahwa koreksi
+diperlukan, picker dibiarkan kosong, dan yang dikirim ke API adalah `null` (legal, karena kolomnya
+nullable). `due_date` juga mendapat `min` = `invoice_date`, sesuai aturan server dan CHECK constraint.
+
+### 2026-09-14 — Feedback PM #4: KPI dihapus dari export Excel
+
+Worksheet `KPI Summary` (total, hitungan per status, bucket aging) dihapus di generatornya, bukan
+ditambal setelah file terbentuk. Panggilan `getDashboardStats()` yang hanya ada untuk mengisinya ikut
+hilang — sekitar 15 query agregat per unduhan. `getDashboardStats` sendiri tidak dihapus:
+`GET /api/dashboard` masih memakainya.
+
+Sheet `Invoices` tidak disentuh. Terverifikasi setelah perubahan: workbook berisi tepat satu sheet
+bernama `Invoices`, dengan ke-20 kolom yang sama dan 104 baris data. Kolom `Currency` tetap menulis
+`invoices.currency` apa adanya, sehingga baris historis tetap terekspor seperti sebelumnya.
+
+### 2026-09-14 — Feedback PM #3: kartu KPI dashboard menjadi filter
+
+**Bukan bug, tapi kemampuan yang belum ada.** `KPICard` adalah `motion.div` non-interaktif, dan
+dashboard hanya punya satu `Prisma.InvoiceWhereInput` yang menggerakkan kartu KPI sekaligus seluruh
+chart — tidak ada cara mengatakan "persempit chart-nya, tapi angka kartunya tetap".
+
+**Perubahan.** Satu query param baru, `kpi`, dengan nilai `payable` / `overdue` / `open`. Kartu
+diidentifikasi lewat predikat bisnisnya — kode status dari `NON_OPEN_STATUSES` dan perbandingan
+`due_date` terhadap `jakartaDayStart()` — **bukan** lewat label UI-nya; nilai berbentuk label seperti
+`kpi=Jatuh Tempo` diabaikan. Kartu Total Invoice tidak membawa predikat, jadi ia adalah tombol
+reset-nya; mengklik kartu yang sedang aktif juga membersihkan filter.
+
+**Komposisi memakai `AND`, bukan menimpa key.** `applyKpiScope` mengembalikan
+`{ AND: [where, ...] }`. Dua alasan: ia hanya bisa **mempersempit**, jadi scoping VENDOR di dalam
+`buildDashboardFilter` tidak mungkin tertimpa oleh sebuah kartu; dan ia tidak bertabrakan dengan
+`dueDate` yang di-spread tiap bucket aging di atasnya. Konsekuensinya, **bug pre-existing** pada
+bucket aging — yang menimpa filter rentang jatuh tempo dari/sampai — **tidak perlu disentuh** untuk
+membuat kartu Overdue benar, dan memang tidak disentuh (lihat Remaining issues).
+
+**Angka kartu tidak ikut menyempit.** `totalInvoices`, `totalPayable`, `overdueCount`, `openCount`
+tetap dihitung dari filter tanpa `kpi`, sesuai definisi bisnis yang sudah ada. Terverifikasi:
+keempat angka identik di keempat pilihan kartu, sementara `statusBreakdown` mengikuti (104 → 84 → 26)
+dan total aging turun dari 14,39 M ke 4,24 M saat kartu Overdue dipilih.
+
+**Export sengaja tidak ikut.** PM hanya meminta kartu dashboard menjadi filter, jadi `kpi`
+ditambahkan ke URL fetch dashboard saja — bukan ke `buildParams()` yang juga membangun tautan export.
+
+### 2026-09-14 — Feedback PM #2: pagination di database, kontrak response tidak dipecah
+
+**Akar masalah.** `GET /api/invoices` adalah `findMany()` polos tanpa `take`/`skip`, jadi setiap
+ketikan di kotak pencarian mengirim seluruh tabel ke browser dan tabel merender semuanya.
+
+**Keputusan kontrak.** Tiga desain ditimbang: (a) envelope `{ invoices, total, page, pages }`
+meniru `GET /api/audit`, (b) dual-shape — array bila tanpa `?page`, envelope bila ada, (c) array
+tetap + metadata di response header. Audit konsumen lebih dulu dijalankan dari lima arah berbeda
+dan hasilnya konsisten: **hanya satu consumer GET** di seluruh repo,
+`src/app/(dashboard)/invoices/page.tsx`. Envelope adalah pola yang sudah ada di repo ini
+(`/api/audit`), tetapi prioritas yang ditetapkan menempatkan *backward compatibility* di atas
+konsistensi pola, dan memang ada cara menambah pagination tanpa memecahkan kontrak — jadi (c)
+dipilih. Dual-shape ditolak: bentuk response yang bergantung pada ada/tidaknya sebuah query param
+adalah dua kontrak dalam satu rute.
+
+**Hasilnya.** Tanpa `page`/`pageSize`, rute berperilaku persis seperti sebelumnya — query sama,
+array sama, tanpa header tambahan. Dengan keduanya, potongan diambil di database dan metadata
+(`X-Total-Count`, `X-Page`, `X-Page-Size`, `X-Total-Pages`) dikirim lewat header. Filter dibangun
+**sebelum** `skip`/`take`, jadi pencarian memindai seluruh tabel lalu memaginasi hasilnya.
+
+**Satu perbaikan yang memang syarat kebenaran pagination:** `orderBy` menjadi
+`[{ createdAt: 'desc' }, { id: 'desc' }]`. `created_at` tidak unik — seed saja punya 14 invoice
+dengan nilai yang sama — sehingga tanpa urutan total, Postgres bisa mengulang atau melewatkan baris
+antar halaman. Terbukti saat verifikasi: 104 baris di 6 halaman, 104 unik, dan tetap 104 unik pada
+`pageSize=5` di 21 halaman.
+
+Di sisi FE, `page` direset ke 1 di dalam setter filter — bukan lewat `useEffect` — supaya query yang
+menyempit dijalankan sekali, bukan dijalankan lalu diulang.
+
+### 2026-09-14 — Feedback PM #1: comment dan aktivitas invoice muncul di "Riwayat & PIC"
+
+**Akar masalah: datanya sudah tersimpan, tidak pernah dibaca.** `PATCH /api/invoices/[id]`
+menulis comment PIC ke `audit_logs.metadata.comment` sejak awal, tetapi `GET /api/invoices/[id]`
+hanya mengembalikan `stageHistory` dan komponen timeline hanya merender itu — sehingga perubahan
+status, penugasan PIC dan comment tidak pernah punya jalan ke layar.
+
+**Perubahan.** GET kini juga mengembalikan `activity`: baris `audit_logs` milik invoice tersebut,
+di-scope `(entity_type, entity_id)` — keduanya literal, tidak pernah dari client — dan dijalankan
+**setelah** pengecekan kepemilikan vendor yang sudah ada, sehingga otorisasinya persis mengikuti
+otorisasi invoice itu sendiri. Tidak ada aturan akses baru yang dibuat: siapa pun yang boleh membaca
+invoice boleh membaca aktivitasnya, sama seperti `stageHistory`, `items` dan `documents` selama ini.
+`invoice.stage_changed` dikecualikan untuk semua role karena `invoice_stage_history` sudah memuat
+setiap perpindahan — memasukkan keduanya akan menampilkan satu perpindahan dua kali.
+
+Satu lubang pencatatan ikut ditutup: `comment` yang dikirim bersama edit non-status dulu dibuang
+diam-diam (hanya cabang `filtered.status` yang menyimpannya).
+
+**Tanpa file baru dan tanpa migrasi.** Penggabungan dua sumber riwayat dilakukan langsung di
+halaman detail, bukan di modul util baru — `CLAUDE.md` meminta memakai util yang sudah ada lebih
+dulu, dan tidak ada abstraksi timeline yang bisa dipakai ulang. Index `@@index([entityType, entityId])`
+yang dibutuhkan query ini sudah dideklarasikan di schema. Penugasan PIC dirender dari
+`metadata.fields` yang memang sudah ditulis rute, jadi bentuk metadata tidak diubah dan baris
+historis tetap terbaca.
+
+### 2026-09-11 (revisi) — Target hosting UAT diubah ke Render + Supabase, sepenuhnya gratis
+
+Maintainer meminta opsi gratis, menyebut Netlify, Render atau Cloudflare. Rekomendasi berbayar
+(Railway) diganti; konfigurasi containernya tidak berubah sama sekali karena image-nya sama.
+
+**Dua dari tiga tidak muat secara arsitektural, bukan soal harga.** Netlify menjalankan Next.js sebagai
+serverless function: batas payload ~6 MB mematikan unggahan 10 MB × 10 file yang diizinkan
+`uploadLimits.ts`, dan batas durasi function memutus stream SSE rute OCR yang dirancang jalan 60 detik+.
+Cloudflare Workers bukan runtime Node penuh — Prisma 7 di sana masih kena bug Wasm codegen terbuka, dan
+D1 adalah SQLite sementara skema ini `provider = "postgresql"` dengan 15 migrasi. **Render** satu-satunya
+yang menjalankan container Docker dengan proses Node hidup terus, jadi Dockerfile yang sudah ada jalan
+apa adanya.
+
+**Database dan storage sengaja tidak di Render.** Postgres gratis Render **kedaluwarsa 30 hari setelah
+dibuat** lalu dihapus permanen setelah 14 hari grace — UAT tidak boleh mati di tengah jalan. Free tier
+juga tidak punya disk persisten. Keduanya diambil dari satu project Supabase gratis: `fileService.ts`
+sudah memilih Supabase Storage begitu `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` terisi, jadi **nol
+perubahan kode** untuk keduanya.
+
+**`render.yaml` baru.** Web service Docker, plan free, region Singapura, healthcheck ke `/api/health`
+yang sudah ada. `NEXTAUTH_SECRET` dan `CRON_SECRET` memakai `generateValue: true` sehingga dibangkitkan
+Render dan tidak pernah menyentuh git; seluruh rahasia lain `sync: false`, diminta lewat dashboard saat
+deploy pertama. Terkonfirmasi dari dokumentasi Render: **setiap env var service otomatis diterjemahkan
+menjadi Docker build arg**, sehingga `ARG NEXT_PUBLIC_*` di stage `builder` menerima nilainya tanpa
+konfigurasi tambahan — syarat mutlak karena `NEXT_PUBLIC_*` disulih saat build, bukan runtime.
+
+**Batas yang diterima sadar:** 512 MB RAM / 0.1 CPU, dan tidur setelah ~15 menit idle (cold start
+~50 detik). Risiko nyata yang dicatat, bukan disembunyikan: `exceljs` menyusun XLSX di memori, jadi
+export daftar panjang bisa OOM. `railway.json` **sengaja dipertahankan** sebagai jalan keluar
+terdokumentasi untuk kasus itu — image-nya sama, jadi pindah tidak butuh perubahan kode.
+
+`docs/DEPLOY_RAILWAY.md` → `docs/DEPLOY_UAT.md`, ditulis ulang dengan Render sebagai jalur utama dan
+Railway sebagai upgrade berbayar di §6.
+
+### 2026-09-11 — Hosting UAT: image container, dan tombol demo yang bertahan di build produksi
+
+Tujuan maintainer: aplikasi online secepatnya untuk dicoba beberapa penguji, dengan perubahan
+seminimal mungkin. Didahului audit enam dimensi (runtime, environment, build, database/storage,
+auth, higiene rahasia) plus riset lima platform secara paralel.
+
+**Kondisi awal ternyata sudah sehat.** `tsc --noEmit` bersih, 125/125 tes lulus, `next build`
+berhasil, dan **ke-29 rute terkompilasi dinamis** — tidak ada halaman yang menyentuh Prisma saat
+build, jadi build Docker tidak membutuhkan database hidup. Yang kurang murni lapisan hosting.
+
+**Platform: Railway.** Dipilih dari enam kandidat. Alasan yang menentukan: region Singapura
+(~25–40 ms dari Jakarta), tidak ada plafon timeout request sehingga SSE OCR yang bisa jalan 60 detik+
+tidak perlu dipikirkan, dan volume yang membuat jalur fallback disk di `fileService.ts` menjadi
+persisten **tanpa perubahan kode**. DigitalOcean App Platform dicoret karena timeout 100 detik yang
+tidak bisa diubah dan tidak adanya volume persisten; Cloudflare Workers karena Prisma 7 di sana masih
+kena bug terbuka; Fly.io karena Managed Postgres mulai $38/bln; Render karena RAM mentok 512 MB di
+Starter, realistis OOM untuk `exceljs` + `react-pdf` + SDK Gemini. Perbandingan lengkap dan urutan
+perintahnya ada di [`DEPLOY_RAILWAY.md`](./DEPLOY_RAILWAY.md).
+
+**`output: "standalone"` di `next.config.ts`**, sehingga stage runtime image tidak perlu
+`node_modules`. Diabaikan `next dev`/`next start`, jadi alur kerja lokal tidak berubah. `Dockerfile`
+sengaja Dockerfile biasa dan bukan buildpack Railway: image yang sama jalan di Render, Fly, Cloud Run
+atau VM mana pun, supaya pilihan UAT tidak mengunci pilihan produksi. Stage runner menyalin `public/`
+dan `.next/static` secara manual — `output: standalone` memang tidak menyertakan keduanya, dan tanpa
+salinan itu semua aset statis 404.
+
+**Tombol login sekali-klik butuh perubahan kode, bukan variabel.** `login/page.tsx` memagari blok
+tombol dengan `process.env.NODE_ENV === 'development'`. Next.js menyulih nilai itu saat **build**, jadi
+pada build produksi ekspresinya terlipat menjadi `false` dan markup-nya dibuang dead-code elimination
+— diverifikasi terhadap build produksi repo ini sendiri: `.next/static/` tidak memuat `gastaff@sip.id`
+maupun `demo1234` sama sekali. Tidak ada variabel runtime yang bisa menghidupkannya kembali. Gerbangnya
+kini menerima `NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'` sebagai alternatif, dan label "Dev" menjadi
+"Demo" karena sekarang memang bisa tampil di luar `next dev`. **Perilaku produksi tidak berubah selama
+variabel itu tidak diset.** Mekanisme login, provider, hash password dan middleware tidak disentuh.
+
+Konsekuensi yang mudah terlewat: `NEXT_PUBLIC_*` disulih saat build, jadi di host container ia harus
+jadi **build argument**. Docker mengisolasi build dari environment host, sehingga variabel service
+Railway hanya masuk kalau dideklarasikan `ARG` di stage yang memakainya — keduanya sudah dideklarasikan
+di stage `builder`. Menyetelnya hanya sebagai variabel runtime tidak melakukan apa-apa, tanpa error.
+
+**Satu jebakan lama ikut diperbaiki di `.env.example`.** Baris `AUTH_TRUST_HOST=` (kosong) lebih buruk
+daripada tidak ada: NextAuth menghitung `!!(AUTH_URL ?? AUTH_TRUST_HOST ?? VERCEL ?? CF_PAGES ?? NODE_ENV !== "production")`,
+dan `??` hanya melompati `null`/`undefined`. String kosong bukan keduanya, jadi rantainya berhenti di
+situ dan menghasilkan `false` — mematikan `trustHost` bahkan di development, di mana nilai yang tidak
+diset justru menyalakannya. Placeholder-nya kini `AUTH_TRUST_HOST=true`.
+
+**Data touched:** tidak ada. Tidak ada perubahan skema, migrasi, maupun rute API. `railway.json`
+mengarahkan healthcheck ke `/api/health` yang sudah ada.
+
+**Sengaja tidak dikerjakan:** cron harian (cron Railway menjalankan perintah, bukan URL — rute ini
+dipicu manual selama UAT); migrasi otomatis saat deploy (butuh CLI Prisma di image runtime);
+memindahkan `bcryptjs` dari `devDependencies` (salah tempat, tapi build ini aman karena `npm ci`
+memasang dev deps dan output tracing menelusuri impor sungguhan). Ketiganya tercatat di §6
+`DEPLOY_RAILWAY.md`.
+
+**Verified:** `tsc --noEmit` bersih, 125/125 tes lulus, `eslint` bersih kecuali satu peringatan lama di
+`src/app/api/notifications/route.ts` yang tidak disentuh perubahan ini.
+
 ### 2026-09-10 — Document-first upload, AI document classification, and vendor credential lockdown
 
 Branch `feat/document-first-upload`, cut fresh from `main` at the maintainer's instruction. Preceded by an analysis pass over the FE, API, schema, migrations, auth and OCR pipeline (7 parallel readers → 4 decision agents), which surfaced four business decisions the maintainer confirmed before any code was written, plus six implementation defaults they reviewed and adjusted.
@@ -900,6 +1129,27 @@ Cut fresh from `main`, not from `feat/prod-adjustment` (which was identical to `
 | `108b797` | 2026-09-10 | feat: rebuild the upload wizard around documents first |
 | `d9f76b6` | 2026-09-10 | feat: vendor accounts get one forced password change, then admin-only credentials |
 | `3db6049` | 2026-09-10 | fix: survive a mid-batch upload failure and refuse a live invoice with no documents |
+
+### Phase 26 — Feedback PM setelah testing UAT (branch `feat/uat-deploy`)
+Enam butir feedback, satu commit per butir, masing-masing membawa entri `docs/` sendiri. Tiga di
+antaranya ternyata bukan masalah UI: comment sudah tersimpan di `audit_logs` dan hanya tidak pernah
+dibaca, kotak currency di wizard tidak pernah mengirim apa pun, dan kartu KPI belum punya konsep
+terpilih sama sekali. Bug pre-existing pada bucket aging (`dueDate` yang saling menimpa) sengaja
+**tidak** diperbaiki — komposisi `AND` pada filter kartu membuatnya tidak diperlukan, jadi cukup
+dilaporkan.
+
+| Commit | Date | Message |
+|---|---|---|
+| `1d53a35` | 2026-09-14 | feat: show invoice comments and activity in Riwayat & PIC |
+| `8c2169e` | 2026-09-14 | feat: paginate invoice list in the database, array response kept |
+| `2df2e00` | 2026-09-14 | feat: make dashboard KPI cards filter the data below them |
+| `1e79a61` | 2026-09-14 | fix: drop the KPI Summary worksheet from the Excel export |
+| `6cd6c8e` | 2026-09-14 | fix: use date pickers for invoice date fields on confirmation |
+| `e8cda24` | 2026-09-14 | fix: accept and show IDR only for new invoice input flow |
+
+Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
+history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini
+sendiri.
 
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.

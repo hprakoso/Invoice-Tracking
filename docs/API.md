@@ -9,7 +9,24 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ### `GET /api/invoices`
 Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
 
-Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`). The last four are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`), plus `page`/`pageSize`. The filter params are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+
+**Pagination is opt-in and the response body is unchanged — still a bare JSON array.**
+
+Omit `page` and `pageSize` and this route behaves exactly as it always has: one unbounded `findMany`, the same array, no extra headers. Send either and the slice is taken in the database (`skip`/`take`) and the metadata comes back in response headers rather than wrapping the body in an envelope — that would have been a breaking change to the contract this section documents, and the audit below found no need for one.
+
+| Header (paginated requests only) | Source |
+|---|---|
+| `X-Total-Count` | `formula`: `COUNT(invoices)` with the same `where`, before paging — **Not Stored** |
+| `X-Page` | `formula`: the clamped `?page` value — **Not Stored** |
+| `X-Page-Size` | `formula`: `?pageSize` clamped to 1..100, default 20 — **Not Stored** |
+| `X-Total-Pages` | `formula`: `ceil(X-Total-Count / X-Page-Size)`, min 1 — **Not Stored** |
+
+Filters are built **before** `skip`/`take`, so a search scans the whole table and pages the matches — never only the rows already on the active page. `page` is clamped the way `GET /api/audit` clamps it (`Number('abc')` is `NaN` and `?page=0`/`-1` is negative; either used to reach Prisma as `skip` and throw). A `page` past the last one returns `[]` rather than an error; the client resets to page 1 whenever a filter changes.
+
+`orderBy` is now `[{ createdAt: 'desc' }, { id: 'desc' }]`. The `id` tiebreak is required for correct paging, not cosmetic: `created_at` is not unique (the seed alone has 14 invoices sharing one value), so without a total order Postgres may repeat or drop rows across two `skip`/`take` pages. The order among ties was previously arbitrary, so making it deterministic changes no contract.
+
+**Consumer audit (2026-09-14).** The collection endpoint has exactly one `GET` consumer in the repository — `src/app/(dashboard)/invoices/page.tsx`. Verified from five independent angles: literal path grep across every file type; a call-site-first enumeration of every `fetch`/`EventSource`/`axios`/`XMLHttpRequest` in the repo; tests, root scripts, CI and deploy config; indirect consumers (there is no API-client or service layer — components call `fetch` directly, and `geminiChat.ts` queries Prisma rather than HTTP); and documentation. `src/app/(dashboard)/invoices/upload/page.tsx` also calls `/api/invoices` but with `POST`, so the `GET` contract does not reach it. Because the body shape is unchanged, none of this required a consumer migration.
 
 | Response field | Source |
 |---|---|
@@ -38,7 +55,20 @@ Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs), and `activity[]`. `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+
+**`activity[]` — the "Riwayat & PIC" source.**
+
+| Response field | Source |
+|---|---|
+| `activity[].id`, `.action`, `.metadata`, `.createdAt` | `audit_logs.id`, `.action`, `.metadata`, `.created_at` where `entity_type = 'invoice' AND entity_id = :id`, ordered by `created_at` ascending. Served by the existing `audit_logs_entity_type_entity_id_idx` (`@@index([entityType, entityId])`) — no migration |
+| `activity[].user.name`, `.user.role` | `users.name`, `users.role` via `audit_logs.user_id`; `null` when the row has no user |
+
+Both `entity_type` and `entity_id` are literals in the query, never client-supplied, and the query runs **after** the vendor-ownership 403 above — so `activity` carries exactly this endpoint's existing access rules and cannot surface another invoice's history. No new authorization rule was introduced: whoever may read the invoice may read its activity, the same way `stageHistory`, `items` and `documents` already behave.
+
+`action = 'invoice.stage_changed'` is excluded for every role: `invoice_stage_history` already holds one row per stage move (and is what the durations are computed from), so returning both would render each move twice.
+
+A PIC's comment has always been persisted here — `PATCH /api/invoices/[id]` writes it to `audit_logs.metadata.comment` — but this endpoint never returned audit rows, which is why the section only ever showed PIC stages.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -141,7 +171,7 @@ Streams `status`, `driving_document`, `needs_invoice_selection`, `document_type`
 | `company.{companyId,status,matchedOn}` | `formula` — `matchCompany()` (`src/lib/companyMatch.ts`) over `companies` rows where `is_active = true`, keyed on `companies.npwp` then normalized `companies.name`. `status` is `MATCHED`/`UNMATCHED`/`AMBIGUOUS`; two or more hits is `AMBIGUOUS` and resolves to `companyId: null`, never a pick (`companies.name` has no unique constraint). **Not Stored** — the client sends the confirmed id back via `PATCH` |
 | `company.{extractedName,extractedNpwp,confidence}` | Gemini `company_name` / `company_npwp` fields (the invoice's bill-to block) — **Not Stored**. Surfaced alongside the verdict so the confirmation page can show what was *read* versus what it *matched* |
 | `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
-| Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
+| Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted. `currency` is accepted **only when it reads `IDR`** — any other code, however well-formed, is reported in `warning.fields[]` and the column keeps its existing value. There is no `currency` `field` event either: the business bills in Rupiah only, so the confirmation step shows it as a fixed value rather than something to review. Dates go through `toIsoDateOnly()` (`src/lib/format.ts`) — the same rule the confirmation form applies — so only the unambiguous `YYYY-MM-DD` form is stored; anything else (a slashed date, free text, an impossible day, an implausible year) is reported in `warning.fields[]` and the column is left at its current value rather than being reinterpreted |
 | `invoiceNumber` | **Streamed but deliberately NOT persisted here.** It's the field the duplicate check keys on, and that check lives only in `PATCH /api/invoices/[id]` — writing it here would slip past it. The client receives it via the `field` event and submits it through `PATCH`, which duplicate-checks it properly. See the note in the route for the two failures this caused when OCR did write it |
 | `po_number` (new), and `companyId` | **Streamed but deliberately NOT persisted here**, for the same class of reason: both gate the draft→live transition in `validateReadyToGoLive`, and writing them straight from OCR would satisfy that gate with data no human confirmed. They return through `PATCH` |
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 `CORE_FIELDS` that came back non-null (same formula the old Python service used). Unchanged by the new fields — `company_name`, `company_npwp` and `po_number` are deliberately **not** in `CORE_FIELDS`, so this metric means the same thing it always did |
@@ -210,7 +240,22 @@ Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` 
 ### `GET /api/dashboard`
 Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below, server-forced (query-param `vendorId` is ignored for vendors, same IDOR protection as `GET /api/invoices`). Aggregation logic and the filter-building are shared with the export route via `getDashboardStats()`/`buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
 
-Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`. Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
+Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`, plus `kpi`.
+
+**`kpi` — the selected KPI card, acting as a dashboard filter.** The four cards are clickable; each is identified by the *business predicate* behind its figure, never by its UI label (an unrecognised value, including a label string, is ignored and echoed back as `null`):
+
+| `kpi` | Card | Predicate AND-ed onto the filter |
+|---|---|---|
+| *(absent)* | Total Invoices | none — this card is the reset |
+| `payable` | Total Tagihan | `status NOT IN ('PAID','CLOSED','REJECTED')` |
+| `open` | Invoice Terbuka | same as `payable` |
+| `overdue` | Jatuh Tempo | the above, plus `due_date < jakartaDayStart()` |
+
+Applied by `applyKpiScope()` as `{ AND: [filter, ...] }`, so it can only ever **narrow** — the `VENDOR` scoping inside `filter` cannot be overwritten by a card — and it does not collide with the per-bucket `due_date` the aging aggregates set on top.
+
+`kpi` is deliberately **not** part of `buildDashboardFilter()`: that builder also backs `GET /api/invoices` (which must not start honouring it), and it is what the KPI figures are computed from. So `totalInvoices`, `totalPayable`, `overdueCount` and `openCount` **ignore** `kpi` and keep their existing business definition, while `statusBreakdown`, `agingBuckets`, `monthlyTrend`, `statusByMonth`, `companyBreakdown`, `stageLeadTimes` and `recentInvoices` all follow it. `GET /api/dashboard/export` also ignores `kpi` — only the dashboard is card-filtered.
+
+Aside from `kpi`, every field below reflects the same filtered set; there's no partially-filtered view.
 
 | Response field | Source |
 |---|---|
@@ -224,13 +269,13 @@ Query params (all optional, all combine with AND): `search` (matches `invoice_nu
 | `statusByMonth[]` | `formula`: trailing 12 UTC months — `{month, entered, accepted}`, counting invoices created that month currently in `status = 'RECEIVED'` (entered) vs `status = 'PAID'` (accepted). A pipeline-health proxy, not a true historical flow rate — see `StatusFlowChart.tsx` |
 | `companyBreakdown[]` | `formula`: `GROUP BY invoices.company_id` over the filtered set → `{companyId, companyName, count, totalAmount}`, sorted by `totalAmount` descending. Company names come from a second `companies` query (Prisma `groupBy` can't include a relation). Invoices with no company are kept as a `companyId: null` row rather than dropped — a missing bill-to is worth seeing |
 | `stageLeadTimes[]` | `formula`: `foldStageLeadTimes()` over `invoice_stage_history` rows for the filtered invoices → `{stage, avgDays, completed, currentCount}` for all 5 stages in workflow order. A stage's duration is the gap to the **next** history row of the same invoice; the last row per invoice is still open, so it counts toward `currentCount` (invoices sitting there now) but **not** the average. Rows are ordered by `(invoice_id, changed_at)`, which is what keeps every gap non-negative even when a stage was recorded out of workflow order. `avgDays` is null when no invoice has completed that stage — rendered as "—", not 0 |
-| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
+| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set, narrowed by `kpi`) + `vendor.name` + `company.name` |
+| `kpi` | `formula`: the accepted `?kpi` value, or `null` — **Not Stored** |
 
 ### `GET /api/dashboard/export`
-Auth: any authenticated user, same `VENDOR` scoping and query params as `GET /api/dashboard` (same `buildDashboardFilter()`). **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
+Auth: any authenticated user, same `VENDOR` scoping and filter params as `GET /api/dashboard` (same `buildDashboardFilter()`). It does **not** honour `kpi` — the KPI-card filter scopes the dashboard only. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
-- Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above, computed over the same filtered set (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice matching the active filters (unfiltered = every invoice, same as the dashboard's default view), columns Invoice Number/**PO Number**/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/**PIC Stage**/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
+- Sheet "Invoices" — **the only sheet**: one row per invoice matching the active filters (unfiltered = every invoice, same as the dashboard's default view), columns Invoice Number/**PO Number**/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/**PIC Stage**/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 
@@ -340,4 +385,3 @@ No auth. Runs `SELECT 1` against the database. Returns `{ status: 'ok'|'degraded
 
 ### `POST /api/auth/[...nextauth]`, `GET /api/auth/[...nextauth]`
 NextAuth v5 handler (`src/lib/auth/auth.ts`). Credentials provider: looks up `users.email`, checks `users.is_active`, verifies `bcrypt.compare(password, users.password_hash)`. On success, JWT carries `id`, `role`, `vendorId` (all from `users.*`); session mirrors the JWT.
-

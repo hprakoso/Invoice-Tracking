@@ -161,7 +161,54 @@ export function applyInvoiceSearchFilters(
   return where
 }
 
-export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
+/**
+ * The KPI cards double as a dashboard filter. A card is identified by the
+ * business predicate behind its figure — status codes and a due-date
+ * comparison — never by the card's UI label:
+ *
+ *   'payable' / 'open' -> status NOT IN the settled set (NON_OPEN_STATUSES)
+ *   'overdue'          -> the same, plus dueDate before the start of today WIB
+ *
+ * The Total Invoices card carries no predicate (it *is* the whole set), so an
+ * absent or unrecognised value returns `where` untouched — that card is the
+ * reset. Unknown input is ignored rather than rejected, matching how the status
+ * and amount filters already treat junk.
+ *
+ * Composed with `AND` rather than by assigning keys on a copy of `where`. Two
+ * reasons: it can only ever NARROW, so the VENDOR scoping in
+ * buildDashboardFilter can never be overwritten by a card; and it does not
+ * collide with the per-bucket `dueDate` the aging aggregates spread on top.
+ *
+ * Deliberately NOT folded into buildDashboardFilter(): that builder also backs
+ * GET /api/invoices, which must not start honouring `?kpi`, and it is what the
+ * KPI figures themselves are computed from — the card numbers keep their
+ * existing business definition while a card is selected.
+ */
+export const KPI_SCOPES = ['payable', 'overdue', 'open'] as const
+export type KpiScope = (typeof KPI_SCOPES)[number]
+
+export function parseKpiScope(searchParams: URLSearchParams): KpiScope | null {
+  const kpi = searchParams.get('kpi')
+  return kpi && (KPI_SCOPES as readonly string[]).includes(kpi) ? (kpi as KpiScope) : null
+}
+
+export function applyKpiScope(
+  where: Prisma.InvoiceWhereInput,
+  kpi: KpiScope | null,
+  now: Date = new Date(),
+): Prisma.InvoiceWhereInput {
+  if (!kpi) return where
+  const open: Prisma.InvoiceWhereInput = { status: { notIn: NON_OPEN_STATUSES } }
+  if (kpi === 'overdue') {
+    return { AND: [where, open, { dueDate: { lt: jakartaDayStart(now) } }] }
+  }
+  return { AND: [where, open] }
+}
+
+export async function getDashboardStats(
+  filter: Prisma.InvoiceWhereInput,
+  scoped: Prisma.InvoiceWhereInput = filter,
+) {
   const now = new Date()
 
   // "Open" metrics (Total Payable, Overdue, Open count, Aging) ALWAYS exclude
@@ -170,12 +217,18 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
   // filtering to PAID reported already-paid invoices as "Overdue" and summed
   // them into "Total Payable" — while the invoice list, filtered the same way,
   // showed no overdue rows at all. One definition now drives both surfaces.
-  const openFilter: Prisma.InvoiceWhereInput = {
-    ...filter,
-    status: filter.status
-      ? { equals: filter.status as InvoiceStatus, notIn: NON_OPEN_STATUSES }
+  const openOf = (w: Prisma.InvoiceWhereInput): Prisma.InvoiceWhereInput => ({
+    ...w,
+    status: w.status
+      ? { equals: w.status as InvoiceStatus, notIn: NON_OPEN_STATUSES }
       : { notIn: NON_OPEN_STATUSES },
-  }
+  })
+
+  const openFilter = openOf(filter)
+  // Everything below the KPI strip follows the selected card; the four KPI
+  // figures stay on the unscoped filter so they keep reporting the whole view,
+  // which is what makes a card a filter rather than a drill-in.
+  const scopedOpen = openOf(scoped)
 
   // Overdue and aging are measured against the start of today in Jakarta, not
   // "now": due dates are calendar dates stored at UTC midnight, so comparing
@@ -197,7 +250,7 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
   ] =
     await Promise.all([
       prisma.invoice.count({ where: filter }),
-      prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: filter }),
+      prisma.invoice.groupBy({ by: ['status'], _count: { id: true }, where: scoped }),
       prisma.invoice.aggregate({ where: openFilter, _sum: { totalAmount: true } }),
       prisma.invoice.count({ where: { ...openFilter, dueDate: { lt: todayStart } } }),
       prisma.invoice.count({ where: openFilter }),
@@ -207,22 +260,22 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
       // "0–30 hari"; invoices with no due date fell through all four and
       // vanished from the panel while still counting toward the KPI.
       Promise.all([
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: todayStart } }, _sum: { totalAmount: true } }),
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d30, lt: todayStart } }, _sum: { totalAmount: true } }),
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d60, lt: d30 } }, _sum: { totalAmount: true } }),
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { gte: d90, lt: d60 } }, _sum: { totalAmount: true } }),
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: { lt: d90 } }, _sum: { totalAmount: true } }),
-        prisma.invoice.aggregate({ where: { ...openFilter, dueDate: null }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: { gte: todayStart } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: { gte: d30, lt: todayStart } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: { gte: d60, lt: d30 } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: { gte: d90, lt: d60 } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: { lt: d90 } }, _sum: { totalAmount: true } }),
+        prisma.invoice.aggregate({ where: { ...scopedOpen, dueDate: null }, _sum: { totalAmount: true } }),
       ]),
       prisma.invoice.findMany({
-        where: { ...filter, createdAt: { gte: windowStart } },
+        where: { ...scoped, createdAt: { gte: windowStart } },
         select: { createdAt: true, status: true, totalAmount: true },
       }),
       prisma.invoice.groupBy({
         by: ['companyId'],
         _count: { id: true },
         _sum: { totalAmount: true },
-        where: filter,
+        where: scoped,
       }),
       // Stage durations can't be expressed as a Prisma aggregate (they need
       // the gap between consecutive rows), so the rows are folded in JS below.
@@ -230,7 +283,7 @@ export async function getDashboardStats(filter: Prisma.InvoiceWhereInput) {
       // scale (a few rows per invoice); move to a SQL window function (LEAD)
       // if the invoice count ever makes this the slow query on the page.
       prisma.invoiceStageHistory.findMany({
-        where: { invoice: filter },
+        where: { invoice: scoped },
         select: { invoiceId: true, stage: true, changedAt: true },
         orderBy: [{ invoiceId: 'asc' }, { changedAt: 'asc' }],
       }),

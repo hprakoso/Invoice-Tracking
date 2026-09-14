@@ -309,8 +309,8 @@ npx prisma migrate resolve --applied     20260907000000_invoice_integrity_constr
 | Item | Catatan |
 |---|---|
 | Rotasi password admin | String `dJLrXlooGsBsGcNJ` ada di history git. Untuk demo tidak masalah (keputusan maintainer 2026-09-07); **wajib** diganti sebelum produksi. |
-| Agregat KPI campur mata uang | Currency sudah divalidasi, tapi tidak ada pengelompokan per-currency. Aman selama semua IDR. |
-| Paginasi `GET /api/invoices` | `items` sudah tidak ikut dikirim; paginasi sungguhan butuh perubahan UI list. |
+| Agregat KPI campur mata uang | Sejak 2026-09-14 jalur tulis dikunci ke IDR (`SUPPORTED_CURRENCIES`), jadi invoice baru tidak bisa lagi masuk dengan currency lain. Tetap tidak ada pengelompokan per-currency, dan baris historis non-IDR (kalau ada) tidak dimigrasi — aman selama seluruh data IDR. |
+| ~~Paginasi `GET /api/invoices`~~ | **Selesai 2026-09-14.** Paginasi dilakukan di database lewat param opt-in `page`/`pageSize`; body response tetap array dan metadata dikirim di header `X-Total-Count`/`X-Page`/`X-Page-Size`/`X-Total-Pages`, jadi kontrak lama tidak dipecah. UI list mendapat kontrol Prev/Next. |
 | Signed URL untuk file | Belum dikerjakan — satu-satunya item §4.1 `PRODUCTION_PLAN.md` yang benar-benar masih terbuka. File masih di-stream lewat function. |
 | `maxDuration` hanya di `vercel.json` | Pindah ke `export const maxDuration` di route kalau host berubah, kalau tidak batas 30s/60s hilang diam-diam. |
 | CI tidak menjalankan `next build` | Kegagalan build baru ketahuan di Vercel. Pertimbangkan menambah `npm run build` dan job migrasi ke Postgres sekali pakai. |

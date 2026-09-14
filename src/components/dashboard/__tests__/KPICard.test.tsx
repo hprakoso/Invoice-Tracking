@@ -1,11 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { KPICard } from '../KPICard'
 
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
       <div {...props}>{children}</div>
+    ),
+    button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+      <button {...props}>{children}</button>
     ),
   },
 }))
@@ -64,5 +67,32 @@ describe('KPICard', () => {
   it('appends cell chrome classes passed via className', () => {
     const { container } = render(<KPICard {...base} className="border-l border-border/60" />)
     expect(container.firstElementChild?.className).toContain('border-l')
+  })
+
+  // The KPI strip doubles as the dashboard's filter control.
+  describe('as a filter toggle', () => {
+    it('stays a plain cell, not a control, without onSelect', () => {
+      render(<KPICard {...base} />)
+      expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    })
+
+    it('becomes a pressable button when given onSelect', () => {
+      const onSelect = vi.fn()
+      render(<KPICard {...base} onSelect={onSelect} />)
+      const button = screen.getByRole('button')
+      expect(button).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(button)
+      expect(onSelect).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks the selected card as pressed', () => {
+      render(<KPICard {...base} onSelect={() => {}} selected />)
+      expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('still renders its figure while acting as a filter', () => {
+      render(<KPICard {...base} onSelect={() => {}} selected />)
+      expect(screen.getByText('42')).toBeInTheDocument()
+    })
   })
 })
