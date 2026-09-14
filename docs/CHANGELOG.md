@@ -1130,5 +1130,26 @@ Cut fresh from `main`, not from `feat/prod-adjustment` (which was identical to `
 | `d9f76b6` | 2026-09-10 | feat: vendor accounts get one forced password change, then admin-only credentials |
 | `3db6049` | 2026-09-10 | fix: survive a mid-batch upload failure and refuse a live invoice with no documents |
 
+### Phase 26 — Feedback PM setelah testing UAT (branch `feat/uat-deploy`)
+Enam butir feedback, satu commit per butir, masing-masing membawa entri `docs/` sendiri. Tiga di
+antaranya ternyata bukan masalah UI: comment sudah tersimpan di `audit_logs` dan hanya tidak pernah
+dibaca, kotak currency di wizard tidak pernah mengirim apa pun, dan kartu KPI belum punya konsep
+terpilih sama sekali. Bug pre-existing pada bucket aging (`dueDate` yang saling menimpa) sengaja
+**tidak** diperbaiki — komposisi `AND` pada filter kartu membuatnya tidak diperlukan, jadi cukup
+dilaporkan.
+
+| Commit | Date | Message |
+|---|---|---|
+| `1d53a35` | 2026-09-14 | feat: show invoice comments and activity in Riwayat & PIC |
+| `8c2169e` | 2026-09-14 | feat: paginate invoice list in the database, array response kept |
+| `2df2e00` | 2026-09-14 | feat: make dashboard KPI cards filter the data below them |
+| `1e79a61` | 2026-09-14 | fix: drop the KPI Summary worksheet from the Excel export |
+| `6cd6c8e` | 2026-09-14 | fix: use date pickers for invoice date fields on confirmation |
+| `e8cda24` | 2026-09-14 | fix: accept and show IDR only for new invoice input flow |
+
+Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
+history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini
+sendiri.
+
 ### Uncommitted / in-progress (not part of the log above)
 - A stash (`stash@{0}`) exists on `main` titled "WIP on main: e6e09e8 fix: load .env in ai-service via python-dotenv so LLM API keys are read" — not applied to this branch; left untouched pending the user's direction.
