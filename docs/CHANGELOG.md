@@ -8,6 +8,17 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #4: KPI dihapus dari export Excel
+
+Worksheet `KPI Summary` (total, hitungan per status, bucket aging) dihapus di generatornya, bukan
+ditambal setelah file terbentuk. Panggilan `getDashboardStats()` yang hanya ada untuk mengisinya ikut
+hilang — sekitar 15 query agregat per unduhan. `getDashboardStats` sendiri tidak dihapus:
+`GET /api/dashboard` masih memakainya.
+
+Sheet `Invoices` tidak disentuh. Terverifikasi setelah perubahan: workbook berisi tepat satu sheet
+bernama `Invoices`, dengan ke-20 kolom yang sama dan 104 baris data. Kolom `Currency` tetap menulis
+`invoices.currency` apa adanya, sehingga baris historis tetap terekspor seperti sebelumnya.
+
 ### 2026-09-14 — Feedback PM #3: kartu KPI dashboard menjadi filter
 
 **Bukan bug, tapi kemampuan yang belum ada.** `KPICard` adalah `motion.div` non-interaktif, dan
