@@ -140,8 +140,24 @@ describe('buildOcrUpdate — ambiguous dates are refused, not guessed', () => {
 })
 
 describe('buildOcrUpdate — currency', () => {
-  it('accepts a 3-letter code and normalises case', () => {
-    expect(buildOcrUpdate(extraction({ currency: field('usd') }), noCurrent).data.currency).toBe('USD')
+  it('accepts IDR and normalises case', () => {
+    expect(buildOcrUpdate(extraction({ currency: field('idr') }), noCurrent).data.currency).toBe('IDR')
+  })
+
+  // The business bills in Rupiah only and nothing converts between currencies,
+  // so a well-formed foreign code must not reach the column either.
+  it('rejects any other currency, however well-formed', () => {
+    for (const other of ['USD', 'SGD', 'EUR']) {
+      const { data, rejected } = buildOcrUpdate(extraction({ currency: field(other) }), noCurrent)
+      expect(rejected).toContain('currency')
+      expect(data.currency).toBeUndefined()
+    }
+  })
+
+  it('leaves the column alone when the document names no currency', () => {
+    const { data, rejected } = buildOcrUpdate(extraction({ currency: field(null) }), noCurrent)
+    expect(data.currency).toBeUndefined()
+    expect(rejected).not.toContain('currency')
   })
 
   it('rejects free text the model invents', () => {

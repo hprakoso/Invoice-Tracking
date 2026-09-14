@@ -325,6 +325,7 @@ const id = {
     fieldInvoiceDate: 'Tanggal Invoice',
     fieldDueDate: 'Jatuh Tempo',
     fieldCurrency: 'Mata Uang',
+    currencyFixedHint: 'Seluruh invoice ditagihkan dalam Rupiah.',
     fieldSubtotal: 'Subtotal',
     fieldTaxAmount: 'PPN',
     fieldTotalAmount: 'Total',

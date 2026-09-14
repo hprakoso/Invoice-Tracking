@@ -8,6 +8,26 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #6: currency hanya IDR untuk flow input baru
+
+**Kondisi awal.** Currency sebenarnya sudah IDR di setiap tempat yang disentuh manusia — wizard
+upload **tidak pernah mengirim** `currency` sama sekali (`confirmAndSubmit` tidak punya key itu),
+sehingga `.default('IDR')` di `createInvoiceSchema` yang selalu berlaku. Kotak currency di langkah
+review karena itu dekoratif: mengeditnya tidak berefek apa pun. Yang benar-benar bisa menembus
+adalah dua jalur: `buildOcrUpdate` menulis kode 3 huruf apa pun yang dibaca model dari dokumen, dan
+`z.string().length(3)` di kedua schema menerima kode apa pun dari pemanggil API langsung.
+
+**Perubahan.** `SUPPORTED_CURRENCIES = ['IDR']` menutup `createInvoiceSchema` dan
+`updateInvoiceSchema` — perubahan validasi input yang diminta secara eksplisit oleh pemilik repo —
+dan `buildOcrUpdate` kini hanya menerima `IDR`; kode lain dilaporkan sebagai `rejected` dan kolom
+dibiarkan pada nilainya. Di UI, currency berhenti menjadi field yang bisa diedit (dihapus dari
+`FIELD_DEFS` dan dari urutan field yang dikirim rute OCR) dan ditampilkan sebagai nilai tetap IDR.
+
+**Tidak ada migrasi dan tidak ada penulisan ulang data historis.** Kolomnya tidak disentuh; baris
+lama menyimpan apa yang sudah ada dan tetap tampil apa adanya di halaman detail, export Excel dan
+chatbot. Sebuah edit yang tidak menyebut `currency` tetap valid, jadi baris non-IDR lama masih bisa
+diperbaiki lewat field lain.
+
 ### 2026-09-14 — Feedback PM #5: field tanggal pada konfirmasi upload memakai date picker
 
 **Akar masalah.** Langkah review merender setiap field hasil ekstraksi lewat satu `<Input>` teks

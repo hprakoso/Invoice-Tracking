@@ -327,6 +327,7 @@ const en: Dictionary = {
     fieldInvoiceDate: 'Invoice Date',
     fieldDueDate: 'Due Date',
     fieldCurrency: 'Currency',
+    currencyFixedHint: 'All invoices are billed in Rupiah.',
     fieldSubtotal: 'Subtotal',
     fieldTaxAmount: 'Tax Amount',
     fieldTotalAmount: 'Total',

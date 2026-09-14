@@ -208,8 +208,13 @@ export function buildOcrUpdate(
     rejected.push('due_date')
   }
 
+  // IDR is the only currency the business bills in, so a code read off a
+  // document is stored only when it agrees. Anything else — including a
+  // well-formed 'USD' — is reported as rejected and the column keeps its
+  // existing value, which is also what makes this non-destructive for the
+  // legacy rows that hold another code.
   const currency = extracted.currency?.value?.trim().toUpperCase()
-  if (currency && /^[A-Z]{3}$/.test(currency)) data.currency = currency
+  if (currency === 'IDR') data.currency = currency
   else if (currency) rejected.push('currency')
 
   for (const [key, column] of AMOUNT_COLUMNS) {

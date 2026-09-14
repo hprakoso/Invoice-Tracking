@@ -46,7 +46,9 @@ const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
   { key: 'po_number', labelKey: 'fieldPoNumber' },
   { key: 'invoice_date', labelKey: 'fieldInvoiceDate' },
   { key: 'due_date', labelKey: 'fieldDueDate' },
-  { key: 'currency', labelKey: 'fieldCurrency' },
+  // No currency row: the business bills in IDR only, so it is shown as a fixed
+  // value below the grid instead of being offered as an editable field. It was
+  // never submitted from here anyway — confirmAndSubmit has no `currency` key.
   { key: 'subtotal', labelKey: 'fieldSubtotal' },
   { key: 'tax_amount', labelKey: 'fieldTaxAmount' },
   { key: 'total_amount', labelKey: 'fieldTotalAmount' },
@@ -58,6 +60,10 @@ const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
 // invoice_number read date-ish to a human but are strings, and both of these
 // columns are nullable, so an empty value stays legal.
 const DATE_FIELD_KEYS = new Set(['invoice_date', 'due_date'])
+
+// The only currency the business bills in. Displayed read-only on the review
+// step; the server enforces the same value (SUPPORTED_CURRENCIES).
+const FIXED_CURRENCY = 'IDR'
 
 // STEP 1 upload -> STEP 2 processing (uploading + ocr) -> STEP 3 review -> STEP 4 done.
 type UploadStage = 'upload' | 'uploading' | 'ocr' | 'review' | 'done'
@@ -1015,6 +1021,12 @@ export default function UploadPage() {
             )}
 
             <Separator />
+
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.fieldCurrency}</label>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{FIXED_CURRENCY}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{t.upload.currencyFixedHint}</p>
+            </div>
 
             <div>
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.sendDateLabel}</label>

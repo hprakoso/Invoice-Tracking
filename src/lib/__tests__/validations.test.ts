@@ -28,6 +28,38 @@ describe('createInvoiceSchema', () => {
     expect(createInvoiceSchema.safeParse({ ...base, isDraft: true }).success).toBe(true)
     expect(createInvoiceSchema.safeParse({ ...base, isDraft: false }).success).toBe(false)
   })
+
+  // The business bills in Rupiah only, and nothing converts between currencies
+  // — a USD total would be summed into Total Payable as if it were IDR.
+  describe('currency is IDR-only for the write paths', () => {
+    const live = { ...base, poNumber: 'PO-2026-0001' }
+
+    it('defaults to IDR when the caller omits it', () => {
+      const parsed = createInvoiceSchema.safeParse(live)
+      expect(parsed.success && parsed.data.currency).toBe('IDR')
+    })
+
+    it('accepts an explicit IDR on create and update', () => {
+      expect(createInvoiceSchema.safeParse({ ...live, currency: 'IDR' }).success).toBe(true)
+      expect(updateInvoiceSchema.safeParse({ currency: 'IDR' }).success).toBe(true)
+    })
+
+    it('refuses any other currency on create', () => {
+      for (const other of ['USD', 'SGD', 'EUR', 'idr']) {
+        expect(createInvoiceSchema.safeParse({ ...live, currency: other }).success).toBe(false)
+      }
+    })
+
+    it('refuses any other currency on update', () => {
+      expect(updateInvoiceSchema.safeParse({ currency: 'USD' }).success).toBe(false)
+    })
+
+    // Nothing here rewrites stored data: an edit that does not mention currency
+    // stays valid, so a legacy non-IDR row can still be corrected in other ways.
+    it('leaves an edit that does not mention currency alone', () => {
+      expect(updateInvoiceSchema.safeParse({ notes: 'ok' }).success).toBe(true)
+    })
+  })
 })
 
 describe('validateReadyToGoLive', () => {
