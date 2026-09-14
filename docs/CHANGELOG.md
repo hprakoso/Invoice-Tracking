@@ -8,6 +8,31 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #1: comment dan aktivitas invoice muncul di "Riwayat & PIC"
+
+**Akar masalah: datanya sudah tersimpan, tidak pernah dibaca.** `PATCH /api/invoices/[id]`
+menulis comment PIC ke `audit_logs.metadata.comment` sejak awal, tetapi `GET /api/invoices/[id]`
+hanya mengembalikan `stageHistory` dan komponen timeline hanya merender itu — sehingga perubahan
+status, penugasan PIC dan comment tidak pernah punya jalan ke layar.
+
+**Perubahan.** GET kini juga mengembalikan `activity`: baris `audit_logs` milik invoice tersebut,
+di-scope `(entity_type, entity_id)` — keduanya literal, tidak pernah dari client — dan dijalankan
+**setelah** pengecekan kepemilikan vendor yang sudah ada, sehingga otorisasinya persis mengikuti
+otorisasi invoice itu sendiri. Tidak ada aturan akses baru yang dibuat: siapa pun yang boleh membaca
+invoice boleh membaca aktivitasnya, sama seperti `stageHistory`, `items` dan `documents` selama ini.
+`invoice.stage_changed` dikecualikan untuk semua role karena `invoice_stage_history` sudah memuat
+setiap perpindahan — memasukkan keduanya akan menampilkan satu perpindahan dua kali.
+
+Satu lubang pencatatan ikut ditutup: `comment` yang dikirim bersama edit non-status dulu dibuang
+diam-diam (hanya cabang `filtered.status` yang menyimpannya).
+
+**Tanpa file baru dan tanpa migrasi.** Penggabungan dua sumber riwayat dilakukan langsung di
+halaman detail, bukan di modul util baru — `CLAUDE.md` meminta memakai util yang sudah ada lebih
+dulu, dan tidak ada abstraksi timeline yang bisa dipakai ulang. Index `@@index([entityType, entityId])`
+yang dibutuhkan query ini sudah dideklarasikan di schema. Penugasan PIC dirender dari
+`metadata.fields` yang memang sudah ditulis rute, jadi bentuk metadata tidak diubah dan baris
+historis tetap terbaca.
+
 ### 2026-09-11 (revisi) — Target hosting UAT diubah ke Render + Supabase, sepenuhnya gratis
 
 Maintainer meminta opsi gratis, menyebut Netlify, Render atau Cloudflare. Rekomendasi berbayar

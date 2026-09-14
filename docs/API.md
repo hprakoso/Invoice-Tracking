@@ -38,7 +38,20 @@ Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs), and `activity[]`. `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+
+**`activity[]` — the "Riwayat & PIC" source.**
+
+| Response field | Source |
+|---|---|
+| `activity[].id`, `.action`, `.metadata`, `.createdAt` | `audit_logs.id`, `.action`, `.metadata`, `.created_at` where `entity_type = 'invoice' AND entity_id = :id`, ordered by `created_at` ascending. Served by the existing `audit_logs_entity_type_entity_id_idx` (`@@index([entityType, entityId])`) — no migration |
+| `activity[].user.name`, `.user.role` | `users.name`, `users.role` via `audit_logs.user_id`; `null` when the row has no user |
+
+Both `entity_type` and `entity_id` are literals in the query, never client-supplied, and the query runs **after** the vendor-ownership 403 above — so `activity` carries exactly this endpoint's existing access rules and cannot surface another invoice's history. No new authorization rule was introduced: whoever may read the invoice may read its activity, the same way `stageHistory`, `items` and `documents` already behave.
+
+`action = 'invoice.stage_changed'` is excluded for every role: `invoice_stage_history` already holds one row per stage move (and is what the durations are computed from), so returning both would render each move twice.
+
+A PIC's comment has always been persisted here — `PATCH /api/invoices/[id]` writes it to `audit_logs.metadata.comment` — but this endpoint never returned audit rows, which is why the section only ever showed PIC stages.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
