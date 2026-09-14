@@ -188,6 +188,9 @@ const id = {
     stageMoved: 'Tahap PIC diperbarui',
     stageMoveFailed: 'Gagal memindahkan tahap',
     poShort: 'PO',
+    pageOf: 'Halaman {page} dari {pages}',
+    previous: 'Sebelumnya',
+    next: 'Berikutnya',
   },
   invoiceDetail: {
     sessionExpired: 'Sesi Anda telah berakhir. Silakan masuk kembali.',

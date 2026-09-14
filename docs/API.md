@@ -9,7 +9,24 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ### `GET /api/invoices`
 Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
 
-Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`). The last four are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`), plus `page`/`pageSize`. The filter params are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+
+**Pagination is opt-in and the response body is unchanged — still a bare JSON array.**
+
+Omit `page` and `pageSize` and this route behaves exactly as it always has: one unbounded `findMany`, the same array, no extra headers. Send either and the slice is taken in the database (`skip`/`take`) and the metadata comes back in response headers rather than wrapping the body in an envelope — that would have been a breaking change to the contract this section documents, and the audit below found no need for one.
+
+| Header (paginated requests only) | Source |
+|---|---|
+| `X-Total-Count` | `formula`: `COUNT(invoices)` with the same `where`, before paging — **Not Stored** |
+| `X-Page` | `formula`: the clamped `?page` value — **Not Stored** |
+| `X-Page-Size` | `formula`: `?pageSize` clamped to 1..100, default 20 — **Not Stored** |
+| `X-Total-Pages` | `formula`: `ceil(X-Total-Count / X-Page-Size)`, min 1 — **Not Stored** |
+
+Filters are built **before** `skip`/`take`, so a search scans the whole table and pages the matches — never only the rows already on the active page. `page` is clamped the way `GET /api/audit` clamps it (`Number('abc')` is `NaN` and `?page=0`/`-1` is negative; either used to reach Prisma as `skip` and throw). A `page` past the last one returns `[]` rather than an error; the client resets to page 1 whenever a filter changes.
+
+`orderBy` is now `[{ createdAt: 'desc' }, { id: 'desc' }]`. The `id` tiebreak is required for correct paging, not cosmetic: `created_at` is not unique (the seed alone has 14 invoices sharing one value), so without a total order Postgres may repeat or drop rows across two `skip`/`take` pages. The order among ties was previously arbitrary, so making it deterministic changes no contract.
+
+**Consumer audit (2026-09-14).** The collection endpoint has exactly one `GET` consumer in the repository — `src/app/(dashboard)/invoices/page.tsx`. Verified from five independent angles: literal path grep across every file type; a call-site-first enumeration of every `fetch`/`EventSource`/`axios`/`XMLHttpRequest` in the repo; tests, root scripts, CI and deploy config; indirect consumers (there is no API-client or service layer — components call `fetch` directly, and `geminiChat.ts` queries Prisma rather than HTTP); and documentation. `src/app/(dashboard)/invoices/upload/page.tsx` also calls `/api/invoices` but with `POST`, so the `GET` contract does not reach it. Because the body shape is unchanged, none of this required a consumer migration.
 
 | Response field | Source |
 |---|---|

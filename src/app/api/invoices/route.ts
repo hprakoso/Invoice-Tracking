@@ -19,19 +19,62 @@ export async function GET(req: NextRequest) {
   // honoured), so the same query string scoped one surface but not the other.
   const where = buildDashboardFilter(req.nextUrl.searchParams, session)
 
-  const invoices = await prisma.invoice.findMany({
-    where,
-    // `items` is deliberately not included: the list page never renders line
-    // items, and including them serialised the whole invoice_items table on
-    // every filter change. Detail pages fetch their own items.
-    include: {
-      vendor: { select: { id: true, name: true } },
-      createdBy: { select: { id: true, name: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  })
+  // Pagination is OPT-IN and the response body stays a bare array.
+  //
+  // Without `?page`/`?pageSize` this route behaves exactly as it always has —
+  // same query, same unbounded result, same JSON — so no existing caller can
+  // break. With them, the slice is taken in the database (skip/take) and the
+  // metadata rides in response headers instead of wrapping the body in an
+  // envelope, which would have been a breaking change to a contract documented
+  // in docs/API.md. Filters are built above, i.e. applied BEFORE skip/take, so
+  // a search scans the whole table and pages the matches rather than filtering
+  // one page's worth of rows.
+  //
+  // `page` is clamped the way GET /api/audit clamps it — `Number('abc')` is NaN
+  // and `?page=0`/`-1` is negative, and either reached Prisma as `skip` and threw.
+  const rawPage = req.nextUrl.searchParams.get('page')
+  const rawPageSize = req.nextUrl.searchParams.get('pageSize')
+  const paginated = rawPage !== null || rawPageSize !== null
 
-  return NextResponse.json(invoices)
+  const parsedPage = Number(rawPage ?? '1')
+  const page = Number.isFinite(parsedPage) && parsedPage >= 1 ? Math.floor(parsedPage) : 1
+  const parsedSize = Number(rawPageSize ?? '20')
+  const pageSize =
+    Number.isFinite(parsedSize) && parsedSize >= 1 ? Math.min(Math.floor(parsedSize), 100) : 20
+
+  const [invoices, total] = await Promise.all([
+    prisma.invoice.findMany({
+      where,
+      // `items` is deliberately not included: the list page never renders line
+      // items, and including them serialised the whole invoice_items table on
+      // every filter change. Detail pages fetch their own items.
+      include: {
+        vendor: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+      },
+      // `id` breaks ties on createdAt. Without it the sort is not total — the
+      // seed alone has 14 invoices sharing one created_at — and Postgres may
+      // then repeat or skip rows across two skip/take pages. Applied
+      // unconditionally: the order among ties was previously arbitrary, so
+      // making it deterministic changes no contract.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(paginated ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
+    }),
+    paginated ? prisma.invoice.count({ where }) : Promise.resolve(0),
+  ])
+
+  if (!paginated) return NextResponse.json(invoices)
+
+  // Metadata out-of-band so the body shape is untouched. Same-origin fetch, so
+  // no Access-Control-Expose-Headers is needed.
+  return NextResponse.json(invoices, {
+    headers: {
+      'X-Total-Count': String(total),
+      'X-Page': String(page),
+      'X-Page-Size': String(pageSize),
+      'X-Total-Pages': String(Math.max(1, Math.ceil(total / pageSize))),
+    },
+  })
 }
 
 export async function POST(req: NextRequest) {

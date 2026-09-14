@@ -190,6 +190,9 @@ const en: Dictionary = {
     stageMoved: 'PIC stage updated',
     stageMoveFailed: 'Failed to move stage',
     poShort: 'PO',
+    pageOf: 'Page {page} of {pages}',
+    previous: 'Previous',
+    next: 'Next',
   },
   invoiceDetail: {
     sessionExpired: 'Your session has expired. Please log in again.',

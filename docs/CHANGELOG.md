@@ -8,6 +8,35 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #2: pagination di database, kontrak response tidak dipecah
+
+**Akar masalah.** `GET /api/invoices` adalah `findMany()` polos tanpa `take`/`skip`, jadi setiap
+ketikan di kotak pencarian mengirim seluruh tabel ke browser dan tabel merender semuanya.
+
+**Keputusan kontrak.** Tiga desain ditimbang: (a) envelope `{ invoices, total, page, pages }`
+meniru `GET /api/audit`, (b) dual-shape — array bila tanpa `?page`, envelope bila ada, (c) array
+tetap + metadata di response header. Audit konsumen lebih dulu dijalankan dari lima arah berbeda
+dan hasilnya konsisten: **hanya satu consumer GET** di seluruh repo,
+`src/app/(dashboard)/invoices/page.tsx`. Envelope adalah pola yang sudah ada di repo ini
+(`/api/audit`), tetapi prioritas yang ditetapkan menempatkan *backward compatibility* di atas
+konsistensi pola, dan memang ada cara menambah pagination tanpa memecahkan kontrak — jadi (c)
+dipilih. Dual-shape ditolak: bentuk response yang bergantung pada ada/tidaknya sebuah query param
+adalah dua kontrak dalam satu rute.
+
+**Hasilnya.** Tanpa `page`/`pageSize`, rute berperilaku persis seperti sebelumnya — query sama,
+array sama, tanpa header tambahan. Dengan keduanya, potongan diambil di database dan metadata
+(`X-Total-Count`, `X-Page`, `X-Page-Size`, `X-Total-Pages`) dikirim lewat header. Filter dibangun
+**sebelum** `skip`/`take`, jadi pencarian memindai seluruh tabel lalu memaginasi hasilnya.
+
+**Satu perbaikan yang memang syarat kebenaran pagination:** `orderBy` menjadi
+`[{ createdAt: 'desc' }, { id: 'desc' }]`. `created_at` tidak unik — seed saja punya 14 invoice
+dengan nilai yang sama — sehingga tanpa urutan total, Postgres bisa mengulang atau melewatkan baris
+antar halaman. Terbukti saat verifikasi: 104 baris di 6 halaman, 104 unik, dan tetap 104 unik pada
+`pageSize=5` di 21 halaman.
+
+Di sisi FE, `page` direset ke 1 di dalam setter filter — bukan lewat `useEffect` — supaya query yang
+menyempit dijalankan sekali, bukan dijalankan lalu diulang.
+
 ### 2026-09-14 — Feedback PM #1: comment dan aktivitas invoice muncul di "Riwayat & PIC"
 
 **Akar masalah: datanya sudah tersimpan, tidak pernah dibaca.** `PATCH /api/invoices/[id]`
