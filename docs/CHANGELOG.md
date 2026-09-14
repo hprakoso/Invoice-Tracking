@@ -8,6 +8,33 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-14 — Feedback PM #3: kartu KPI dashboard menjadi filter
+
+**Bukan bug, tapi kemampuan yang belum ada.** `KPICard` adalah `motion.div` non-interaktif, dan
+dashboard hanya punya satu `Prisma.InvoiceWhereInput` yang menggerakkan kartu KPI sekaligus seluruh
+chart — tidak ada cara mengatakan "persempit chart-nya, tapi angka kartunya tetap".
+
+**Perubahan.** Satu query param baru, `kpi`, dengan nilai `payable` / `overdue` / `open`. Kartu
+diidentifikasi lewat predikat bisnisnya — kode status dari `NON_OPEN_STATUSES` dan perbandingan
+`due_date` terhadap `jakartaDayStart()` — **bukan** lewat label UI-nya; nilai berbentuk label seperti
+`kpi=Jatuh Tempo` diabaikan. Kartu Total Invoice tidak membawa predikat, jadi ia adalah tombol
+reset-nya; mengklik kartu yang sedang aktif juga membersihkan filter.
+
+**Komposisi memakai `AND`, bukan menimpa key.** `applyKpiScope` mengembalikan
+`{ AND: [where, ...] }`. Dua alasan: ia hanya bisa **mempersempit**, jadi scoping VENDOR di dalam
+`buildDashboardFilter` tidak mungkin tertimpa oleh sebuah kartu; dan ia tidak bertabrakan dengan
+`dueDate` yang di-spread tiap bucket aging di atasnya. Konsekuensinya, **bug pre-existing** pada
+bucket aging — yang menimpa filter rentang jatuh tempo dari/sampai — **tidak perlu disentuh** untuk
+membuat kartu Overdue benar, dan memang tidak disentuh (lihat Remaining issues).
+
+**Angka kartu tidak ikut menyempit.** `totalInvoices`, `totalPayable`, `overdueCount`, `openCount`
+tetap dihitung dari filter tanpa `kpi`, sesuai definisi bisnis yang sudah ada. Terverifikasi:
+keempat angka identik di keempat pilihan kartu, sementara `statusBreakdown` mengikuti (104 → 84 → 26)
+dan total aging turun dari 14,39 M ke 4,24 M saat kartu Overdue dipilih.
+
+**Export sengaja tidak ikut.** PM hanya meminta kartu dashboard menjadi filter, jadi `kpi`
+ditambahkan ke URL fetch dashboard saja — bukan ke `buildParams()` yang juga membangun tautan export.
+
 ### 2026-09-14 — Feedback PM #2: pagination di database, kontrak response tidak dipecah
 
 **Akar masalah.** `GET /api/invoices` adalah `findMany()` polos tanpa `take`/`skip`, jadi setiap

@@ -164,6 +164,7 @@ const id = {
     loadingAria: 'Memuat dashboard',
     filterDueFrom: 'Tanggal jatuh tempo dari',
     filterDueTo: 'Tanggal jatuh tempo sampai',
+    kpiFilterActive: 'Grafik dan tabel di bawah mengikuti kartu yang dipilih. Klik kartu itu lagi, atau "Total Invoice", untuk menampilkan seluruh data.',
   },
   invoices: {
     title: 'Invoice',

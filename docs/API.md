@@ -240,7 +240,22 @@ Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` 
 ### `GET /api/dashboard`
 Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below, server-forced (query-param `vendorId` is ignored for vendors, same IDOR protection as `GET /api/invoices`). Aggregation logic and the filter-building are shared with the export route via `getDashboardStats()`/`buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
 
-Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`. Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
+Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`, plus `kpi`.
+
+**`kpi` — the selected KPI card, acting as a dashboard filter.** The four cards are clickable; each is identified by the *business predicate* behind its figure, never by its UI label (an unrecognised value, including a label string, is ignored and echoed back as `null`):
+
+| `kpi` | Card | Predicate AND-ed onto the filter |
+|---|---|---|
+| *(absent)* | Total Invoices | none — this card is the reset |
+| `payable` | Total Tagihan | `status NOT IN ('PAID','CLOSED','REJECTED')` |
+| `open` | Invoice Terbuka | same as `payable` |
+| `overdue` | Jatuh Tempo | the above, plus `due_date < jakartaDayStart()` |
+
+Applied by `applyKpiScope()` as `{ AND: [filter, ...] }`, so it can only ever **narrow** — the `VENDOR` scoping inside `filter` cannot be overwritten by a card — and it does not collide with the per-bucket `due_date` the aging aggregates set on top.
+
+`kpi` is deliberately **not** part of `buildDashboardFilter()`: that builder also backs `GET /api/invoices` (which must not start honouring it), and it is what the KPI figures are computed from. So `totalInvoices`, `totalPayable`, `overdueCount` and `openCount` **ignore** `kpi` and keep their existing business definition, while `statusBreakdown`, `agingBuckets`, `monthlyTrend`, `statusByMonth`, `companyBreakdown`, `stageLeadTimes` and `recentInvoices` all follow it. `GET /api/dashboard/export` also ignores `kpi` — only the dashboard is card-filtered.
+
+Aside from `kpi`, every field below reflects the same filtered set; there's no partially-filtered view.
 
 | Response field | Source |
 |---|---|
@@ -254,7 +269,8 @@ Query params (all optional, all combine with AND): `search` (matches `invoice_nu
 | `statusByMonth[]` | `formula`: trailing 12 UTC months — `{month, entered, accepted}`, counting invoices created that month currently in `status = 'RECEIVED'` (entered) vs `status = 'PAID'` (accepted). A pipeline-health proxy, not a true historical flow rate — see `StatusFlowChart.tsx` |
 | `companyBreakdown[]` | `formula`: `GROUP BY invoices.company_id` over the filtered set → `{companyId, companyName, count, totalAmount}`, sorted by `totalAmount` descending. Company names come from a second `companies` query (Prisma `groupBy` can't include a relation). Invoices with no company are kept as a `companyId: null` row rather than dropped — a missing bill-to is worth seeing |
 | `stageLeadTimes[]` | `formula`: `foldStageLeadTimes()` over `invoice_stage_history` rows for the filtered invoices → `{stage, avgDays, completed, currentCount}` for all 5 stages in workflow order. A stage's duration is the gap to the **next** history row of the same invoice; the last row per invoice is still open, so it counts toward `currentCount` (invoices sitting there now) but **not** the average. Rows are ordered by `(invoice_id, changed_at)`, which is what keeps every gap non-negative even when a stage was recorded out of workflow order. `avgDays` is null when no invoice has completed that stage — rendered as "—", not 0 |
-| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
+| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set, narrowed by `kpi`) + `vendor.name` + `company.name` |
+| `kpi` | `formula`: the accepted `?kpi` value, or `null` — **Not Stored** |
 
 ### `GET /api/dashboard/export`
 Auth: any authenticated user, same `VENDOR` scoping and query params as `GET /api/dashboard` (same `buildDashboardFilter()`). **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.

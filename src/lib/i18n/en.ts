@@ -166,6 +166,7 @@ const en: Dictionary = {
     loadingAria: 'Loading dashboard',
     filterDueFrom: 'Due date from',
     filterDueTo: 'Due date to',
+    kpiFilterActive: 'The charts and tables below follow the selected card. Click it again, or "Total Invoices", to see all data.',
   },
   invoices: {
     title: 'Invoices',

@@ -80,6 +80,15 @@ export default function DashboardPage() {
   const [companyId, setCompanyId] = useState('')
   const [dueFrom, setDueFrom] = useState('')
   const [dueTo, setDueTo] = useState('')
+  // Which KPI card is acting as a filter. '' = the Total Invoices card, i.e. no
+  // card predicate — that card is the reset. Values are the server's business
+  // scopes (see applyKpiScope), never a card's UI label.
+  const [kpi, setKpi] = useState<'' | 'payable' | 'overdue' | 'open'>('')
+
+  // Clicking the selected card again clears it, so every card is its own reset
+  // as well; Total Invoices clears unconditionally.
+  const selectKpi = (next: '' | 'payable' | 'overdue' | 'open') =>
+    setKpi((current) => (current === next ? '' : next))
 
   const buildParams = useCallback(() => {
     const params = new URLSearchParams()
@@ -99,14 +108,19 @@ export default function DashboardPage() {
     // setLoading(false) ran, leaving the whole dashboard stuck on its skeleton
     // until the user happened to change a filter — the only other re-trigger.
     try {
-      const res = await fetch(`/api/dashboard?${buildParams()}`)
+      // `kpi` is appended here rather than inside buildParams(): buildParams()
+      // also builds the Excel export link, and the export is deliberately not
+      // scoped by the selected card — only the dashboard is.
+      const params = buildParams()
+      if (kpi) params.set('kpi', kpi)
+      const res = await fetch(`/api/dashboard?${params}`)
       setData(res.ok ? await res.json() : null)
     } catch {
       setData(null)
     } finally {
       setLoading(false)
     }
-  }, [buildParams])
+  }, [buildParams, kpi])
 
   useEffect(() => {
     if (!isVendor) {
@@ -214,11 +228,16 @@ export default function DashboardPage() {
           {/* KPI summary — single glass strip, hairline-divided cells */}
           <section className="glass-panel overflow-hidden rounded-2xl" aria-label={t.dashboard.subtitle}>
             <div className="grid grid-cols-2 lg:grid-cols-4">
-              <KPICard className={KPI_CELL} title={t.dashboard.totalInvoices} value={data.totalInvoices} />
-              <KPICard className={KPI_CELL} title={t.dashboard.totalPayable} value={data.totalPayable} format="currency" subtitle={t.dashboard.totalPayableSubtitle} />
-              <KPICard className={KPI_CELL} title={t.dashboard.overdue} value={data.overdueCount} tone="danger" subtitle={t.dashboard.overdueSubtitle} />
-              <KPICard className={KPI_CELL} title={t.dashboard.openInvoices} value={data.openCount} />
+              <KPICard className={KPI_CELL} title={t.dashboard.totalInvoices} value={data.totalInvoices} selected={kpi === ''} onSelect={() => setKpi('')} />
+              <KPICard className={KPI_CELL} title={t.dashboard.totalPayable} value={data.totalPayable} format="currency" subtitle={t.dashboard.totalPayableSubtitle} selected={kpi === 'payable'} onSelect={() => selectKpi('payable')} />
+              <KPICard className={KPI_CELL} title={t.dashboard.overdue} value={data.overdueCount} tone="danger" subtitle={t.dashboard.overdueSubtitle} selected={kpi === 'overdue'} onSelect={() => selectKpi('overdue')} />
+              <KPICard className={KPI_CELL} title={t.dashboard.openInvoices} value={data.openCount} selected={kpi === 'open'} onSelect={() => selectKpi('open')} />
             </div>
+            {kpi !== '' && (
+              <p className="border-t border-border/60 px-4 py-2 text-xs text-muted-foreground sm:px-6">
+                {t.dashboard.kpiFilterActive}
+              </p>
+            )}
           </section>
 
           {/* Hero — monthly trend */}
