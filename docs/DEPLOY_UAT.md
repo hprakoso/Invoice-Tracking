@@ -302,3 +302,28 @@ Dua jalan keluar, tanpa perubahan kode karena image-nya sama:
 | **Rate limit per-instance** | `rate-limit.ts` menyimpan state di memori. Tidak masalah selama satu instance | Sebelum menaikkan replika |
 | **Password admin bootstrap** | Literal di `prisma/seed.ts:89`, ada di riwayat git **repo publik** | **Wajib** rotasi sebelum produksi |
 | **Tombol demo di halaman login** | Mengirim kredensial seed dari bundle klien. Aman hanya karena akun-akun itu throwaway | Matikan `NEXT_PUBLIC_ENABLE_DEMO_LOGIN` sebelum produksi |
+
+---
+
+## 4.8 Merapikan company contoh di environment yang sudah pernah di-seed (2026-09-17)
+
+Deploy **tidak** menjalankan seed: image runtime hanya `CMD ["node", "server.js"]`, `render.yaml` tidak
+punya build/start/pre-deploy command, dan `db:seed` adalah skrip manual. Jadi mengubah daftar company di
+`prisma/seed.ts` tidak berpengaruh pada database yang sudah terisi — barisnya sudah terlanjur ada.
+
+Re-seed bukan jalan keluar di tengah UAT: `seed.ts` menghapus seluruh tabel lebih dulu.
+
+Jalankan sekali dari mesin yang punya kredensial database UAT:
+
+```bash
+DATABASE_URL="<UAT database url>" DATABASE_SSL_REJECT_UNAUTHORIZED=false \
+  npm run db:reconcile-companies -- --dry-run   # lihat rencananya dulu
+DATABASE_URL="<UAT database url>" DATABASE_SSL_REJECT_UNAUTHORIZED=false \
+  npm run db:reconcile-companies
+```
+
+Skrip ini idempoten — dijalankan lagi pada database yang sudah benar ia hanya melaporkan
+"nothing to do". Ia memindahkan invoice dari company lama ke salah satu company yang disetujui lebih
+dulu, baru menghapus baris lamanya, sehingga tidak ada foreign key yatim. Vendor tidak disentuh.
+
+**Tidak perlu redeploy untuk ini** — perubahannya murni di data, bukan di kode yang berjalan.

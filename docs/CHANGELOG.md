@@ -8,6 +8,38 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-17 — Rekonsiliasi company untuk environment yang sudah pernah di-seed
+
+**Akar masalahnya bukan kode, melainkan data yang sudah terlanjur ada.** `prisma/seed.ts` sudah
+menghasilkan dua company yang benar, tetapi seed **tidak pernah dijalankan oleh proses deploy**: image
+runtime memakai `CMD ["node", "server.js"]`, `render.yaml` tidak menyetel build/start/pre-deploy
+command apa pun, dan `db:seed` hanya skrip npm manual. Seed juga menghapus seluruh tabel di awal, jadi
+menjalankannya ulang di tengah UAT akan memusnahkan seluruh invoice dan user milik penguji. Akibatnya
+database yang pernah di-seed dengan daftar company lama akan menyimpan baris itu selamanya, dan
+redeploy tidak mengubah apa pun.
+
+Di UAT keadaannya: dua company yang benar sudah ada dan aktif, tiga company lama masih ada tetapi
+non-aktif, dan 88 invoice contoh masih menunjuk ke tiga baris lama itu. Halaman admin Company memanggil
+`/api/companies?includeInactive=true` — memang disengaja, supaya admin bisa melihat dan mengaktifkan
+kembali company yang dinonaktifkan — sehingga ketiga baris lama tetap tampil meskipun setiap dropdown
+lain sudah memakai endpoint default yang hanya mengembalikan yang aktif.
+
+**Perbaikan: `prisma/reconcile-companies.ts` + skrip npm `db:reconcile-companies`.** Idempoten;
+dijalankan pada database yang sudah benar ia melaporkan "nothing to do" dan tidak menulis apa pun.
+Langkahnya: pastikan kedua company yang disetujui ada dan aktif (dicocokkan berdasarkan nama, karena id
+digenerate per environment), lalu untuk setiap company lain pindahkan dulu invoice-nya ke salah satu
+company yang disetujui, baru hapus barisnya. `invoices.company_id` adalah **satu-satunya** foreign key
+ke `companies` (diverifikasi terhadap `prisma/schema.prisma`), jadi itu keseluruhan dependensinya —
+tidak ada FK yatim yang bisa tertinggal.
+
+Pemetaannya round-robin berdasarkan urutan nama company lama, jadi deterministik dan hasilnya sama bila
+diulang. `seed.ts` menyebar invoice ke company secara acak tanpa makna bisnis per-invoice, jadi tidak
+ada aturan yang perlu dipertahankan selain sifatnya yang tersebar. Hanya `company_id` yang disentuh;
+vendor, nominal, tanggal dan status invoice tidak diubah sama sekali.
+
+**Sengaja tidak diotomatiskan.** Ini bukan migrasi dan tidak dipanggil saat aplikasi start, karena
+menghapus baris Company hanya benar untuk data contoh — bukan untuk data produksi.
+
 ### 2026-09-17 — Pre-UAT: password awal diterbitkan server, tidak lagi diketik ADMIN
 
 **Perubahan.** Password awal tidak lagi diketik ADMIN (`src/lib/validations.ts`, `src/app/api/users/route.ts`,
