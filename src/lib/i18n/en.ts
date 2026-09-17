@@ -527,6 +527,8 @@ const en: Dictionary = {
     deactivate: 'Deactivate',
     reactivate: 'Reactivate',
     companyCreated: 'Company created',
+    editCompany: 'Edit Company',
+    companyUpdated: 'Company updated',
     companyCreateFailed: 'Failed to create company',
     companyDeactivated: 'Company deactivated',
     companyReactivated: 'Company reactivated',

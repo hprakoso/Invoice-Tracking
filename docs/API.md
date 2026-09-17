@@ -230,7 +230,7 @@ Auth: any authenticated user (needed by the vendor upload wizard's company dropd
 Auth: `ADMIN`, `GA_STAFF` only. Body validated by `createCompanySchema`. Writes: `companies` row, `audit_logs` (`action: 'company.created'`).
 
 ### `PATCH /api/companies/[id]`
-Auth: `ADMIN`, `GA_STAFF` only. Body validated by `updateCompanySchema` (partial). Writes: `companies` row (partial update), `audit_logs` (`action: 'company.updated'`, `metadata: { fields }`).
+Auth: `ADMIN`, `GA_STAFF` only. Body validated by `updateCompanySchema` (partial). Writes: `companies` row (partial update), `audit_logs` (`action: 'company.updated'`, `metadata: { fields }`). Serves two callers on the admin page: the full-record edit form (name/npwp/address/city/email) and the activate/deactivate toggle (`isActive` alone).
 
 ### `DELETE /api/companies/[id]`
 Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` (no row is actually deleted — invoices already pointing at it keep a valid FK). Writes `audit_logs` (`action: 'company.deactivated'`).

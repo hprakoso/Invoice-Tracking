@@ -525,6 +525,8 @@ const id = {
     deactivate: 'Nonaktifkan',
     reactivate: 'Aktifkan kembali',
     companyCreated: 'Perusahaan berhasil dibuat',
+    editCompany: 'Ubah Perusahaan',
+    companyUpdated: 'Perusahaan berhasil diperbarui',
     companyCreateFailed: 'Gagal membuat perusahaan',
     companyDeactivated: 'Perusahaan dinonaktifkan',
     companyReactivated: 'Perusahaan diaktifkan kembali',

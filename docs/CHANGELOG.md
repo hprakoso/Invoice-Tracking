@@ -8,6 +8,25 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-17 — Pre-UAT: ADMIN dapat mengubah company, dan seed company jadi dua entitas
+
+**1. ADMIN bisa mengubah company (`src/app/(dashboard)/admin/companies/page.tsx`).**
+Akar masalahnya murni di UI. `PATCH /api/companies/[id]` sudah ada sejak awal, sudah dibatasi
+`requireRole(['ADMIN','GA_STAFF'])`, dan sudah divalidasi `updateCompanySchema` — halaman admin hanya
+tidak pernah memanggilnya kecuali untuk menyalakan/mematikan `isActive`. Form yang sudah ada kini
+dipakai untuk create dan edit sekaligus (satu state, satu submit path: POST saat membuat, PATCH saat
+mengubah), ditambah tombol Edit per baris. Tidak ada komponen form baru, tidak ada perubahan
+otorisasi: GA_MANAGER tetap 403 untuk POST/PATCH/DELETE, dan sidebar tetap membatasi halaman ini ke
+ADMIN + GA_STAFF.
+
+**2. Seed company tinggal dua entitas (`prisma/seed.ts`).**
+`companySpecs` menjadi `PT. Berau Coal Energy Tbk.` dan `PT. Borneo Indobara`. Seluruh referensi ke
+company memakai id yang digenerate saat seed (`companies[0]` untuk invoice batas UAT, dan pilihan acak
+untuk sisanya), jadi panjang daftar bebas berubah dan tidak ada FK yang putus — terverifikasi 0 baris
+yatim dari 105 invoice. Baris yang menonaktifkan satu company dihapus: dengan hanya dua entitas nyata,
+menonaktifkan salah satunya memangkas separuh pilihan dan terbaca seperti bug saat UAT. Seed vendor
+tidak disentuh sama sekali (tetap 6 vendor, 1 di antaranya nonaktif untuk menguji toggle).
+
 ### 2026-09-14 — Feedback PM #6: currency hanya IDR untuk flow input baru
 
 **Kondisi awal.** Currency sebenarnya sudah IDR di setiap tempat yang disentuh manusia — wizard
