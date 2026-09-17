@@ -472,7 +472,7 @@ const en: Dictionary = {
     namePlaceholder: 'Name',
     emailPlaceholder: 'Email',
     selectVendor: 'Select vendor...',
-    initialPasswordPlaceholder: 'Initial password (min 8 chars)',
+    initialPasswordNotice: 'Initial login credentials will be sent to the user\'s email. They must change the password on first login.',
     createUser: 'Create User',
     colName: 'Name',
     colEmail: 'Email',

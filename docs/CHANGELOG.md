@@ -8,6 +8,32 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-17 — Pre-UAT: password awal diterbitkan server, tidak lagi diketik ADMIN
+
+**Perubahan.** Password awal tidak lagi diketik ADMIN (`src/lib/validations.ts`, `src/app/api/users/route.ts`,
+`src/app/(dashboard)/admin/users/page.tsx`).**
+Sebelumnya form mengirim `password` dan tombol Buat terkunci sampai ADMIN mengetik minimal 8 karakter.
+Kini `createUserSchema` tidak lagi punya field `password` sama sekali, sehingga nilai yang dikirim
+client akan dibuang zod sebelum sampai ke bcrypt — terverifikasi: akun yang dibuat dengan
+`password: 'attacker-chosen-pw'` menolak password itu saat login. Rute menerbitkan kredensial sendiri
+dari `INITIAL_USER_PASSWORD` (env, default `P@ssw0rd`, pola yang sama dengan `DEMO_PASSWORD` di seed),
+menyimpannya sebagai `bcrypt.hash(..., 12)`, menyetel `must_change_password = true` secara eksplisit,
+lalu mengirim email selamat datang lewat `sendEmail()`/`renderEmailLayout()` yang sudah ada.
+
+Kegagalan email tidak bisa menggagalkan pembuatan akun: `sendEmail` memang no-op tanpa
+`RESEND_API_KEY`, dan pemanggilannya dibungkus try/catch supaya throw di level transport tidak
+mengembalikan 500 untuk akun yang sebenarnya sudah jadi — kalau itu terjadi, ADMIN akan mengulang dan
+menabrak error email duplikat. Karena password awalnya nilai tetap yang dikonfigurasi, ADMIN tetap
+bisa memberitahukannya secara langsung bila email belum aktif.
+
+**UI create user menyesuaikan.** Input password dihapus, diganti keterangan bahwa kredensial awal
+dikirim ke email pengguna dan wajib diganti saat pertama masuk. Tombol Buat kini hanya menunggu
+nama + email (dan vendor, untuk role VENDOR). Alur reset password oleh ADMIN di halaman yang sama —
+fitur terpisah yang memakai `PATCH /api/users/[id]` — tidak disentuh dan tetap berfungsi.
+
+**Tanpa migrasi.** `users.password_hash` dan `users.must_change_password` sudah ada; yang berubah
+hanyalah dari mana nilai password awal berasal.
+
 ### 2026-09-17 — Pre-UAT: ADMIN dapat mengubah company, dan seed company jadi dua entitas
 
 **1. ADMIN bisa mengubah company (`src/app/(dashboard)/admin/companies/page.tsx`).**

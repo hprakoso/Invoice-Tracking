@@ -24,7 +24,7 @@ export default function AdminUsersPage() {
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
+  const [form, setForm] = useState({ name: '', email: '', role: 'GA_STAFF', vendorId: '' })
   const [saving, setSaving] = useState(false)
 
   const fetchUsers = () =>
@@ -128,7 +128,7 @@ export default function AdminUsersPage() {
     if (res.ok) {
       toast.success(t.userManagement.userCreated)
       setShowCreate(false)
-      setForm({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
+      setForm({ name: '', email: '', role: 'GA_STAFF', vendorId: '' })
       fetchUsers()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -170,9 +170,11 @@ export default function AdminUsersPage() {
                 {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             )}
-            <Input placeholder={t.userManagement.initialPasswordPlaceholder} type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
           </div>
-          <Button onClick={createUser} disabled={saving || !form.name || !form.email || form.password.length < 8}>
+          {/* No password input: POST /api/users issues the initial credential
+              server-side and mails it to the new user. */}
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t.userManagement.initialPasswordNotice}</p>
+          <Button onClick={createUser} disabled={saving || !form.name || !form.email || (form.role === 'VENDOR' && !form.vendorId)}>
             {t.userManagement.createUser}
           </Button>
         </div>

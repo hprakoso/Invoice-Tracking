@@ -470,7 +470,7 @@ const id = {
     namePlaceholder: 'Nama',
     emailPlaceholder: 'Email',
     selectVendor: 'Pilih vendor...',
-    initialPasswordPlaceholder: 'Password awal (min. 8 karakter)',
+    initialPasswordNotice: 'Kredensial login awal akan dikirim ke email pengguna. Pengguna wajib menggantinya saat pertama kali masuk.',
     createUser: 'Buat Pengguna',
     colName: 'Nama',
     colEmail: 'Email',

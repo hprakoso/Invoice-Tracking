@@ -255,13 +255,18 @@ export const updateReminderSettingSchema = z.object({
   inAppEnabled: z.boolean().optional(),
 })
 
+/**
+ * No `password` field: the initial credential is issued server-side by
+ * POST /api/users and mailed to the new user, so the browser never supplies,
+ * sees or transmits one. Anything a client does send under that key is simply
+ * dropped by zod rather than reaching bcrypt.
+ */
 export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),
     email: z.string().email(),
     role: z.enum(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
     vendorId: z.string().uuid().optional().nullable(),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
   })
   .refine((d) => d.role !== 'VENDOR' || !!d.vendorId, {
     message: 'vendorId is required for VENDOR role',

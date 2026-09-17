@@ -312,7 +312,13 @@ Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{
 Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
 
 ### `POST /api/users`
-Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` defaults to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod): `{ name, email, role, vendorId? }`.
+
+**The body carries no password.** Since 2026-09-17 the initial credential is issued server-side, so the browser never supplies, sees or transmits one; a `password` key sent by a client is dropped by zod before it can reach bcrypt. The value comes from `INITIAL_USER_PASSWORD` (env, default `P@ssw0rd`), configured the same way `prisma/seed.ts` configures `DEMO_PASSWORD`. A shared, known starting credential is only safe because it is single-use — see `must_change_password` below.
+
+Writes: `users` row (`password_hash` = `bcrypt.hash(INITIAL_USER_PASSWORD, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` set explicitly to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+
+Then sends a welcome email to the new address via the shared `sendEmail()`/`renderEmailLayout()` (**Not Stored**) carrying the login email and the initial password. Delivery is best-effort by design: `sendEmail` is already a no-op when `RESEND_API_KEY` is unset, and the call is additionally wrapped so a transport-level throw cannot fail the request — the account exists and is usable either way, and a 500 here would push the admin into retrying into a duplicate-email error. The plaintext credential is never persisted, never logged and never present in the response, whose `select` returns only `id`, `name`, `email`, `role`, `vendorId`, `isActive`.
 
 ### `PATCH /api/users/[id]`
 Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
