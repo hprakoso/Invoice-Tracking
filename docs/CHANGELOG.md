@@ -8,6 +8,21 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-25 — Filter perusahaan di daftar invoice, kolom Tahap PIC disembunyikan untuk Vendor
+
+**Filter Perusahaan.** Dropdown baru di sebelah Status dan Vendor pada `/invoices`, tampil untuk semua
+role. Opsinya diambil dari `GET /api/companies?includeInactive=true` (`companies.id`, `companies.name`)
+— sama dengan filter di dashboard, supaya invoice lama yang ditagihkan ke perusahaan yang sudah
+dinonaktifkan tetap bisa dicari. Nilai terpilih dikirim sebagai `companyId` ke `GET /api/invoices`,
+yang sudah menerimanya lewat `buildDashboardFilter()` (`where.companyId`, kolom `invoices.company_id`);
+tidak ada perubahan backend. Mengganti filter mengembalikan ke halaman 1, sama seperti filter lain.
+**Not Stored** — filter hanya state client.
+
+**Tahap PIC untuk Vendor.** Membalik keputusan entri 2026-09-24: atas permintaan PM, header dan sel
+kolom Tahap PIC tidak dirender bila `session.user.role === 'VENDOR'`. Jumlah kolom skeleton dan
+`colSpan` empty-state ikut menyesuaikan (11 → 10). Ini hanya di UI — `GET /api/invoices` tetap
+mengembalikan `picStage` (`invoices.pic_stage`) ke vendor, dan halaman detail invoice tidak disentuh.
+
 ### 2026-09-24 — Kolom perusahaan & tanggal dokumen di daftar invoice, plus sorting
 
 **Tahap PIC untuk Vendor: ternyata tidak ada yang perlu diperbaiki.** `invoices.pic_stage` adalah kolom
@@ -1249,6 +1264,11 @@ dilaporkan.
 | `1e79a61` | 2026-09-14 | fix: drop the KPI Summary worksheet from the Excel export |
 | `6cd6c8e` | 2026-09-14 | fix: use date pickers for invoice date fields on confirmation |
 | `e8cda24` | 2026-09-14 | fix: accept and show IDR only for new invoice input flow |
+| `1a8b47e` | 2026-09-17 | feat: let ADMIN edit a company, and seed only the two real companies |
+| `78db88c` | 2026-09-17 | feat: issue the initial user password server-side and email it |
+| `2f654c5` | 2026-09-17 | fix: reconcile sample company data on already-seeded environments |
+| `e1e9323` | 2026-09-24 | feat: add company and document date columns and sorting to invoice list |
+| _(this commit)_ | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
 
 Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
 history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini

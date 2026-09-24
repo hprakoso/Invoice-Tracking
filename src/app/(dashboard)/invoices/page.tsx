@@ -98,6 +98,8 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [vendorId, setVendorId] = useState('')
+  const [companies, setCompanies] = useState<Vendor[]>([])
+  const [companyId, setCompanyId] = useState('')
   const [poNumber, setPoNumber] = useState('')
   const [picId, setPicId] = useState('')
   const [amountMin, setAmountMin] = useState('')
@@ -135,6 +137,10 @@ export default function InvoicesPage() {
   // PIC is internal-only (scrubbed from vendor-facing invoice responses), so
   // vendors don't get a filter for it either.
   const canFilterByPic = ['ADMIN', 'GA_STAFF', 'GA_MANAGER'].includes(session?.user?.role ?? '')
+  // The PIC stage column is internal workflow, so vendors don't see it. The
+  // skeleton and empty-state rows must span the same number of columns.
+  const showPicStage = session?.user?.role !== 'VENDOR'
+  const colCount = showPicStage ? 11 : 10
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -142,6 +148,7 @@ export default function InvoicesPage() {
     if (search) params.set('search', search)
     if (status) params.set('status', status)
     if (vendorId) params.set('vendorId', vendorId)
+    if (companyId) params.set('companyId', companyId)
     if (poNumber) params.set('poNumber', poNumber)
     if (picId) params.set('picId', picId)
     if (amountMin) params.set('amountMin', amountMin)
@@ -157,10 +164,13 @@ export default function InvoicesPage() {
     setTotal(Number.isFinite(headerTotal) ? headerTotal : 0)
     setPages(Number.isFinite(headerPages) && headerPages > 0 ? headerPages : 1)
     setLoading(false)
-  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax, page, sort, dir])
+  }, [search, status, vendorId, companyId, poNumber, picId, amountMin, amountMax, page, sort, dir])
 
   useEffect(() => {
     fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
+    // Inactive companies included, same as the dashboard filter: older invoices
+    // may still be billed to a company that has since been deactivated.
+    fetch('/api/companies?includeInactive=true').then(r => r.json()).then((d: unknown) => setCompanies(Array.isArray(d) ? d : []))
     // PIC filter lists GA staff — the same source the upload wizard's PIC
     // dropdown uses. VENDOR callers get 403 here and simply see no filter.
     if (canFilterByPic) {
@@ -236,6 +246,14 @@ export default function InvoicesPage() {
             <option value="">{t.dashboard.allVendors}</option>
             {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
+          <select
+            value={companyId}
+            onChange={e => onFilter(setCompanyId)(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">{t.dashboard.allCompanies}</option>
+            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
         </div>
 
         <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
@@ -298,7 +316,7 @@ export default function InvoicesPage() {
                 <SortTh k="deliveredDate" label={t.invoices.colReceivedDate} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden lg:table-cell" />
                 <SortTh k="totalAmount" label={t.invoices.colTotal} sort={sort} dir={dir} onToggle={toggleSort} align="right" />
                 <SortTh k="status" label={t.invoices.colStatus} sort={sort} dir={dir} onToggle={toggleSort} align="center" />
-                <SortTh k="picStage" label={t.invoices.colPicStage} sort={sort} dir={dir} onToggle={toggleSort} />
+                {showPicStage && <SortTh k="picStage" label={t.invoices.colPicStage} sort={sort} dir={dir} onToggle={toggleSort} />}
                 <th className="w-8 px-2"></th>
               </tr>
             </thead>
@@ -306,14 +324,14 @@ export default function InvoicesPage() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="border-b dark:border-gray-700">
-                    {[...Array(11)].map((_, j) => (
+                    {[...Array(colCount)].map((_, j) => (
                       <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={colCount} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                     {t.invoices.noInvoicesFound}
                   </td>
                 </tr>
@@ -344,7 +362,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden lg:table-cell whitespace-nowrap">{formatDate(inv.deliveredDate)}</td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatIDR(inv.totalAmount)}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>
-                    <td className="px-4 py-3">
+                    {showPicStage && <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <PICStageBadge stage={inv.picStage} />
                         {canManageStage && (
@@ -374,7 +392,7 @@ export default function InvoicesPage() {
                           </DropdownMenu>
                         )}
                       </div>
-                    </td>
+                    </td>}
                     <td className="px-2 py-3"><ChevronRight className="h-4 w-4 text-gray-300 dark:text-gray-600" /></td>
                   </motion.tr>
                 ))
