@@ -11,6 +11,12 @@ Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId 
 
 Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`), plus `page`/`pageSize`. The filter params are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
 
+**Sorting.** `sort` + `dir` (`asc`/`desc`, default `createdAt desc`). `sort` is matched against a whitelist (`invoiceNumber`, `company`, `status`, `sendDate`, `deliveredDate`, `invoiceDate`, `dueDate`, `createdAt`, `totalAmount`, `picStage`); anything unrecognised falls back to `createdAt`, so no client string reaches Prisma's `orderBy`. Every sort carries `id desc` as a tiebreak because none of these columns is unique. Nullable date columns sort `nulls: 'last'` in both directions. Sorting is applied **before** `skip`/`take`, so it orders the whole filtered set.
+
+| Response field | Source |
+|---|---|
+| `company.id`, `company.name` | `companies.id`, `companies.name` via `invoices.company_id`; `null` when the invoice has no company |
+
 **Pagination is opt-in and the response body is unchanged — still a bare JSON array.**
 
 Omit `page` and `pageSize` and this route behaves exactly as it always has: one unbounded `findMany`, the same array, no extra headers. Send either and the slice is taken in the database (`skip`/`take`) and the metadata comes back in response headers rather than wrapping the body in an envelope — that would have been a breaking change to the contract this section documents, and the audit below found no need for one.

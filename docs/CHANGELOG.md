@@ -8,6 +8,32 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-24 — Kolom perusahaan & tanggal dokumen di daftar invoice, plus sorting
+
+**Tahap PIC untuk Vendor: ternyata tidak ada yang perlu diperbaiki.** `invoices.pic_stage` adalah kolom
+persisten, dikembalikan apa adanya oleh `GET /api/invoices` untuk semua role, dan kolomnya dirender
+tanpa gerbang role — hanya dropdown pemindah tahap yang dibatasi `canManageStage`. Diverifikasi dengan
+memuat `/invoices` sebagai VENDOR: teks "Tahap PIC" ada di HTML, dan payload API memuat `picStage`.
+Jadi tidak ada perubahan kode untuk butir ini.
+
+**Kolom baru.** `GET /api/invoices` kini ikut meng-`include` relasi `company` (satu join, bukan
+lookup per baris), dan tabel invoice menampilkan Perusahaan, Dokumen Dikirim (`invoices.send_date`)
+dan Dokumen Diterima (`invoices.delivered_date`). Tidak ada kolom `receivedDate` di schema —
+`delivered_date` adalah tanggal dokumen diterima kantor, pasangan dari `send_date`. Nilai kosong
+tampil sebagai `—`, sama seperti kolom lain.
+
+**Sorting di database, sebelum pagination.** Param `sort` + `dir`; nama kolom dari client dicocokkan
+ke whitelist dan yang tidak dikenal jatuh ke `createdAt`, jadi tidak ada nama field yang sampai ke
+`orderBy` Prisma. Setiap sort memakai `id` sebagai tiebreak karena tidak satu pun kolom ini unik.
+Kolom tanggal memakai `nulls: 'last'` di kedua arah — Postgres menaruh NULL lebih dulu pada DESC,
+yang membuat "Dokumen Diterima terbaru" dibuka dengan layar penuh sel kosong. Vendor tidak ikut
+di-sort (relasi, tidak diminta) dan headernya tetap polos.
+
+Scope perusahaan untuk GA_STAFF dikerjakan di commit terpisah dan **sengaja belum di-push**: kodenya
+membaca tabel dan kolom baru yang baru ada setelah migrasi, sementara UAT belum di-backup. Karena
+Render auto-deploy saat push, mengirim keduanya sekaligus akan membuat halaman Manajemen Pengguna dan
+semua request GA_STAFF error. Commit ini tidak menyentuh skema sama sekali.
+
 ### 2026-09-17 — Rekonsiliasi company untuk environment yang sudah pernah di-seed
 
 **Akar masalahnya bukan kode, melainkan data yang sudah terlanjur ada.** `prisma/seed.ts` sudah

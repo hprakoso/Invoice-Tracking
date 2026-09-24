@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Plus, ChevronLeft, ChevronRight, ChevronsUpDown } from 'lucide-react'
+import { Search, Plus, ChevronLeft, ChevronRight, ChevronsUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -29,12 +29,56 @@ interface Invoice {
   currency: string
   ocrConfidence: number | null
   vendor: { id: string; name: string }
+  company: { id: string; name: string } | null
   createdBy: { id: string; name: string }
   pic: { id: string; name: string } | null
   items: { id: string; description: string; quantity: string | null; unitPrice: string | null; total: string }[]
 }
 
 interface Vendor { id: string; name: string }
+
+// Columns the API is willing to sort by — mirrors the SORTABLE whitelist in
+// src/app/api/invoices/route.ts. Anything not listed renders as a plain header.
+type SortKey =
+  | 'invoiceNumber' | 'company' | 'status' | 'sendDate' | 'deliveredDate'
+  | 'invoiceDate' | 'dueDate' | 'createdAt' | 'totalAmount' | 'picStage'
+
+// A sortable column header. Declared at module scope, not inside the page
+// component — a component created during render is a new type on every render,
+// which resets its state and defeats reconciliation. Non-sortable columns stay
+// a plain <th> so they don't look clickable; aria-sort tells assistive tech
+// which column is currently ordering the table.
+function SortTh({
+  k, label, sort, dir, onToggle, cls = '', align = 'left',
+}: {
+  k: SortKey
+  label: string
+  sort: SortKey
+  dir: 'asc' | 'desc'
+  onToggle: (k: SortKey) => void
+  cls?: string
+  align?: 'left' | 'right' | 'center'
+}) {
+  const active = sort === k
+  const alignCls = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'
+  return (
+    <th
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap ${alignCls} ${cls}`}
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(k)}
+        className={`inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200 ${active ? 'text-gray-700 dark:text-gray-200' : ''}`}
+      >
+        {label}
+        {active
+          ? (dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+          : <ChevronsUpDown className="h-3 w-3 opacity-30" />}
+      </button>
+    </th>
+  )
+}
 
 import { formatIDR, formatDate, isOverdue } from '@/lib/format'
 
@@ -65,6 +109,19 @@ export default function InvoicesPage() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(1)
+  // Sort is applied by the API before paging, so it is server state, not a
+  // client-side re-order of the current page. Keys are the API's whitelist.
+  const [sort, setSort] = useState<SortKey>('createdAt')
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+
+  // A new column starts descending (most useful default for dates/amounts);
+  // clicking the active column flips direction. Sorting re-orders the whole
+  // filtered set, so the current page number no longer means anything.
+  const toggleSort = (key: SortKey) => {
+    if (key === sort) setDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSort(key); setDir('desc') }
+    setPage(1)
+  }
 
   // A filter change invalidates the page number: page 4 of the unfiltered list
   // is not page 4 of the filtered one, and is usually past its end. Done in the
@@ -90,6 +147,8 @@ export default function InvoicesPage() {
     if (amountMin) params.set('amountMin', amountMin)
     if (amountMax) params.set('amountMax', amountMax)
     params.set('page', String(page))
+    params.set('sort', sort)
+    params.set('dir', dir)
     const res = await fetch(`/api/invoices?${params}`)
     const data = await res.json()
     setInvoices(Array.isArray(data) ? data : [])
@@ -98,7 +157,7 @@ export default function InvoicesPage() {
     setTotal(Number.isFinite(headerTotal) ? headerTotal : 0)
     setPages(Number.isFinite(headerPages) && headerPages > 0 ? headerPages : 1)
     setLoading(false)
-  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax, page])
+  }, [search, status, vendorId, poNumber, picId, amountMin, amountMax, page, sort, dir])
 
   useEffect(() => {
     fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : []))
@@ -229,13 +288,17 @@ export default function InvoicesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{t.invoices.colInvoiceNo}</th>
+                <SortTh k="invoiceNumber" label={t.invoices.colInvoiceNo} sort={sort} dir={dir} onToggle={toggleSort} />
+                {/* Vendor is not in the API's sort whitelist, so it stays a plain header. */}
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.invoices.colVendor}</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden md:table-cell whitespace-nowrap">{t.invoices.colInvoiceDate}</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:table-cell whitespace-nowrap">{t.invoices.colDueDate}</th>
-                <th className="text-right px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{t.invoices.colTotal}</th>
-                <th className="text-center px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.invoices.colStatus}</th>
-                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium whitespace-nowrap">{t.invoices.colPicStage}</th>
+                <SortTh k="company" label={t.invoices.colCompany} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden md:table-cell" />
+                <SortTh k="invoiceDate" label={t.invoices.colInvoiceDate} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden xl:table-cell" />
+                <SortTh k="dueDate" label={t.invoices.colDueDate} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden sm:table-cell" />
+                <SortTh k="sendDate" label={t.invoices.colSentDate} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden lg:table-cell" />
+                <SortTh k="deliveredDate" label={t.invoices.colReceivedDate} sort={sort} dir={dir} onToggle={toggleSort} cls="hidden lg:table-cell" />
+                <SortTh k="totalAmount" label={t.invoices.colTotal} sort={sort} dir={dir} onToggle={toggleSort} align="right" />
+                <SortTh k="status" label={t.invoices.colStatus} sort={sort} dir={dir} onToggle={toggleSort} align="center" />
+                <SortTh k="picStage" label={t.invoices.colPicStage} sort={sort} dir={dir} onToggle={toggleSort} />
                 <th className="w-8 px-2"></th>
               </tr>
             </thead>
@@ -243,14 +306,14 @@ export default function InvoicesPage() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="border-b dark:border-gray-700">
-                    {[...Array(8)].map((_, j) => (
+                    {[...Array(11)].map((_, j) => (
                       <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={11} className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                     {t.invoices.noInvoicesFound}
                   </td>
                 </tr>
@@ -271,11 +334,14 @@ export default function InvoicesPage() {
                       {inv.poNumber && <div className="text-[10px] text-gray-400 dark:text-gray-500 font-sans">{t.invoices.poShort}: {inv.poNumber}</div>}
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300 max-w-[180px] truncate">{inv.vendor?.name}</td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell whitespace-nowrap">{formatDate(inv.invoiceDate)}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell max-w-[180px] truncate">{inv.company?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden xl:table-cell whitespace-nowrap">{formatDate(inv.invoiceDate)}</td>
                     <td className={`px-4 py-3 hidden sm:table-cell font-medium ${isOverdue(inv.dueDate, inv.status) ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
                       <div className="whitespace-nowrap">{formatDate(inv.dueDate)}</div>
                       {isOverdue(inv.dueDate, inv.status) && <div className="text-xs text-red-500 dark:text-red-400 font-semibold mt-0.5">{t.invoices.overdueTag}</div>}
                     </td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden lg:table-cell whitespace-nowrap">{formatDate(inv.sendDate)}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden lg:table-cell whitespace-nowrap">{formatDate(inv.deliveredDate)}</td>
                     <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatIDR(inv.totalAmount)}</td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>
                     <td className="px-4 py-3">

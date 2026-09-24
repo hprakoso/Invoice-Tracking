@@ -32,6 +32,48 @@ export async function GET(req: NextRequest) {
   //
   // `page` is clamped the way GET /api/audit clamps it — `Number('abc')` is NaN
   // and `?page=0`/`-1` is negative, and either reached Prisma as `skip` and threw.
+  // Sorting happens in the database, before skip/take, so a sort applies to the
+  // whole filtered set rather than to whichever rows the active page holds.
+  //
+  // The client sends a column key, never a Prisma field name: an unknown key
+  // falls back to createdAt rather than reaching orderBy, so no caller can
+  // order by a column it was never meant to see (or crash the query).
+  const SORTABLE = {
+    invoiceNumber: 'invoiceNumber',
+    company: 'company',
+    status: 'status',
+    sendDate: 'sendDate',
+    deliveredDate: 'deliveredDate',
+    invoiceDate: 'invoiceDate',
+    dueDate: 'dueDate',
+    createdAt: 'createdAt',
+    totalAmount: 'totalAmount',
+    picStage: 'picStage',
+  } as const
+  const rawSort = req.nextUrl.searchParams.get('sort') ?? ''
+  const sortKey = (Object.keys(SORTABLE) as (keyof typeof SORTABLE)[]).includes(rawSort as never)
+    ? (rawSort as keyof typeof SORTABLE)
+    : 'createdAt'
+  const dir: 'asc' | 'desc' = req.nextUrl.searchParams.get('dir') === 'asc' ? 'asc' : 'desc'
+
+  // `id` is the tiebreak on every sort: none of these columns is unique, and
+  // without a total order Postgres may repeat or drop rows across skip/take
+  // pages. Company sorts by its related name, which Prisma expresses as a
+  // nested orderBy rather than a scalar field.
+  // Nullable columns sort with their blanks last in both directions. Postgres
+  // orders NULLs first on DESC by default, which would open "Dokumen Diterima,
+  // newest first" with a screen of empty cells.
+  const NULLABLE = new Set(['sendDate', 'deliveredDate', 'dueDate', 'invoiceDate'])
+  const orderBy: Prisma.InvoiceOrderByWithRelationInput[] =
+    sortKey === 'company'
+      ? [{ company: { name: dir } }, { id: 'desc' }]
+      : [
+          (NULLABLE.has(sortKey)
+            ? { [sortKey]: { sort: dir, nulls: 'last' } }
+            : { [sortKey]: dir }) as Prisma.InvoiceOrderByWithRelationInput,
+          { id: 'desc' },
+        ]
+
   const rawPage = req.nextUrl.searchParams.get('page')
   const rawPageSize = req.nextUrl.searchParams.get('pageSize')
   const paginated = rawPage !== null || rawPageSize !== null
@@ -51,13 +93,16 @@ export async function GET(req: NextRequest) {
       include: {
         vendor: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
+        // One join, not a per-row lookup: the list renders the bill-to company
+        // and would otherwise need an N+1 fetch per invoice.
+        company: { select: { id: true, name: true } },
       },
       // `id` breaks ties on createdAt. Without it the sort is not total — the
       // seed alone has 14 invoices sharing one created_at — and Postgres may
       // then repeat or skip rows across two skip/take pages. Applied
       // unconditionally: the order among ties was previously arbitrary, so
       // making it deterministic changes no contract.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy,
       ...(paginated ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
     }),
     paginated ? prisma.invoice.count({ where }) : Promise.resolve(0),
