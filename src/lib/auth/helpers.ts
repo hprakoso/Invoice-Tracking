@@ -25,6 +25,39 @@ export async function requireRole(allowedRoles: Role[]) {
 }
 
 /**
+ * The companies a GA_STAFF account may see, or `null` for "no company
+ * restriction": ADMIN and GA_MANAGER are organisation-wide, VENDOR is scoped by
+ * vendorId instead, and a GA_STAFF flagged handlesAllCompanies covers every
+ * company including ones created later. `[]` is NOT the same as `null` — it
+ * means the staffer only sees invoices that have no company (see canSeeCompany).
+ *
+ * Read from the database on every call rather than carried in the JWT: if an
+ * ADMIN removes a company from a staffer, it bites on the next request.
+ */
+export async function gaStaffCompanyScope(session: {
+  user: { id: string; role: string }
+}): Promise<string[] | null> {
+  if (session.user.role !== 'GA_STAFF') return null
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { handlesAllCompanies: true, scopedCompanies: { select: { id: true } } },
+  })
+  if (!user) return []
+  if (user.handlesAllCompanies) return null
+  return user.scopedCompanies.map((c) => c.id)
+}
+
+/**
+ * Whether a caller with `scope` (from gaStaffCompanyScope) may reach an invoice
+ * billed to `companyId`. An invoice with no company is visible to every
+ * GA_STAFF — nobody can be said to own it yet, and hiding it would strand it.
+ */
+export function canSeeCompany(scope: string[] | null, companyId: string | null): boolean {
+  return scope === null || companyId === null || scope.includes(companyId)
+}
+
+/**
  * A VENDOR account with no vendorId can't be scoped to any data, so every
  * vendor-facing read must fail closed on it. Without this, a Prisma filter
  * built as `vendorId: session.user.vendorId ?? undefined` drops the clause
@@ -75,11 +108,19 @@ export async function requireInvoiceAccess(invoiceId: string, allowedRoles?: Rol
       // the submission is still a draft, so callers need this alongside the
       // ownership check they already get here.
       isDraft: true,
+      // Needed for the GA_STAFF company-scope check below.
+      companyId: true,
     },
   })
 
+  // GA_STAFF reaches only invoices of its companies (or with no company). Same
+  // shape as the vendor check: the caller cannot tell "exists but forbidden"
+  // from "does not exist".
+  const outOfCompanyScope =
+    !!invoice && !canSeeCompany(await gaStaffCompanyScope(session), invoice.companyId)
+
   const isVendor = session.user.role === 'VENDOR'
-  if (!invoice || (isVendor && invoice.vendorId !== session.user.vendorId)) {
+  if (!invoice || outOfCompanyScope || (isVendor && invoice.vendorId !== session.user.vendorId)) {
     return {
       error: isVendor
         ? NextResponse.json({ error: 'Forbidden' }, { status: 403 })

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, requireRole, unlinkedVendorResponse } from '@/lib/auth/helpers'
+import { requireAuth, requireRole, unlinkedVendorResponse, gaStaffCompanyScope } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse, DRAFT_PO_PLACEHOLDER } from '@/lib/validations'
 import { buildDashboardFilter } from '@/lib/services/dashboardStats'
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   // The dashboard's filter builder, not a second copy of it: the hand-rolled
   // block this replaces silently ignored companyId (which the dashboard
   // honoured), so the same query string scoped one surface but not the other.
-  const where = buildDashboardFilter(req.nextUrl.searchParams, session)
+  const where = buildDashboardFilter(req.nextUrl.searchParams, session, await gaStaffCompanyScope(session))
 
   // Pagination is OPT-IN and the response body stays a bare array.
   //

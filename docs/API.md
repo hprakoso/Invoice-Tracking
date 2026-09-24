@@ -11,6 +11,8 @@ Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId 
 
 Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `companyId` (exact, `invoices.company_id`), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`), plus `page`/`pageSize`. The filter params are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
 
+**GA_STAFF is scoped by company.** A `GA_STAFF` caller only receives invoices billed to a company it is responsible for (`_GaStaffCompanies`) **plus invoices with no company** (`invoices.company_id IS NULL`), resolved per request by `gaStaffCompanyScope()` (`src/lib/auth/helpers.ts`) and applied inside `buildDashboardFilter` as `OR: [{ companyId: { in: scope } }, { companyId: null }]`. A `GA_STAFF` with `users.handles_all_companies = true` is unrestricted, exactly like `ADMIN`. A `companyId` query param is intersected with that scope, never unioned — asking for a company outside it returns zero rows. `ADMIN` and `GA_MANAGER` remain organisation-wide; `VENDOR` is unaffected and stays scoped by `vendorId`. The same rule (`canSeeCompany()`) gates every single-invoice route — `GET`/`PATCH /api/invoices/[id]`, `PATCH .../stage`, `.../file`, `.../upload`, `.../ocr`, `.../documents/[documentId]` and its `/file` — which return **404** for an invoice outside the caller's scope, and the dashboard + Excel export, which share `buildDashboardFilter`.
+
 **Sorting.** `sort` + `dir` (`asc`/`desc`, default `createdAt desc`). `sort` is matched against a whitelist (`invoiceNumber`, `company`, `status`, `sendDate`, `deliveredDate`, `invoiceDate`, `dueDate`, `createdAt`, `totalAmount`, `picStage`); anything unrecognised falls back to `createdAt`, so no client string reaches Prisma's `orderBy`. Every sort carries `id desc` as a tiebreak because none of these columns is unique. Nullable date columns sort `nulls: 'last'` in both directions. Sorting is applied **before** `skip`/`take`, so it orders the whole filtered set.
 
 | Response field | Source |
@@ -315,19 +317,19 @@ Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{
 ## Users
 
 ### `GET /api/users`
-Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive,handlesAllCompanies}` plus `scopedCompanies: [{ id, name }]` (`_GaStaffCompanies` → `companies.id`, `companies.name`; empty for non-`GA_STAFF`) — `passwordHash` is never selected/returned.
 
 ### `POST /api/users`
-Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod): `{ name, email, role, vendorId? }`.
+Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod): `{ name, email, role, vendorId?, companyIds?, handlesAllCompanies? }`. A `GA_STAFF` must carry `handlesAllCompanies: true` or at least one `companyIds` entry (400 otherwise); every id must be an existing `companies.id` (400 otherwise). For other roles both are ignored.
 
 **The body carries no password.** Since 2026-09-17 the initial credential is issued server-side, so the browser never supplies, sees or transmits one; a `password` key sent by a client is dropped by zod before it can reach bcrypt. The value comes from `INITIAL_USER_PASSWORD` (env, default `P@ssw0rd`), configured the same way `prisma/seed.ts` configures `DEMO_PASSWORD`. A shared, known starting credential is only safe because it is single-use — see `must_change_password` below.
 
-Writes: `users` row (`password_hash` = `bcrypt.hash(INITIAL_USER_PASSWORD, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` set explicitly to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+Writes: `users` row (`password_hash` = `bcrypt.hash(INITIAL_USER_PASSWORD, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `handles_all_companies` and `_GaStaffCompanies` rows set only when `role='GA_STAFF'`; `must_change_password` set explicitly to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
 
-Then sends a welcome email to the new address via the shared `sendEmail()`/`renderEmailLayout()` (**Not Stored**) carrying the login email and the initial password. Delivery is best-effort by design: `sendEmail` is already a no-op when `RESEND_API_KEY` is unset, and the call is additionally wrapped so a transport-level throw cannot fail the request — the account exists and is usable either way, and a 500 here would push the admin into retrying into a duplicate-email error. The plaintext credential is never persisted, never logged and never present in the response, whose `select` returns only `id`, `name`, `email`, `role`, `vendorId`, `isActive`.
+Then sends a welcome email to the new address via the shared `sendEmail()`/`renderEmailLayout()` (**Not Stored**) carrying the login email and the initial password. Delivery is best-effort by design: `sendEmail` is already a no-op when `RESEND_API_KEY` is unset, and the call is additionally wrapped so a transport-level throw cannot fail the request — the account exists and is usable either way, and a 500 here would push the admin into retrying into a duplicate-email error. The plaintext credential is never persisted, never logged and never present in the response, whose `select` returns only `id`, `name`, `email`, `role`, `vendorId`, `isActive`, `handlesAllCompanies`, `scopedCompanies`.
 
 ### `PATCH /api/users/[id]`
-Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
+Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password?, companyIds?, handlesAllCompanies? }`. Response adds `handlesAllCompanies` and `scopedCompanies` (same sources as `GET`). Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
 
 `email` and `password` are the **admin-side counterpart to the vendor credential lockdown**: a vendor may change neither its own login email nor (after the forced first change) its own password, so this route is the only path for either. Without it the restriction would be a dead end.
 
@@ -336,6 +338,8 @@ Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. 
 | `role` | `users.role`, and `users.vendor_id` forced to null for non-VENDOR | unchanged |
 | `isActive` | `users.is_active` | unchanged; deactivated users fail login at `authorize()` (`!user.isActive` in `auth.ts`) |
 | `vendorId` | `users.vendor_id` | unchanged |
+| `companyIds` | `_GaStaffCompanies` (`set` — replaces the whole list) | `GA_STAFF` only; omitted = unchanged. Any role other than `GA_STAFF` has its rows cleared and `handles_all_companies` forced false |
+| `handlesAllCompanies` | `users.handles_all_companies` | `GA_STAFF` only; omitted = unchanged |
 | `email` | `users.email` | the login identity |
 | `password` | `users.password_hash` = `bcrypt.hash(password, 12)` **and `users.must_change_password = true`** | applies to every role. The value an admin types is always a handover secret, never the account's live credential — the recipient is forced to replace it at their next sign-in, so no admin ends up holding a working vendor password |
 
@@ -347,6 +351,7 @@ Audit rows are now per credential event rather than one blanket `user.role_updat
 | email actually changed | `user.email_changed` | `{ from, to }` |
 | `password` supplied | `user.password_reset` | `{ role, mustChangePassword: true }` |
 | `isActive` supplied | `user.active_changed` | `{ isActive }` |
+| `companyIds` or `handlesAllCompanies` supplied for a `GA_STAFF` | `user.company_scope_changed` | `{ handlesAllCompanies, companyIds }` (values after the update) |
 | none of the above (e.g. `vendorId` only) | `user.updated` | `{ fields }` |
 
 > **A reset does not evict a live session.** Sessions are stateless JWTs with no revocation mechanism, so an existing browser session keeps working until the token expires. To cut off access immediately, deactivate the account (`{ isActive: false }`) and then reset the password.

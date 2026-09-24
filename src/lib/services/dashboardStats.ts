@@ -86,6 +86,13 @@ function trailingMonthKeys(anchor: Date, count: number): string[] {
 export function buildDashboardFilter(
   searchParams: URLSearchParams,
   session: { user: { role: string; vendorId?: string | null } },
+  /**
+   * GA_STAFF company scope from `gaStaffCompanyScope()`; `null` means the role
+   * carries no company restriction. Passed in rather than read here so this
+   * function stays synchronous and every caller is forced to resolve the scope
+   * explicitly instead of silently getting an unscoped query.
+   */
+  scopedCompanyIds: string[] | null = null,
 ): Prisma.InvoiceWhereInput {
   // Wizard rows that never reached the review step are not invoices yet: they
   // stay out of every KPI, chart, list and export until confirmed. They are
@@ -120,6 +127,19 @@ export function buildDashboardFilter(
 
   const companyId = searchParams.get('companyId')
   if (companyId) where.companyId = companyId
+
+  // GA_STAFF company scope. Applied AFTER the client's own companyId filter and
+  // as an intersection, so asking for a company outside the scope narrows to
+  // nothing rather than widening access. Invoices with no company are visible
+  // to every GA_STAFF (same rule as canSeeCompany in auth/helpers), so an
+  // unfiltered scoped query is "my companies OR no company".
+  if (scopedCompanyIds !== null) {
+    if (companyId) {
+      where.companyId = scopedCompanyIds.includes(companyId) ? companyId : { in: [] }
+    } else {
+      where.OR = [{ companyId: { in: scopedCompanyIds } }, { companyId: null }]
+    }
+  }
 
   const from = searchParams.get('from')
   const to = searchParams.get('to')

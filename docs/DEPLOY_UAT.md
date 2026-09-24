@@ -327,3 +327,31 @@ Skrip ini idempoten — dijalankan lagi pada database yang sudah benar ia hanya 
 dulu, baru menghapus baris lamanya, sehingga tidak ada foreign key yatim. Vendor tidak disentuh.
 
 **Tidak perlu redeploy untuk ini** — perubahannya murni di data, bukan di kode yang berjalan.
+
+---
+
+## 4.9 Menerapkan scope perusahaan GA_STAFF ke UAT yang sudah berisi data (2026-09-25)
+
+UAT memuat data yang dibuat penguji. **Jangan** memakai `db:seed` untuk memperbarui database ini —
+seed menghapus seluruh tabel lebih dulu dan akan memusnahkan data tersebut.
+
+Tiga migrasi ikut dalam perubahan ini (`20260917130306_ga_staff_company_scope`,
+`20260917162439_ga_staff_legacy_scope_exemption`, `20260925000000_ga_staff_handles_all_companies`).
+Render menjalankan kode baru begitu branch di-push, dan kode itu membaca kolom/tabel baru — jadi
+migrasi harus sudah diterapkan **sebelum** push, dari mesin yang punya kredensial database UAT:
+
+```bash
+# 1. Backup dulu. Ini satu-satunya langkah yang benar-benar melindungi data.
+pg_dump "<UAT database url>" -Fc -f uat-$(date +%Y%m%d-%H%M).dump
+
+# 2. Terapkan migrasi. Memakai session pooler 5432, bukan 6543 (lihat bagian migrasi di atas).
+DATABASE_URL="<UAT database url>" DIRECT_URL="<UAT database url>" \
+  npx prisma migrate deploy
+```
+
+Setelah migrasi, **setiap GA_STAFF yang sudah ada otomatis bertanda "Semua perusahaan"**
+(`users.handles_all_companies = true`), jadi aksesnya sama persis seperti sebelumnya. ADMIN lalu
+mempersempitnya lewat kolom "Perusahaan yang Ditangani" di Manajemen Pengguna.
+
+Jumlah yang harus dibandingkan sebelum dan sesudah: `users`, `companies`, `vendors`, `invoices`,
+`audit_logs`, `notifications`. Migrasi ini tidak boleh mengubah satu pun dari angka tersebut.

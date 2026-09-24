@@ -267,10 +267,22 @@ export const createUserSchema = z
     email: z.string().email(),
     role: z.enum(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
     vendorId: z.string().uuid().optional().nullable(),
+    // GA_STAFF company scope. Shape only — that every id refers to a real
+    // company is checked in the route, which is the layer with database access.
+    companyIds: z.array(z.string().uuid()).optional(),
+    // GA_STAFF covers every company, including ones added later.
+    handlesAllCompanies: z.boolean().optional(),
   })
   .refine((d) => d.role !== 'VENDOR' || !!d.vendorId, {
     message: 'vendorId is required for VENDOR role',
     path: ['vendorId'],
+  })
+  // A GA_STAFF with no company would only ever see company-less invoices, which
+  // reads as a broken account rather than a deliberate one — so a scope ("All"
+  // or at least one company) is required up front.
+  .refine((d) => d.role !== 'GA_STAFF' || d.handlesAllCompanies || (d.companyIds?.length ?? 0) > 0, {
+    message: 'Select all companies or at least one company for GA_STAFF role',
+    path: ['companyIds'],
   })
 
 /**

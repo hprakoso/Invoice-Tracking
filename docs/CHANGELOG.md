@@ -8,6 +8,43 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-25 — GA_STAFF: perusahaan yang ditangani, dan akses invoice dibatasi ke sana
+
+**Apa.** Di `/admin/users`, akun `GA_STAFF` kini punya "Perusahaan yang Ditangani": multicheck semua
+company (`GET /api/companies?includeInactive=true`) plus pilihan "Semua perusahaan". Tampil di form
+buat user dan sebagai kolom baru di tabel (Edit → Simpan/Batal). Mengganti role ke `GA_STAFF` lewat
+dropdown langsung membuka picker-nya.
+
+**Kenapa.** Beberapa GA staff didedikasikan untuk company tertentu, sebagian menangani semuanya.
+
+**Disimpan di mana.**
+- Company terpilih → tabel join `_GaStaffCompanies` (`A` = `companies.id`, `B` = `users.id`), ditulis
+  `POST /api/users` (`companyIds`) dan `PATCH /api/users/[id]` (`set`, jadi menghapus centang = mencabut).
+- "Semua perusahaan" → `users.handles_all_companies`. Flag, bukan "centang semua", supaya company yang
+  ditambahkan nanti otomatis tercakup tanpa edit ADMIN.
+- Role selain `GA_STAFF` → keduanya dikosongkan/false. Perubahan scope dicatat di `audit_logs`
+  (`user.company_scope_changed`, metadata `{ handlesAllCompanies, companyIds }`).
+
+**Aturan akses** (satu sumber: `gaStaffCompanyScope()` + `canSeeCompany()` di `src/lib/auth/helpers.ts`,
+dibaca dari DB tiap request sehingga pencabutan langsung berlaku tanpa logout):
+- `GA_STAFF` "Semua" / `ADMIN` / `GA_MANAGER` → tanpa batasan. `VENDOR` tetap per `vendorId`, tidak disentuh.
+- `GA_STAFF` terbatas → invoice company-nya **ditambah invoice tanpa company** (`company_id IS NULL`),
+  keputusan PM: invoice yang belum jelas company-nya jangan sampai tidak terlihat siapa pun.
+- Diterapkan di `buildDashboardFilter` (daftar invoice, dashboard, export Excel) dan di setiap route
+  per-invoice (detail, PATCH, stage, file, upload, OCR, dokumen). Di luar scope → 404.
+
+**Dasar kode.** Memakai ulang commit `f938d27` (`feat/production-prep`, belum pernah di-merge ke sini)
+lewat `cherry-pick -n`, lalu disesuaikan: flag transisi `company_scope_exempt` diganti flag permanen
+`handles_all_companies` (migrasi `20260925000000_…` menambah kolom, mengisi true untuk GA_STAFF lama
+tanpa assignment, lalu drop kolom lama — kolom itu belum pernah ada di UAT); invoice tanpa company
+kini terlihat oleh GA_STAFF; pembatasan daftar `GET /api/companies` dibuang karena GA_STAFF tetap
+mengelola halaman Companies dan boleh membuat invoice untuk company mana pun (company sering baru
+terdeteksi OCR setelah upload); route file dokumen ikut dijaga (dulu terlewat).
+
+**Sengaja tidak dibatasi:** dropdown PIC (tetap semua GA_STAFF) dan pembuatan invoice.
+
+**Deploy:** migrasi harus diterapkan ke UAT **sebelum** push — lihat `docs/DEPLOY_UAT.md` §4.9.
+
 ### 2026-09-25 — Filter perusahaan di daftar invoice, kolom Tahap PIC disembunyikan untuk Vendor
 
 **Filter Perusahaan.** Dropdown baru di sebelah Status dan Vendor pada `/invoices`, tampil untuk semua
@@ -1268,7 +1305,8 @@ dilaporkan.
 | `78db88c` | 2026-09-17 | feat: issue the initial user password server-side and email it |
 | `2f654c5` | 2026-09-17 | fix: reconcile sample company data on already-seeded environments |
 | `e1e9323` | 2026-09-24 | feat: add company and document date columns and sorting to invoice list |
-| _(this commit)_ | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
+| `e3fe01c` | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
+| _(this commit)_ | 2026-09-25 | feat: assign GA_STAFF responsible companies and scope invoice access to them |
 
 Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
 history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini

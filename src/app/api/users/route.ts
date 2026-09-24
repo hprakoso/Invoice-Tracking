@@ -26,7 +26,12 @@ export async function GET(req: NextRequest) {
   const users = await prisma.user.findMany({
     where: role ? { role: role as never } : undefined,
     orderBy: { name: 'asc' },
-    select: { id: true, name: true, email: true, role: true, vendorId: true, isActive: true },
+    select: {
+      id: true, name: true, email: true, role: true, vendorId: true, isActive: true,
+      // Lets User Management show and pre-fill the GA_STAFF company scope.
+      handlesAllCompanies: true,
+      scopedCompanies: { select: { id: true, name: true } },
+    },
   })
 
   return NextResponse.json(users)
@@ -43,18 +48,37 @@ export async function POST(req: NextRequest) {
   // Hashed here with the same bcrypt cost every other write path uses; only
   // the hash is ever persisted. The response `select` deliberately omits
   // passwordHash, so neither the credential nor its hash leaves this function.
+  // Every supplied company id must be a real company. Without this a forged
+  // request could attach a GA_STAFF to an id that does not exist (Prisma would
+  // reject) or, worse, to one the ADMIN never intended.
+  const companyIds = data.role === 'GA_STAFF' ? (data.companyIds ?? []) : []
+  if (companyIds.length > 0) {
+    const found = await prisma.company.count({ where: { id: { in: companyIds } } })
+    if (found !== companyIds.length) {
+      return NextResponse.json({ error: 'One or more companies do not exist' }, { status: 400 })
+    }
+  }
+
   const user = await prisma.user.create({
     data: {
       name: data.name,
       email: data.email,
       role: data.role,
       vendorId: data.role === 'VENDOR' ? data.vendorId : null,
+      // Only GA_STAFF carries a company scope; every other role stays
+      // organisation-wide (or vendor-scoped) and gets no rows.
+      handlesAllCompanies: data.role === 'GA_STAFF' && !!data.handlesAllCompanies,
+      scopedCompanies: companyIds.length > 0 ? { connect: companyIds.map((id) => ({ id })) } : undefined,
       passwordHash: await bcrypt.hash(INITIAL_PASSWORD, 12),
       // Already the column default; set explicitly so the forced first-login
       // change is visible at the point the credential is issued.
       mustChangePassword: true,
     },
-    select: { id: true, name: true, email: true, role: true, vendorId: true, isActive: true },
+    select: {
+      id: true, name: true, email: true, role: true, vendorId: true, isActive: true,
+      handlesAllCompanies: true,
+      scopedCompanies: { select: { id: true, name: true } },
+    },
   })
 
   await prisma.auditLog.create({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, requireRole } from '@/lib/auth/helpers'
+import { requireAuth, requireRole, gaStaffCompanyScope, canSeeCompany } from '@/lib/auth/helpers'
 import {
   updateInvoiceSchema,
   validateDeliveryDates,
@@ -41,6 +41,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // VENDOR can only access their own invoices
   if (session.user.role === 'VENDOR' && invoice.vendorId !== session.user.vendorId) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // GA_STAFF reaches only invoices of its companies (or with no company).
+  if (!canSeeCompany(await gaStaffCompanyScope(session), invoice.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
   // Source for "Riwayat & PIC". Nothing new is recorded for it: every mutating
@@ -145,6 +150,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Same company gate as GET: a GA_STAFF must not mutate an invoice it cannot
+  // see. Checked before any field-permission logic so an out-of-scope caller
+  // never reaches the transition/duplicate/payment machinery below.
+  if (!canSeeCompany(await gaStaffCompanyScope(session), current.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
 
   const role = session.user.role
   const isOwner = role === 'VENDOR' && current.vendorId === session.user.vendorId

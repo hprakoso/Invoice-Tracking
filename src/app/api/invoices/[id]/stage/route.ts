@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireRole } from '@/lib/auth/helpers'
+import { requireRole, gaStaffCompanyScope, canSeeCompany } from '@/lib/auth/helpers'
 import { updateInvoiceStageSchema, validationErrorResponse } from '@/lib/validations'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
@@ -22,8 +22,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const stage: PICStage = parsed.data.stage
 
-  const previous = await prisma.invoice.findUnique({ where: { id }, select: { picStage: true } })
+  const previous = await prisma.invoice.findUnique({
+    where: { id },
+    select: { picStage: true, companyId: true },
+  })
   if (!previous) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // This route only ever checked the caller's ROLE, never the invoice — so a
+  // GA_STAFF could move the stage of any invoice in the system. Harmless while
+  // GA was organisation-wide; with company scoping it is the hole that would
+  // let a staffer act on another company's invoice.
+  if (!canSeeCompany(await gaStaffCompanyScope(session), previous.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
 
   const invoice = await prisma.invoice.update({
     where: { id },

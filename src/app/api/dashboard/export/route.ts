@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, unlinkedVendorResponse } from '@/lib/auth/helpers'
+import { requireAuth, unlinkedVendorResponse, gaStaffCompanyScope } from '@/lib/auth/helpers'
 import { buildDashboardFilter } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const unlinked = unlinkedVendorResponse(session)
   if (unlinked) return unlinked
 
-  const filter = buildDashboardFilter(req.nextUrl.searchParams, session)
+  const filter = buildDashboardFilter(req.nextUrl.searchParams, session, await gaStaffCompanyScope(session))
 
   // The workbook is the invoice sheet and nothing else. The 'KPI Summary'
   // worksheet it used to open with (totals, per-status counts, aging buckets)

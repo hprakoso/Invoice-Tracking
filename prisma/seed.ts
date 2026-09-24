@@ -237,6 +237,23 @@ async function main() {
       },
     })
   }
+  // GA_STAFF is company-scoped. gastaff@sip.id and nonaktif@sip.id cover every
+  // company via the "All" flag so the seeded walkthrough behaves as it always
+  // has; gantipassword@sip.id is narrowed to one company so the single-company
+  // scope has a real account to demonstrate. Assigned here rather than in the
+  // user loop above because the companies must exist first.
+  for (const email of ['gastaff@sip.id', 'nonaktif@sip.id']) {
+    const u = createdDemoUsers[email]
+    if (u) await prisma.user.update({ where: { id: u.id }, data: { handlesAllCompanies: true } })
+  }
+  const narrowed = createdDemoUsers['gantipassword@sip.id']
+  if (narrowed) {
+    await prisma.user.update({
+      where: { id: narrowed.id },
+      data: { scopedCompanies: { set: [{ id: companies[0].id }] } },
+    })
+  }
+
   const gaStaff = createdDemoUsers['gastaff@sip.id']
   const gaManager = createdDemoUsers['gamanager@sip.id']
   console.log(`Demo accounts: ${DEMO_ACCOUNTS.map((u) => u.email).join(', ')}`)

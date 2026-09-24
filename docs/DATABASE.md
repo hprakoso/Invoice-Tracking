@@ -46,6 +46,16 @@ Invoice ──1:N──> InvoiceStageHistory (cascade delete)
 | must_change_password | bool, default true | set on every `POST /api/users`-created account and re-set by an admin password reset (`PATCH /api/users/[id]` with `password`); cleared by `PATCH /api/users/me/password`. Added in migration `20260726181558_add_must_change_password`. Demo seed accounts explicitly set this `false` so the shared demo login isn't gated. **For a `VENDOR` this is a one-shot permit, not just a nag:** true is the only state in which the vendor may change its own password (`canChangeOwnPassword()`), and while true `middleware.ts` blocks the vendor from every `/api/*` route except `/api/auth/*` and `/api/users/me/password` (as well as redirecting page routes to `/change-password`). Migration `20260910000000_vendor_initial_password_rearm` re-armed it for pre-existing vendors that had never completed a change |
 | created_at / updated_at | timestamp | |
 | vendor_id | uuid FK → `vendors.id`, nullable | set only for `VENDOR` role; drives data isolation |
+| handles_all_companies | bool, default false | `GA_STAFF` only: covers every company, including companies created later; when true the `_GaStaffCompanies` rows are ignored. Written by `POST /api/users` / `PATCH /api/users/[id]` (`handlesAllCompanies`), forced false when the role is not `GA_STAFF`. Added in migration `20260925000000_ga_staff_handles_all_companies`, which set it true for every existing `GA_STAFF` that had no company assignment |
+
+### `_GaStaffCompanies` (implicit many-to-many, `User.scopedCompanies` ↔ `Company.scopedStaff`)
+The companies a `GA_STAFF` account is responsible for. Read per request by `gaStaffCompanyScope()` (`src/lib/auth/helpers.ts`) to scope invoice access and notifications. Written by `POST /api/users` (`connect`) and `PATCH /api/users/[id]` (`set`, so removing a company revokes it); cleared when the role changes away from `GA_STAFF`.
+
+| Column | Type | Notes |
+|---|---|---|
+| A | uuid FK → `companies.id`, `ON DELETE CASCADE` | |
+| B | uuid FK → `users.id`, `ON DELETE CASCADE` | |
+| PK (A, B) | | index on B |
 
 ### `vendors`
 | Column | Type | Notes |
@@ -213,6 +223,9 @@ Deduplication: the reminder scheduler skips creating a `due_soon`/`overdue` noti
 | `20260901000000_status_and_stage_overhaul` | Adds `invoices.po_number` (backfilled `'N/A'`), `PICStage` enum + `invoices.pic_stage` (default `GA`), new `invoice_stage_history` table (backfilled one `GA` row per existing invoice); replaces `InvoiceStatus` entirely with the 17-value workflow enum (type-swap, old rows remapped: `DRAFT→RECEIVED`, `SUBMITTED→REGISTERED`, `PAID→PAID`, `CANCELLED/VOID→REJECTED`, `REJECTED→REJECTED`, `REVISION→RETURNED_TO_VENDOR`) |
 | `20260907000000_invoice_integrity_constraints` | `invoices_due_date_after_invoice_date` and `invoices_amounts_non_negative` CHECK constraints, `invoice_items_total_non_negative`, `invoices.is_draft`, and the hot-path indexes |
 | `20260910000000_vendor_initial_password_rearm` | **Data-only, no schema change.** Sets `users.must_change_password = true` for `VENDOR` rows that still read false *and* have no `user.password_changed` row in `audit_logs`. Deliberately not a blanket `WHERE role = 'VENDOR'`: a vendor that genuinely completed its first-login change must not be forced through another. That audit row is a reliable discriminator — `PATCH /api/users/me/password` is the only route that has ever written `users.password_hash` for a signed-in user, and it has written the audit row since the commit that introduced it (`a067057`), so no self-service change has ever left no trace. Audit rows are never pruned; the only statement that deletes them is `seed.ts`, which drops `users` in the same run, so a user cannot outlive its own audit history. Needed because `seed.ts` writes `false` for every account it creates, including both demo vendors, which would otherwise be frozen on a shared seeded password with no way to set a private one |
+| `20260917130306_ga_staff_company_scope` | New implicit join table `_GaStaffCompanies` (companies ↔ users), both FKs `ON DELETE CASCADE` |
+| `20260917162439_ga_staff_legacy_scope_exemption` | Adds `users.company_scope_exempt`, set true for existing `GA_STAFF`. **Superseded** — dropped by the next migration |
+| `20260925000000_ga_staff_handles_all_companies` | Adds `users.handles_all_companies` (`NOT NULL DEFAULT false`), sets it true for `GA_STAFF` rows with no `_GaStaffCompanies` row (so existing staff keep organisation-wide access after deploy), then drops `users.company_scope_exempt` |
 
 ## Seed data (`prisma/seed.ts`)
 
