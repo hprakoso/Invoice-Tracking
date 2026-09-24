@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 
 // helpers.ts imports next-auth; canSeeCompany itself is pure.
 vi.mock('@/lib/auth/auth', () => ({ auth: vi.fn() }))
+vi.mock('@/lib/db/prisma', () => ({ prisma: {} }))
 
 import { buildDashboardFilter } from '../services/dashboardStats'
-import { canSeeCompany } from '../auth/helpers'
+import { canSeeCompany, companyScopeOf } from '../auth/helpers'
+import { scopedFor } from '../services/reminderScheduler'
 
 // GA_STAFF is scoped to the companies an ADMIN assigned it. buildDashboardFilter
 // is the single gate behind the invoice list, the dashboard and the Excel
@@ -123,5 +125,42 @@ describe('canSeeCompany (single-invoice routes and notifications)', () => {
   it('an invoice with no company is visible to every GA_STAFF', () => {
     expect(canSeeCompany([COMPANY_A], null)).toBe(true)
     expect(canSeeCompany([], null)).toBe(true)
+  })
+})
+
+describe('companyScopeOf (loaded user row -> scope)', () => {
+  const row = (role: string, handlesAllCompanies: boolean, ids: string[] = []) =>
+    ({ role, handlesAllCompanies, scopedCompanies: ids.map((id) => ({ id })) })
+
+  it('GA_STAFF with "All" is unrestricted', () => {
+    expect(companyScopeOf(row('GA_STAFF', true, [COMPANY_A]))).toBeNull()
+  })
+  it('GA_STAFF without "All" is limited to its companies', () => {
+    expect(companyScopeOf(row('GA_STAFF', false, [COMPANY_A]))).toEqual([COMPANY_A])
+  })
+  it('other roles are never company-restricted', () => {
+    expect(companyScopeOf(row('GA_MANAGER', false, [COMPANY_A]))).toBeNull()
+    expect(companyScopeOf(row('ADMIN', false))).toBeNull()
+  })
+})
+
+describe('reminder notifications follow the company scope', () => {
+  const invoices = [
+    { id: 'a', vendorId: 'vendor-1', companyId: COMPANY_A },
+    { id: 'b', vendorId: 'vendor-2', companyId: COMPANY_B },
+    { id: 'n', vendorId: 'vendor-2', companyId: null },
+  ]
+  const recipient = (role: 'GA_STAFF' | 'GA_MANAGER' | 'VENDOR', companyScope: string[] | null, vendorId: string | null = null) =>
+    ({ id: 'u', email: 'u@x', role, vendorId, companyScope })
+
+  it('scoped GA_STAFF hears about its company and company-less invoices only', () => {
+    expect(scopedFor(recipient('GA_STAFF', [COMPANY_A]), invoices).map((i) => i.id)).toEqual(['a', 'n'])
+  })
+  it('"All" GA_STAFF and GA_MANAGER hear about everything', () => {
+    expect(scopedFor(recipient('GA_STAFF', null), invoices)).toHaveLength(3)
+    expect(scopedFor(recipient('GA_MANAGER', null), invoices)).toHaveLength(3)
+  })
+  it('VENDOR stays scoped to its own vendor', () => {
+    expect(scopedFor(recipient('VENDOR', null, 'vendor-2'), invoices).map((i) => i.id)).toEqual(['b', 'n'])
   })
 })

@@ -41,10 +41,21 @@ export async function gaStaffCompanyScope(session: {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { handlesAllCompanies: true, scopedCompanies: { select: { id: true } } },
+    select: { role: true, handlesAllCompanies: true, scopedCompanies: { select: { id: true } } },
   })
-  if (!user) return []
-  if (user.handlesAllCompanies) return null
+  return user ? companyScopeOf(user) : []
+}
+
+/**
+ * The same scope resolved from an already-loaded user row — used where many
+ * users are loaded at once (notification recipients) instead of one query each.
+ */
+export function companyScopeOf(user: {
+  role: string
+  handlesAllCompanies: boolean
+  scopedCompanies: { id: string }[]
+}): string[] | null {
+  if (user.role !== 'GA_STAFF' || user.handlesAllCompanies) return null
   return user.scopedCompanies.map((c) => c.id)
 }
 

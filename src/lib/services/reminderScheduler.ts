@@ -3,6 +3,7 @@ import type { InvoiceStatus, Role } from '@prisma/client'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { OPEN_STATUSES as OPEN_STATUS_NAMES } from '@/lib/invoiceStatus'
 import { jakartaDayStart } from '@/lib/format'
+import { canSeeCompany, companyScopeOf } from '@/lib/auth/helpers'
 
 // Invoices still "in play" — everything except the settled/dead statuses.
 const OPEN_STATUSES = OPEN_STATUS_NAMES as readonly string[] as InvoiceStatus[]
@@ -116,17 +117,33 @@ async function recipientsForRoles(recipientRoles: unknown) {
   const roles = Array.isArray(recipientRoles) ? (recipientRoles as Role[]) : []
   if (roles.length === 0) return []
   // role/vendorId are selected because VENDOR recipients must be scoped to
-  // their own invoices — see scopedFor() and sendDigest().
-  return prisma.user.findMany({
+  // their own invoices, and the company fields because a GA_STAFF is scoped to
+  // its responsible companies — see scopedFor() and sendDigest().
+  const users = await prisma.user.findMany({
     where: { role: { in: roles }, isActive: true },
-    select: { id: true, email: true, role: true, vendorId: true },
+    select: {
+      id: true, email: true, role: true, vendorId: true,
+      handlesAllCompanies: true, scopedCompanies: { select: { id: true } },
+    },
   })
+  return users.map(({ handlesAllCompanies, scopedCompanies, ...u }): Recipient => ({
+    ...u,
+    companyScope: companyScopeOf({ role: u.role, handlesAllCompanies, scopedCompanies }),
+  }))
 }
 
-type Recipient = { id: string; email: string; role: Role; vendorId: string | null }
+type Recipient = {
+  id: string
+  email: string
+  role: Role
+  vendorId: string | null
+  /** null = no company restriction; see gaStaffCompanyScope(). */
+  companyScope: string[] | null
+}
 
 type InvoiceForDigest = {
   vendorId: string
+  companyId: string | null
   invoiceNumber: string
   dueDate: Date | null
   totalAmount: unknown
@@ -137,18 +154,27 @@ type InvoiceForDigest = {
  * The invoices a given recipient is allowed to hear about. VENDOR is a
  * selectable recipient role, but the due-soon/overdue queries span every
  * vendor — so an unscoped fan-out told each vendor the invoice numbers and
- * vendor names of all the others.
+ * vendor names of all the others. A company-scoped GA_STAFF likewise hears
+ * only about its companies' invoices (plus company-less ones).
  */
-function scopedFor<T extends { vendorId: string }>(recipient: Recipient, invoices: T[]): T[] {
-  if (recipient.role !== 'VENDOR') return invoices
-  if (!recipient.vendorId) return []
-  return invoices.filter((i) => i.vendorId === recipient.vendorId)
+export function scopedFor<T extends { vendorId: string; companyId: string | null }>(
+  recipient: Recipient,
+  invoices: T[],
+): T[] {
+  if (recipient.role === 'VENDOR') {
+    if (!recipient.vendorId) return []
+    return invoices.filter((i) => i.vendorId === recipient.vendorId)
+  }
+  return invoices.filter((i) => canSeeCompany(recipient.companyScope, i.companyId))
 }
 
+/** Sees every invoice, so can share the one combined digest. */
+const isUnscoped = (r: Recipient) => r.role !== 'VENDOR' && r.companyScope === null
+
 /**
- * One digest to the internal recipients (plus any configured extra addresses),
- * and a separate per-vendor digest to each VENDOR recipient containing only
- * that vendor's rows.
+ * One digest to the unscoped internal recipients (plus any configured extra
+ * addresses), and a separate digest to each VENDOR or company-scoped GA_STAFF
+ * recipient containing only the rows it may see.
  */
 async function sendDigest(
   recipients: Recipient[],
@@ -160,14 +186,14 @@ async function sendDigest(
   if (invoices.length === 0) return
 
   const internalTo = [
-    ...recipients.filter((r) => r.role !== 'VENDOR').map((r) => r.email),
+    ...recipients.filter(isUnscoped).map((r) => r.email),
     ...extraEmails,
   ]
   if (internalTo.length > 0) {
     await sendEmail(internalTo, subject(invoices.length), renderInvoiceListEmail(heading(invoices.length), invoices))
   }
 
-  for (const recipient of recipients.filter((r) => r.role === 'VENDOR')) {
+  for (const recipient of recipients.filter((r) => !isUnscoped(r))) {
     const own = scopedFor(recipient, invoices)
     if (own.length === 0) continue
     await sendEmail([recipient.email], subject(own.length), renderInvoiceListEmail(heading(own.length), own))

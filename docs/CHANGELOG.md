@@ -45,6 +45,19 @@ terdeteksi OCR setelah upload); route file dokumen ikut dijaga (dulu terlewat).
 
 **Deploy:** migrasi harus diterapkan ke UAT **sebelum** push — lihat `docs/DEPLOY_UAT.md` §4.9.
 
+**Notifikasi ikut scope** (commit terpisah). Penerima `GA_STAFF` terbatas hanya diberi tahu soal
+invoice yang bisa ia buka:
+- `due_soon` / `overdue` (cron, `reminderScheduler.ts`): notifikasi in-app per invoice difilter lewat
+  `scopedFor()`. Email: GA_STAFF terbatas tidak lagi ikut email ringkasan gabungan — ia menerima email
+  sendiri berisi baris miliknya saja (pola yang sudah dipakai untuk VENDOR). Penerima tanpa batasan dan
+  `extra_emails` tetap satu email gabungan.
+- `stage_assigned` (`PATCH /api/invoices/[id]/stage`): GA_STAFF terbatas di luar company invoice tidak
+  menerima email maupun notifikasi in-app.
+- `status_changed` tidak berubah — penerimanya selalu vendor invoice itu sendiri.
+Resolusi scope dari baris user yang sudah dimuat dipusatkan di `companyScopeOf()` (`auth/helpers.ts`),
+dipakai juga oleh `gaStaffCompanyScope()`. Tersimpan di `notifications` (baris in-app) seperti
+sebelumnya; email **Not Stored**.
+
 ### 2026-09-25 — Filter perusahaan di daftar invoice, kolom Tahap PIC disembunyikan untuk Vendor
 
 **Filter Perusahaan.** Dropdown baru di sebelah Status dan Vendor pada `/invoices`, tampil untuk semua
@@ -1306,7 +1319,8 @@ dilaporkan.
 | `2f654c5` | 2026-09-17 | fix: reconcile sample company data on already-seeded environments |
 | `e1e9323` | 2026-09-24 | feat: add company and document date columns and sorting to invoice list |
 | `e3fe01c` | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
-| _(this commit)_ | 2026-09-25 | feat: assign GA_STAFF responsible companies and scope invoice access to them |
+| `0cdbafe` | 2026-09-25 | feat: assign GA_STAFF responsible companies and scope invoice access to them |
+| _(this commit)_ | 2026-09-25 | feat: send GA_STAFF due-date and stage notifications only for their companies |
 
 Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
 history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini
