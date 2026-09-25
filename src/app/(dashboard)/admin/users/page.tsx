@@ -2,9 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus } from 'lucide-react'
+import { ChevronDown, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/hooks/useI18n'
 
 interface UserRow {
@@ -24,41 +31,55 @@ const ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
 
 // GA_STAFF responsible companies: "All" (a flag that also covers companies
 // added later) or an explicit subset. Shared by the create form and the table.
-function CompanyScopePicker({ companies, value, onChange, allLabel }: {
+// A multi-select dropdown: the menu stays open on each check (Base UI
+// CheckboxItem closeOnClick defaults to false) so several can be picked.
+function CompanyScopePicker({ companies, value, onChange }: {
   companies: { id: string; name: string }[]
   value: Scope
   onChange: (next: Scope) => void
-  allLabel: string
 }) {
+  const { t } = useI18n()
+  const selected = companies.filter(c => value.companyIds.includes(c.id))
+  const summary = value.handlesAllCompanies
+    ? t.dashboard.allCompanies
+    : selected.length === 1
+      ? selected[0].name
+      : selected.length > 1
+        ? t.userManagement.companyScopeSelected.replace('{count}', String(selected.length))
+        : null
   return (
-    <div className="space-y-1.5">
-      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-        <input
-          type="checkbox"
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex h-8 w-56 max-w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2 text-sm">
+        <span className={`truncate ${summary ? '' : 'text-muted-foreground'}`}>
+          {summary ?? t.userManagement.companyScopePlaceholder}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-72">
+        <DropdownMenuCheckboxItem
           checked={value.handlesAllCompanies}
-          onChange={e => onChange({ ...value, handlesAllCompanies: e.target.checked })}
-        />
-        {allLabel}
-      </label>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pl-5">
+          onCheckedChange={checked => onChange({ ...value, handlesAllCompanies: checked })}
+        >
+          {t.userManagement.companyScopeAll}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
         {companies.map(c => (
-          <label key={c.id} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-            <input
-              type="checkbox"
-              disabled={value.handlesAllCompanies}
-              checked={value.handlesAllCompanies || value.companyIds.includes(c.id)}
-              onChange={e => onChange({
-                ...value,
-                companyIds: e.target.checked
-                  ? [...value.companyIds, c.id]
-                  : value.companyIds.filter(x => x !== c.id),
-              })}
-            />
+          <DropdownMenuCheckboxItem
+            key={c.id}
+            disabled={value.handlesAllCompanies}
+            checked={value.handlesAllCompanies || value.companyIds.includes(c.id)}
+            onCheckedChange={checked => onChange({
+              ...value,
+              companyIds: checked
+                ? [...value.companyIds, c.id]
+                : value.companyIds.filter(x => x !== c.id),
+            })}
+          >
             {c.name}
-          </label>
+          </DropdownMenuCheckboxItem>
         ))}
-      </div>
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -254,7 +275,6 @@ export default function AdminUsersPage() {
                 companies={companies}
                 value={form}
                 onChange={next => setForm(f => ({ ...f, ...next }))}
-                allLabel={t.userManagement.companyScopeAll}
               />
               <p className="text-xs text-gray-400 mt-2">{t.userManagement.companyScopeHint}</p>
             </div>
@@ -305,7 +325,6 @@ export default function AdminUsersPage() {
                           companies={companies}
                           value={editingScope}
                           onChange={next => setEditingScope({ id: u.id, ...next })}
-                          allLabel={t.userManagement.companyScopeAll}
                         />
                         <div className="flex gap-2">
                           <Button size="sm" onClick={saveScope} disabled={!hasScope(editingScope)}>{t.common.save}</Button>

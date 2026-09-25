@@ -476,6 +476,8 @@ const id = {
     companyScopeLabel: 'Perusahaan yang ditangani (wajib untuk GA Staff)',
     companyScopeHint: 'GA Staff hanya melihat dan menerima notifikasi invoice dari perusahaan yang dipilih (ditambah invoice tanpa perusahaan).',
     companyScopeAll: 'Semua perusahaan (termasuk yang ditambahkan nanti)',
+    companyScopePlaceholder: 'Pilih perusahaan',
+    companyScopeSelected: '{count} perusahaan dipilih',
     colCompanies: 'Perusahaan yang Ditangani',
     companyScopeUpdated: 'Perusahaan yang ditangani diperbarui',
     companyScopeUpdateFailed: 'Gagal memperbarui perusahaan yang ditangani',

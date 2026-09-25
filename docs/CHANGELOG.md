@@ -8,6 +8,23 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-25 — User Management: pilihan perusahaan GA_STAFF jadi dropdown multi-select
+
+**Apa.** `CompanyScopePicker` di `src/app/(dashboard)/admin/users/page.tsx` (dipakai di form buat user
+dan di mode Ubah pada tabel) diganti dari grid checkbox menjadi dropdown memakai
+`DropdownMenuCheckboxItem` yang sudah ada (`src/components/ui/dropdown-menu.tsx`, Base UI Menu).
+Menu tetap terbuka setiap kali dicentang (`closeOnClick` default `false`) sehingga bisa pilih banyak.
+Tombol menampilkan ringkasan: "Semua Perusahaan" / nama company (1 dipilih) / "{count} perusahaan
+dipilih" / "Pilih perusahaan" (kosong). Selama "Semua perusahaan" dicentang, item company tampil
+tercentang dan dinonaktifkan — sama seperti sebelumnya. Key i18n baru: `userManagement.companyScopePlaceholder`,
+`userManagement.companyScopeSelected` (en + id). Prop `allLabel` dibuang; picker membaca `t` sendiri.
+
+**Kenapa.** Grid checkbox 2 kolom di sel tabel sempit membuat nama company terpotong jadi 3–4 baris
+dan tidak rapi. Diminta user dari UAT.
+
+**Disimpan di mana.** Tidak berubah — `users.handles_all_companies` dan tabel join `_GaStaffCompanies`,
+ditulis lewat `POST /api/users` / `PATCH /api/users/[id]` seperti sebelumnya. Tidak ada perubahan API.
+
 ### 2026-09-25 — Dashboard: pipeline Alur Verifikasi jadi grid 3×3
 
 **Apa.** Strip pipeline di kartu "Alur Verifikasi" (`src/components/dashboard/StatusFlowChart.tsx`)
@@ -1334,7 +1351,8 @@ dilaporkan.
 | `e3fe01c` | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
 | `0cdbafe` | 2026-09-25 | feat: assign GA_STAFF responsible companies and scope invoice access to them |
 | `dc9a720` | 2026-09-25 | feat: send GA_STAFF due-date and stage notifications only for their companies |
-| _(this commit)_ | 2026-09-25 | fix: wrap verification flow pipeline into a 3x3 grid inside its card |
+| `d122ff4` | 2026-09-25 | fix: wrap verification flow pipeline into a 3x3 grid inside its card |
+| _(this commit)_ | 2026-09-25 | feat: replace GA_STAFF company checkbox grid with a multi-select dropdown |
 
 Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
 history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini

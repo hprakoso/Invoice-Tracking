@@ -478,6 +478,8 @@ const en: Dictionary = {
     companyScopeLabel: 'Responsible companies (required for GA Staff)',
     companyScopeHint: 'A GA Staff account only sees and is notified about invoices for the selected companies (plus invoices with no company).',
     companyScopeAll: 'All companies (including ones added later)',
+    companyScopePlaceholder: 'Select companies',
+    companyScopeSelected: '{count} companies selected',
     colCompanies: 'Responsible Companies',
     companyScopeUpdated: 'Responsible companies updated',
     companyScopeUpdateFailed: 'Failed to update responsible companies',
