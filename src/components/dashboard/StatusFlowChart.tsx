@@ -1,5 +1,4 @@
 'use client'
-import { Fragment } from 'react'
 import { Workflow } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { TooltipContentProps } from 'recharts'
@@ -81,8 +80,8 @@ function FlowTooltip({ active, payload }: TooltipContentProps) {
 
 /**
  * Verification flow panel:
- * 1. Pipeline strip — current count per workflow status (from statusBreakdown),
- *    read left-to-right as the linear process.
+ * 1. Pipeline grid — current count per workflow status (from statusBreakdown),
+ *    numbered and read left-to-right, top-to-bottom as the linear process.
  * 2. Area chart — monthly entered (verificationProcess) vs accepted (invoiceAccepted);
  *    the gap between the lines is work still in flight.
  */
@@ -143,33 +142,30 @@ export function StatusFlowChart({
 
   return (
     <div>
-      {/* Pipeline strip — current state, not last month */}
-      <div className="flex items-center gap-1.5">
+      {/* Pipeline grid — current state, not last month. 9 steps in a 3×3 grid:
+          a single row overflowed the half-width card. Step numbers keep the
+          left-to-right, top-to-bottom order readable without arrows. */}
+      <div className="grid grid-cols-3 gap-2">
         {FLOW_ORDER.map((k, i) => (
-          <Fragment key={k}>
-            {i > 0 && (
-              <span className="flex-shrink-0 text-muted-foreground/50" aria-hidden="true">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 6l6 6-6 6" />
-                </svg>
-              </span>
-            )}
-            <div
-              className="flex-1 rounded-xl border px-3 py-2.5"
-              style={{
-                borderColor: `color-mix(in oklab, ${FLOW_COLORS[k]} 45%, transparent)`,
-                background: `color-mix(in oklab, ${FLOW_COLORS[k]} 8%, transparent)`,
-              }}
-            >
-              <p className="text-[10px] font-medium leading-tight text-muted-foreground">{labels[k]}</p>
-              <p className="mt-0.5 text-lg leading-none font-bold tabular-nums" style={{ color: FLOW_COLORS[k] }}>
-                {breakdownByKey[k]}
-              </p>
-              <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
-                {total > 0 ? Math.round((breakdownByKey[k] / total) * 100) : 0}%
-              </p>
-            </div>
-          </Fragment>
+          <div
+            key={k}
+            className="min-w-0 rounded-xl border px-3 py-2.5"
+            style={{
+              borderColor: `color-mix(in oklab, ${FLOW_COLORS[k]} 45%, transparent)`,
+              background: `color-mix(in oklab, ${FLOW_COLORS[k]} 8%, transparent)`,
+            }}
+          >
+            <p className="text-[10px] font-medium leading-tight text-muted-foreground">
+              <span className="mr-1 opacity-60 tabular-nums">{i + 1}</span>
+              {labels[k]}
+            </p>
+            <p className="mt-0.5 text-lg leading-none font-bold tabular-nums" style={{ color: FLOW_COLORS[k] }}>
+              {breakdownByKey[k]}
+            </p>
+            <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
+              {total > 0 ? Math.round((breakdownByKey[k] / total) * 100) : 0}%
+            </p>
+          </div>
         ))}
       </div>
 

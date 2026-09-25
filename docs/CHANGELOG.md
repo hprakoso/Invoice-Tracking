@@ -8,6 +8,19 @@ Two sections, per `CLAUDE.md` convention:
 
 ## Code Changes Made
 
+### 2026-09-25 — Dashboard: pipeline Alur Verifikasi jadi grid 3×3
+
+**Apa.** Strip pipeline di kartu "Alur Verifikasi" (`src/components/dashboard/StatusFlowChart.tsx`)
+diubah dari satu baris flex (9 kotak + 8 panah) menjadi `grid grid-cols-3`. Panah dihapus; tiap kotak
+diberi nomor langkah (1–9) supaya urutan tetap terbaca kiri→kanan, atas→bawah.
+
+**Kenapa.** Kartu ini hanya setengah lebar layar (`lg:grid-cols-2`); satu baris berisi 9 kotak tanpa
+wrap membuat kotak 7–9 (Pembayaran Terjadwal, Sudah Dibayar, Selesai) meluber keluar kartu dan tidak
+terlihat. Dilaporkan user dari UAT.
+
+**Data.** Tidak berubah — jumlah per status tetap dari `statusBreakdown` `GET /api/dashboard`
+(`COUNT` per `invoices.status`), persen = jumlah / total 9 status utama. **Not Stored.**
+
 ### 2026-09-25 — GA_STAFF: perusahaan yang ditangani, dan akses invoice dibatasi ke sana
 
 **Apa.** Di `/admin/users`, akun `GA_STAFF` kini punya "Perusahaan yang Ditangani": multicheck semua
@@ -1320,7 +1333,8 @@ dilaporkan.
 | `e1e9323` | 2026-09-24 | feat: add company and document date columns and sorting to invoice list |
 | `e3fe01c` | 2026-09-25 | feat: add company filter and hide PIC stage column for vendors on invoice list |
 | `0cdbafe` | 2026-09-25 | feat: assign GA_STAFF responsible companies and scope invoice access to them |
-| _(this commit)_ | 2026-09-25 | feat: send GA_STAFF due-date and stage notifications only for their companies |
+| `dc9a720` | 2026-09-25 | feat: send GA_STAFF due-date and stage notifications only for their companies |
+| _(this commit)_ | 2026-09-25 | fix: wrap verification flow pipeline into a 3x3 grid inside its card |
 
 Fase ini juga membawa satu commit dokumentasi (`docs: log the PM feedback phase and its commit
 history`) yang mencatat tabel di atas; hash-nya tidak dicantumkan karena commit itu adalah tabel ini
