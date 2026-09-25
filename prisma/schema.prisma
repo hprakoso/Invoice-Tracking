@@ -68,6 +68,20 @@ model User {
   vendorId          String?            @map("vendor_id")
   vendor            Vendor?            @relation(fields: [vendorId], references: [id])
 
+  // Which bill-to companies a GA_STAFF account may see (plus invoices with no
+  // company, which every GA_STAFF sees). Ignored for every other role: ADMIN and
+  // GA_MANAGER stay organisation-wide, VENDOR is scoped by vendorId above.
+  //
+  // Many-to-many because one GA staffer can cover several companies and one
+  // company is covered by several staffers. Implicit relation: the join table
+  // carries no extra columns, so there is nothing to model beyond the pair.
+  scopedCompanies   Company[]          @relation("GaStaffCompanies")
+
+  // GA_STAFF covers every company, including ones created later. When true,
+  // scopedCompanies is ignored. Kept as a flag rather than "assign every
+  // company" so a newly added company is covered without an ADMIN edit.
+  handlesAllCompanies Boolean          @default(false) @map("handles_all_companies")
+
   createdInvoices   Invoice[]          @relation("CreatedBy")
   picInvoices       Invoice[]          @relation("Pic")
   paidInvoices      Invoice[]          @relation("PaidBy")
@@ -132,6 +146,8 @@ model Company {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   invoices  Invoice[]
+  // GA_STAFF accounts scoped to this company — see User.scopedCompanies.
+  scopedStaff User[]  @relation("GaStaffCompanies")
 
   @@map("companies")
 }

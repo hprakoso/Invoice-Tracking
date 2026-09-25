@@ -44,6 +44,19 @@ export function validateInvoiceDates(
   return { valid: true }
 }
 
+/**
+ * The business bills in Rupiah only, so this is the one currency any new
+ * invoice or edit may carry. It was `z.string().length(3)`, which accepted any
+ * code — and nothing anywhere converts between currencies, so a USD total would
+ * have been summed straight into Total Payable next to IDR ones.
+ *
+ * Scoped to WRITES on purpose. The column is untouched and there is no
+ * migration: rows written before this keep whatever they hold, and every read
+ * path (detail page, Excel export, chatbot) still renders them as stored.
+ */
+export const SUPPORTED_CURRENCIES = ['IDR'] as const
+const currencySchema = z.enum(SUPPORTED_CURRENCIES)
+
 const itemSchema = z.object({
   description: z.string().min(1, 'Item description required'),
   quantity: z.number().positive().optional(),
@@ -91,7 +104,7 @@ export const createInvoiceSchema = z.object({
   poNumber: z.string().trim().min(1, 'PO number required').max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
-  currency: z.string().length(3).default('IDR'),
+  currency: currencySchema.default('IDR'),
   subtotal: z.number().nonnegative().optional().nullable(),
   taxAmount: z.number().nonnegative().optional().nullable(),
   totalAmount: z.number().min(0, 'Total amount must be non-negative'),
@@ -132,7 +145,7 @@ export const updateInvoiceSchema = z.object({
   poNumber: z.string().trim().min(1).max(100).optional(),
   invoiceDate: isoDateString.optional().nullable(),
   dueDate: isoDateString.optional().nullable(),
-  currency: z.string().length(3).optional(),
+  currency: currencySchema.optional(),
   subtotal: z.number().nonnegative().optional().nullable(),
   taxAmount: z.number().nonnegative().optional().nullable(),
   totalAmount: z.number().min(0).optional(),
@@ -242,17 +255,34 @@ export const updateReminderSettingSchema = z.object({
   inAppEnabled: z.boolean().optional(),
 })
 
+/**
+ * No `password` field: the initial credential is issued server-side by
+ * POST /api/users and mailed to the new user, so the browser never supplies,
+ * sees or transmits one. Anything a client does send under that key is simply
+ * dropped by zod rather than reaching bcrypt.
+ */
 export const createUserSchema = z
   .object({
     name: z.string().min(1).max(200),
     email: z.string().email(),
     role: z.enum(['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']),
     vendorId: z.string().uuid().optional().nullable(),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
+    // GA_STAFF company scope. Shape only — that every id refers to a real
+    // company is checked in the route, which is the layer with database access.
+    companyIds: z.array(z.string().uuid()).optional(),
+    // GA_STAFF covers every company, including ones added later.
+    handlesAllCompanies: z.boolean().optional(),
   })
   .refine((d) => d.role !== 'VENDOR' || !!d.vendorId, {
     message: 'vendorId is required for VENDOR role',
     path: ['vendorId'],
+  })
+  // A GA_STAFF with no company would only ever see company-less invoices, which
+  // reads as a broken account rather than a deliberate one — so a scope ("All"
+  // or at least one company) is required up front.
+  .refine((d) => d.role !== 'GA_STAFF' || d.handlesAllCompanies || (d.companyIds?.length ?? 0) > 0, {
+    message: 'Select all companies or at least one company for GA_STAFF role',
+    path: ['companyIds'],
   })
 
 /**

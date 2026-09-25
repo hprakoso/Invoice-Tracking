@@ -124,10 +124,12 @@ async function main() {
   const rand = mulberry32(20260818)
 
   // Companies (bill-to entities)
+  // The two real bill-to entities for UAT. Every reference to a company is by
+  // the id generated here (invoices pick one at random, the UAT boundary cases
+  // use companies[0]), so the list length is free to change.
   const companySpecs = [
-    { name: 'PT Nusantara Gemilang Sejahtera', npwp: '31.234.567.8-901.000', address: 'Jl. Jend. Sudirman Kav. 52-53', city: 'Jakarta', email: 'ap@nusantaragemilang.co.id' },
-    { name: 'PT Delta Prima Energi', npwp: '32.345.678.9-012.000', address: 'Jl. Basuki Rahmat No. 88', city: 'Surabaya', email: 'finance@deltaprimaenergi.co.id' },
-    { name: 'PT Artha Karya Persada', npwp: '33.456.789.0-123.000', address: 'Jl. Asia Afrika No. 121', city: 'Bandung', email: 'payables@arthakarya.co.id' },
+    { name: 'PT. Berau Coal Energy Tbk.', npwp: '31.234.567.8-901.000', address: 'Jl. Jend. Sudirman Kav. 52-53', city: 'Jakarta', email: 'ap@beraucoalenergy.co.id' },
+    { name: 'PT. Borneo Indobara', npwp: '32.345.678.9-012.000', address: 'Jl. Basuki Rahmat No. 88', city: 'Banjarmasin', email: 'finance@borneoindobara.co.id' },
   ]
   const companies: { id: string }[] = []
   for (const c of companySpecs) {
@@ -235,16 +237,34 @@ async function main() {
       },
     })
   }
+  // GA_STAFF is company-scoped. gastaff@sip.id and nonaktif@sip.id cover every
+  // company via the "All" flag so the seeded walkthrough behaves as it always
+  // has; gantipassword@sip.id is narrowed to one company so the single-company
+  // scope has a real account to demonstrate. Assigned here rather than in the
+  // user loop above because the companies must exist first.
+  for (const email of ['gastaff@sip.id', 'nonaktif@sip.id']) {
+    const u = createdDemoUsers[email]
+    if (u) await prisma.user.update({ where: { id: u.id }, data: { handlesAllCompanies: true } })
+  }
+  const narrowed = createdDemoUsers['gantipassword@sip.id']
+  if (narrowed) {
+    await prisma.user.update({
+      where: { id: narrowed.id },
+      data: { scopedCompanies: { set: [{ id: companies[0].id }] } },
+    })
+  }
+
   const gaStaff = createdDemoUsers['gastaff@sip.id']
   const gaManager = createdDemoUsers['gamanager@sip.id']
   console.log(`Demo accounts: ${DEMO_ACCOUNTS.map((u) => u.email).join(', ')}`)
   console.log(`Extra UAT accounts: ${EXTRA_UAT_ACCOUNTS.map((u) => u.email).join(', ')}`)
 
-  // One inactive vendor and one inactive company, so the isActive toggles, the
-  // active-only vendor dropdown and the dashboard's includeInactive=true
-  // company fetch all have a real row to act on.
+  // One inactive vendor, so the isActive toggle and the active-only vendor
+  // dropdown have a real row to act on. No company is deactivated any more:
+  // with only the two real bill-to entities seeded, deactivating one would
+  // halve the company picker and read as a bug during UAT. The dashboard's
+  // includeInactive=true fetch still works — it just returns both as active.
   await prisma.vendor.update({ where: { id: vendors[vendors.length - 1].id }, data: { isActive: false } })
-  await prisma.company.update({ where: { id: companies[companies.length - 1].id }, data: { isActive: false } })
 
   const now = new Date()
   const curYear = now.getUTCFullYear()
@@ -564,7 +584,7 @@ async function main() {
   )
 
   console.log(`UAT boundary invoices: ${uatCases.map((c) => c.n).join(', ')} (vendor: ${vendorSpecs[0].name})`)
-  console.log('Dummy data created: 3 companies, 6 vendors, 100 invoices (2 items each), stage history')
+  console.log('Dummy data created: 2 companies, 6 vendors, 100 invoices (2 items each), stage history')
   const pad = Math.max(adminEmail.length, ...demoUsers.map((u) => u.email.length))
   const row = (email: string, role: string, note: string) =>
     `  ${email.padEnd(pad)}  ${role.padEnd(11)} ${note}`

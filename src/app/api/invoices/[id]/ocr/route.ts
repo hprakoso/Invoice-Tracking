@@ -193,7 +193,10 @@ export async function GET(
           { key: 'po_number', label: 'Nomor PO' },
           { key: 'invoice_date', label: 'Tanggal Invoice' },
           { key: 'due_date', label: 'Jatuh Tempo' },
-          { key: 'currency', label: 'Mata Uang' },
+          // `currency` is not emitted: the business bills in IDR only, so the
+          // confirmation step shows it as a fixed value rather than something
+          // to review. It is still extracted and still validated into the
+          // column by buildOcrUpdate below.
           { key: 'subtotal', label: 'Subtotal' },
           { key: 'tax_amount', label: 'PPN' },
           { key: 'total_amount', label: 'Total' },

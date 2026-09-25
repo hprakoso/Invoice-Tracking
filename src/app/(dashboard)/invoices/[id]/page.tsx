@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator'
 import { StatusBadge } from '@/components/invoice/StatusBadge'
 import { PICStageBadge, PIC_STAGE_ORDER } from '@/components/invoice/PICStageBadge'
 import { useI18n } from '@/hooks/useI18n'
+import type { Dictionary } from '@/lib/i18n'
 
 // Dynamic import to avoid SSR issues with react-pdf
 const PDFDocument = dynamic(() => import('react-pdf').then(m => m.Document), { ssr: false })
@@ -73,10 +74,147 @@ interface Invoice {
     changedById: string | null
     changedBy?: { name: string; email?: string | null } | null
   }[]
+  // audit_logs rows for this invoice; invoice.stage_changed is filtered out
+  // server-side because stageHistory above already carries every stage move.
+  activity?: {
+    id: string
+    action: string
+    createdAt: string
+    metadata: Record<string, unknown> | null
+    user: { name: string; role: string } | null
+  }[]
 }
 
 import { formatIDR, formatDate, formatDateTime, isOverdue, jakartaDayStart } from '@/lib/format'
 import { VALID_TRANSITIONS } from '@/lib/invoiceStatus'
+
+// One row of "Riwayat & PIC". The two persisted sources are merged here rather
+// than in a new module: invoice_stage_history (which also carries the stage
+// durations) and the invoice's audit_logs rows.
+interface TimelineRow {
+  key: string
+  at: string
+  title: string
+  actor: string | null
+  details: string[]
+  comment: string | null
+  isStage: boolean
+  isCurrentStage: boolean
+  duration: string | null
+}
+
+// Audit actions map onto the labels the audit log page already uses, so the
+// two surfaces name the same event the same way.
+const ACTION_LABEL: Record<string, keyof Dictionary['audit']> = {
+  'invoice.created': 'actionInvoiceCreated',
+  'invoice.file_uploaded': 'actionFileUploaded',
+  'invoice.status_changed': 'actionStatusChanged',
+  'invoice.updated': 'actionUpdated',
+  'invoice.auto_rejected': 'actionAutoRejected',
+  'invoice.document_reclassified': 'actionDocumentReclassified',
+  'invoice.document_removed': 'actionDocumentRemoved',
+  'invoice.deleted': 'actionDeleted',
+}
+
+// Only the fields worth naming to a reader; anything else falls back to its
+// raw key rather than being hidden.
+const FIELD_LABEL: Record<string, keyof Dictionary['invoiceDetail']> = {
+  picId: 'fieldPicId',
+  sendDate: 'fieldSendDate',
+  deliveredDate: 'fieldDeliveredDate',
+  notes: 'fieldNotes',
+  invoiceDate: 'invoiceDate',
+  dueDate: 'dueDate',
+}
+
+function buildTimeline(invoice: Invoice, now: number, t: Dictionary): TimelineRow[] {
+  const stageRows: TimelineRow[] = invoice.stageHistory.map((h, i) => {
+    const isCurrent = i === invoice.stageHistory.length - 1
+    const prev = invoice.stageHistory[i - 1]
+    const days = prev
+      ? Math.floor((new Date(h.changedAt).getTime() - new Date(prev.changedAt).getTime()) / 86400000)
+      : null
+    const ongoing = isCurrent ? Math.floor((now - new Date(h.changedAt).getTime()) / 86400000) : null
+    const closed = prev
+      ? days !== null && days <= 0
+        ? t.invoiceDetail.stageDurationZero
+        : t.invoiceDetail.stageDurationDays.replace('{count}', String(days))
+      : '—'
+    const running =
+      ongoing === null
+        ? null
+        : ongoing <= 0
+          ? t.invoiceDetail.stageDurationZero
+          : t.invoiceDetail.stageDurationOngoing.replace('{count}', String(ongoing))
+    return {
+      key: `stage-${h.id}`,
+      at: h.changedAt,
+      title: (t.picStage as Record<string, string>)[h.stage] ?? h.stage,
+      actor: h.changedBy?.name ?? null,
+      details: [],
+      comment: null,
+      isStage: true,
+      isCurrentStage: isCurrent,
+      duration: isCurrent ? running : closed,
+    }
+  })
+
+  const statusLabel = (v: unknown) => (t.status as Record<string, string>)[String(v)] ?? String(v)
+  const docTypeLabel = (v: unknown) => (t.documentType as Record<string, string>)[String(v)] ?? String(v)
+
+  const activityRows: TimelineRow[] = (invoice.activity ?? []).map((row) => {
+    const m = row.metadata ?? {}
+    const details: string[] = []
+
+    if (row.action === 'invoice.status_changed' && m.from && m.to) {
+      details.push(`${statusLabel(m.from)} → ${statusLabel(m.to)}`)
+    } else if (row.action === 'invoice.auto_rejected' && m.duplicateOfNumber) {
+      details.push(t.invoiceDetail.timelineDuplicate.replace('{number}', String(m.duplicateOfNumber)))
+    } else if (row.action === 'invoice.created' && m.invoiceNumber) {
+      details.push(String(m.invoiceNumber))
+    } else if (row.action === 'invoice.file_uploaded' && m.fileName) {
+      details.push(String(m.fileName))
+    } else if (row.action === 'invoice.document_reclassified' && m.from && m.to) {
+      details.push(`${docTypeLabel(m.from)} → ${docTypeLabel(m.to)}`)
+    } else if (row.action === 'invoice.document_removed' && m.originalName) {
+      details.push(String(m.originalName))
+    }
+
+    // A PIC assignment reaches here as metadata.fields = ['picId'] — the shape
+    // the route has always written. Naming the fields is what turns it into a
+    // readable "PIC was changed" entry without altering what gets persisted.
+    if (Array.isArray(m.fields) && m.fields.length > 0) {
+      const named = (m.fields as unknown[])
+        .map(String)
+        .map((f) => {
+          const key = FIELD_LABEL[f]
+          return key ? (t.invoiceDetail as Record<string, string>)[key] : f
+        })
+        .join(', ')
+      details.push(t.invoiceDetail.timelineFields.replace('{fields}', named))
+    }
+
+    const labelKey = ACTION_LABEL[row.action]
+    const comment = m.comment
+    return {
+      key: `activity-${row.id}`,
+      at: row.createdAt,
+      title: labelKey ? t.audit[labelKey] : row.action,
+      actor: row.user?.name ?? t.audit.system,
+      details,
+      comment: typeof comment === 'string' && comment.trim() ? comment : null,
+      isStage: false,
+      isCurrentStage: false,
+      duration: null,
+    }
+  })
+
+  // Activity first on an exact tie: an invoice's creation row and its first
+  // stage row are written in the same transaction. Array.prototype.sort is stable.
+  return [...activityRows, ...stageRows].sort(
+    (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
+  )
+}
 
 function ConfidenceBar({ value }: { value: number }) {
   const { t } = useI18n()
@@ -410,6 +548,7 @@ export default function InvoiceDetailPage() {
   }
 
   const overdue = isOverdue(invoice.dueDate, invoice.status)
+  const timeline = buildTimeline(invoice, now, t)
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -667,55 +806,51 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
-          {/* SLA timeline — stageHistory with auto-computed durations */}
-          {invoice.stageHistory.length > 0 && (
+          {/* Riwayat & PIC — invoice_stage_history and the invoice's audit rows
+              merged chronologically. Stage rows keep their duration chip. */}
+          {timeline.length > 0 && (
             <div className="bg-white rounded-xl border p-4 space-y-3">
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide">{t.invoiceDetail.slaTitle}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{t.invoiceDetail.slaSubtitle}</p>
               </div>
               <div>
-                {invoice.stageHistory.map((h, i) => {
-                  const isCurrent = i === invoice.stageHistory.length - 1
-                  const prev = invoice.stageHistory[i - 1]
-                  const durDays = prev
-                    ? Math.floor((new Date(h.changedAt).getTime() - new Date(prev.changedAt).getTime()) / 86400000)
-                    : null
-                  const ongoingDays = isCurrent ? Math.floor((now - new Date(h.changedAt).getTime()) / 86400000) : null
-                  const durLabel = prev
-                    ? durDays !== null && durDays <= 0
-                      ? t.invoiceDetail.stageDurationZero
-                      : t.invoiceDetail.stageDurationDays.replace('{count}', String(durDays))
-                    : '—'
-                  const ongoingLabel = ongoingDays !== null
-                    ? ongoingDays <= 0
-                      ? t.invoiceDetail.stageDurationZero
-                      : t.invoiceDetail.stageDurationOngoing.replace('{count}', String(ongoingDays))
-                    : null
+                {timeline.map((row, i) => {
+                  const isLast = i === timeline.length - 1
+                  const dot = !row.isStage
+                    ? 'bg-slate-400 ring-4 ring-slate-400/15'
+                    : row.isCurrentStage
+                      ? 'bg-amber-400 ring-4 ring-amber-400/20'
+                      : 'bg-teal-500 ring-4 ring-teal-500/15'
                   return (
-                    <div key={h.id} className="relative pl-5 pb-4 last:pb-0">
-                      {!isCurrent && <span className="absolute left-[5px] top-4 bottom-0 w-px bg-gray-200 dark:bg-gray-700" />}
-                      <span
-                        className={`absolute top-1.5 left-0 h-2.5 w-2.5 rounded-full ${
-                          isCurrent ? 'bg-amber-400 ring-4 ring-amber-400/20' : 'bg-teal-500 ring-4 ring-teal-500/15'
-                        }`}
-                      />
+                    <div key={row.key} className="relative pl-5 pb-4 last:pb-0">
+                      {!isLast && <span className="absolute left-[5px] top-4 bottom-0 w-px bg-gray-200 dark:bg-gray-700" />}
+                      <span className={`absolute top-1.5 left-0 h-2.5 w-2.5 rounded-full ${dot}`} />
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                          {(t.picStage as Record<string, string>)[h.stage] ?? h.stage}
-                        </span>
-                        <span className="text-[11px] text-gray-400 tabular-nums">{formatDateTime(h.changedAt)}</span>
-                        <span
-                          className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full border ${
-                            isCurrent
-                              ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800'
-                              : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800'
-                          }`}
-                        >
-                          {isCurrent ? ongoingLabel : durLabel}
-                        </span>
+                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{row.title}</span>
+                        <span className="text-[11px] text-gray-400 tabular-nums">{formatDateTime(row.at)}</span>
+                        {row.duration && (
+                          <span
+                            className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full border ${
+                              row.isCurrentStage
+                                ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800'
+                                : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800'
+                            }`}
+                          >
+                            {row.duration}
+                          </span>
+                        )}
                       </div>
-                      {h.changedBy?.name && <p className="text-[11px] text-gray-400 mt-0.5">{h.changedBy.name}</p>}
+                      {row.details.map((d, j) => (
+                        <p key={j} className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{d}</p>
+                      ))}
+                      {row.actor && <p className="text-[11px] text-gray-400 mt-0.5">{row.actor}</p>}
+                      {row.comment && (
+                        <p className="mt-1 rounded-md border-l-2 border-blue-300 bg-blue-50/60 px-2 py-1 text-xs text-gray-600 whitespace-pre-wrap dark:border-blue-700 dark:bg-blue-900/20 dark:text-gray-300">
+                          <span className="text-gray-400">{t.invoiceDetail.timelineComment}: </span>
+                          {row.comment}
+                        </p>
+                      )}
                     </div>
                   )
                 })}

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "npx tsx prisma/seed.ts",
+    "db:reconcile-companies": "npx tsx prisma/reconcile-companies.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, requireRole } from '@/lib/auth/helpers'
+import { requireAuth, requireRole, gaStaffCompanyScope, canSeeCompany } from '@/lib/auth/helpers'
 import {
   updateInvoiceSchema,
   validateDeliveryDates,
@@ -43,12 +43,42 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // PIC (GA Staff handling the hardcopy) is internal-only, not for vendors
-  if (session.user.role === 'VENDOR') {
-    return NextResponse.json({ ...invoice, pic: null })
+  // GA_STAFF reaches only invoices of its companies (or with no company).
+  if (!canSeeCompany(await gaStaffCompanyScope(session), invoice.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
-  return NextResponse.json(invoice)
+  // Source for "Riwayat & PIC". Nothing new is recorded for it: every mutating
+  // invoice route already writes an audit row, and PATCH has always stored the
+  // PIC's comment in metadata.comment — the section simply never read it back,
+  // which is why only PIC stages ever showed.
+  //
+  // Scoped by (entity_type, entity_id), both literals and never client-supplied,
+  // and reached only AFTER the ownership check above — so it carries exactly the
+  // invoice's existing access rules and cannot surface another invoice's history.
+  // Served by the @@index([entityType, entityId]) the schema already declares.
+  //
+  // invoice.stage_changed is excluded for everyone: invoice_stage_history holds
+  // one row per move and is what the durations below are computed from, so
+  // returning both would render every stage change twice.
+  const activity = await prisma.auditLog.findMany({
+    where: { entityType: 'invoice', entityId: id, action: { not: 'invoice.stage_changed' } },
+    select: {
+      id: true,
+      action: true,
+      metadata: true,
+      createdAt: true,
+      user: { select: { name: true, role: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  // PIC (GA Staff handling the hardcopy) is internal-only, not for vendors
+  if (session.user.role === 'VENDOR') {
+    return NextResponse.json({ ...invoice, pic: null, activity })
+  }
+
+  return NextResponse.json({ ...invoice, activity })
 }
 
 const CREATE_TIME_FIELDS = [
@@ -120,6 +150,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     },
   })
   if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Same company gate as GET: a GA_STAFF must not mutate an invoice it cannot
+  // see. Checked before any field-permission logic so an out-of-scope caller
+  // never reaches the transition/duplicate/payment machinery below.
+  if (!canSeeCompany(await gaStaffCompanyScope(session), current.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
 
   const role = session.user.role
   const isOwner = role === 'VENDOR' && current.vendorId === session.user.vendorId
@@ -351,7 +388,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ? { from: current.status, to: 'REJECTED', reason: 'duplicate', duplicateOfId: duplicateOf.id, duplicateOfNumber: duplicateOf.invoiceNumber }
         : filtered.status
           ? { from: current.status, to: filtered.status, comment }
-          : { fields: Object.keys(filtered) },
+          // `comment` was dropped entirely on this branch, so a comment sent
+          // alongside a non-status edit returned 200 and left no trace.
+          : { fields: Object.keys(filtered), ...(comment ? { comment } : {}) },
     },
   })
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireRole } from '@/lib/auth/helpers'
+import { requireRole, gaStaffCompanyScope, canSeeCompany, companyScopeOf } from '@/lib/auth/helpers'
 import { updateInvoiceStageSchema, validationErrorResponse } from '@/lib/validations'
 import { sendEmail, renderEmailLayout } from '@/lib/services/email'
 import { extraEmailsOf } from '@/lib/services/reminderScheduler'
@@ -22,8 +22,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const stage: PICStage = parsed.data.stage
 
-  const previous = await prisma.invoice.findUnique({ where: { id }, select: { picStage: true } })
+  const previous = await prisma.invoice.findUnique({
+    where: { id },
+    select: { picStage: true, companyId: true },
+  })
   if (!previous) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // This route only ever checked the caller's ROLE, never the invoice — so a
+  // GA_STAFF could move the stage of any invoice in the system. Harmless while
+  // GA was organisation-wide; with company scoping it is the hole that would
+  // let a staffer act on another company's invoice.
+  if (!canSeeCompany(await gaStaffCompanyScope(session), previous.companyId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
 
   const invoice = await prisma.invoice.update({
     where: { id },
@@ -50,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // stage still appends history (an explicit "still here" record) but
   // shouldn't ping the team again.
   if (previous.picStage !== stage) {
-    await notifyStageAssigned(id, invoice.invoiceNumber, stage)
+    await notifyStageAssigned(id, invoice.invoiceNumber, stage, previous.companyId)
   }
 
   return NextResponse.json(invoice)
@@ -73,17 +84,23 @@ const STAGE_LABELS_ID: Record<string, string> = {
 // vendor: pic_stage is internal routing (it's scrubbed from vendor-facing
 // responses entirely), so telling a vendor their invoice moved to SSU would
 // leak internal process detail they can't act on.
-async function notifyStageAssigned(invoiceId: string, invoiceNumber: string, stage: string) {
+async function notifyStageAssigned(invoiceId: string, invoiceNumber: string, stage: string, companyId: string | null) {
   const setting = await prisma.reminderSetting.findUnique({ where: { type: 'stage_assigned' } })
   if (!setting?.isActive || !(setting.inAppEnabled || setting.emailEnabled)) return
 
   const roles = Array.isArray(setting.recipientRoles) ? (setting.recipientRoles as string[]) : []
   if (roles.length === 0) return
 
-  const recipients = await prisma.user.findMany({
+  const users = await prisma.user.findMany({
     where: { role: { in: roles as never[] }, isActive: true },
-    select: { id: true, email: true },
+    select: {
+      id: true, email: true, role: true,
+      handlesAllCompanies: true, scopedCompanies: { select: { id: true } },
+    },
   })
+  // A company-scoped GA_STAFF is only told about invoices it can open — same
+  // rule as the access checks (canSeeCompany).
+  const recipients = users.filter((u) => canSeeCompany(companyScopeOf(u), companyId))
   if (recipients.length === 0) return
 
   const label = STAGE_LABELS_ID[stage] ?? stage

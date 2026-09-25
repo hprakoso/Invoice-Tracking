@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, requireRole, unlinkedVendorResponse } from '@/lib/auth/helpers'
+import { requireAuth, requireRole, unlinkedVendorResponse, gaStaffCompanyScope } from '@/lib/auth/helpers'
 import { Prisma } from '@prisma/client'
 import { createInvoiceSchema, validationErrorResponse, DRAFT_PO_PLACEHOLDER } from '@/lib/validations'
 import { buildDashboardFilter } from '@/lib/services/dashboardStats'
@@ -17,21 +17,109 @@ export async function GET(req: NextRequest) {
   // The dashboard's filter builder, not a second copy of it: the hand-rolled
   // block this replaces silently ignored companyId (which the dashboard
   // honoured), so the same query string scoped one surface but not the other.
-  const where = buildDashboardFilter(req.nextUrl.searchParams, session)
+  const where = buildDashboardFilter(req.nextUrl.searchParams, session, await gaStaffCompanyScope(session))
 
-  const invoices = await prisma.invoice.findMany({
-    where,
-    // `items` is deliberately not included: the list page never renders line
-    // items, and including them serialised the whole invoice_items table on
-    // every filter change. Detail pages fetch their own items.
-    include: {
-      vendor: { select: { id: true, name: true } },
-      createdBy: { select: { id: true, name: true } },
+  // Pagination is OPT-IN and the response body stays a bare array.
+  //
+  // Without `?page`/`?pageSize` this route behaves exactly as it always has —
+  // same query, same unbounded result, same JSON — so no existing caller can
+  // break. With them, the slice is taken in the database (skip/take) and the
+  // metadata rides in response headers instead of wrapping the body in an
+  // envelope, which would have been a breaking change to a contract documented
+  // in docs/API.md. Filters are built above, i.e. applied BEFORE skip/take, so
+  // a search scans the whole table and pages the matches rather than filtering
+  // one page's worth of rows.
+  //
+  // `page` is clamped the way GET /api/audit clamps it — `Number('abc')` is NaN
+  // and `?page=0`/`-1` is negative, and either reached Prisma as `skip` and threw.
+  // Sorting happens in the database, before skip/take, so a sort applies to the
+  // whole filtered set rather than to whichever rows the active page holds.
+  //
+  // The client sends a column key, never a Prisma field name: an unknown key
+  // falls back to createdAt rather than reaching orderBy, so no caller can
+  // order by a column it was never meant to see (or crash the query).
+  const SORTABLE = {
+    invoiceNumber: 'invoiceNumber',
+    company: 'company',
+    status: 'status',
+    sendDate: 'sendDate',
+    deliveredDate: 'deliveredDate',
+    invoiceDate: 'invoiceDate',
+    dueDate: 'dueDate',
+    createdAt: 'createdAt',
+    totalAmount: 'totalAmount',
+    picStage: 'picStage',
+  } as const
+  const rawSort = req.nextUrl.searchParams.get('sort') ?? ''
+  const sortKey = (Object.keys(SORTABLE) as (keyof typeof SORTABLE)[]).includes(rawSort as never)
+    ? (rawSort as keyof typeof SORTABLE)
+    : 'createdAt'
+  const dir: 'asc' | 'desc' = req.nextUrl.searchParams.get('dir') === 'asc' ? 'asc' : 'desc'
+
+  // `id` is the tiebreak on every sort: none of these columns is unique, and
+  // without a total order Postgres may repeat or drop rows across skip/take
+  // pages. Company sorts by its related name, which Prisma expresses as a
+  // nested orderBy rather than a scalar field.
+  // Nullable columns sort with their blanks last in both directions. Postgres
+  // orders NULLs first on DESC by default, which would open "Dokumen Diterima,
+  // newest first" with a screen of empty cells.
+  const NULLABLE = new Set(['sendDate', 'deliveredDate', 'dueDate', 'invoiceDate'])
+  const orderBy: Prisma.InvoiceOrderByWithRelationInput[] =
+    sortKey === 'company'
+      ? [{ company: { name: dir } }, { id: 'desc' }]
+      : [
+          (NULLABLE.has(sortKey)
+            ? { [sortKey]: { sort: dir, nulls: 'last' } }
+            : { [sortKey]: dir }) as Prisma.InvoiceOrderByWithRelationInput,
+          { id: 'desc' },
+        ]
+
+  const rawPage = req.nextUrl.searchParams.get('page')
+  const rawPageSize = req.nextUrl.searchParams.get('pageSize')
+  const paginated = rawPage !== null || rawPageSize !== null
+
+  const parsedPage = Number(rawPage ?? '1')
+  const page = Number.isFinite(parsedPage) && parsedPage >= 1 ? Math.floor(parsedPage) : 1
+  const parsedSize = Number(rawPageSize ?? '20')
+  const pageSize =
+    Number.isFinite(parsedSize) && parsedSize >= 1 ? Math.min(Math.floor(parsedSize), 100) : 20
+
+  const [invoices, total] = await Promise.all([
+    prisma.invoice.findMany({
+      where,
+      // `items` is deliberately not included: the list page never renders line
+      // items, and including them serialised the whole invoice_items table on
+      // every filter change. Detail pages fetch their own items.
+      include: {
+        vendor: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+        // One join, not a per-row lookup: the list renders the bill-to company
+        // and would otherwise need an N+1 fetch per invoice.
+        company: { select: { id: true, name: true } },
+      },
+      // `id` breaks ties on createdAt. Without it the sort is not total — the
+      // seed alone has 14 invoices sharing one created_at — and Postgres may
+      // then repeat or skip rows across two skip/take pages. Applied
+      // unconditionally: the order among ties was previously arbitrary, so
+      // making it deterministic changes no contract.
+      orderBy,
+      ...(paginated ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
+    }),
+    paginated ? prisma.invoice.count({ where }) : Promise.resolve(0),
+  ])
+
+  if (!paginated) return NextResponse.json(invoices)
+
+  // Metadata out-of-band so the body shape is untouched. Same-origin fetch, so
+  // no Access-Control-Expose-Headers is needed.
+  return NextResponse.json(invoices, {
+    headers: {
+      'X-Total-Count': String(total),
+      'X-Page': String(page),
+      'X-Page-Size': String(pageSize),
+      'X-Total-Pages': String(Math.max(1, Math.ceil(total / pageSize))),
     },
-    orderBy: { createdAt: 'desc' },
   })
-
-  return NextResponse.json(invoices)
 }
 
 export async function POST(req: NextRequest) {

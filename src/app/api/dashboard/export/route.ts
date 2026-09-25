@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { prisma } from '@/lib/db/prisma'
-import { requireAuth, unlinkedVendorResponse } from '@/lib/auth/helpers'
-import { getDashboardStats, buildDashboardFilter } from '@/lib/services/dashboardStats'
+import { requireAuth, unlinkedVendorResponse, gaStaffCompanyScope } from '@/lib/auth/helpers'
+import { buildDashboardFilter } from '@/lib/services/dashboardStats'
 
 export async function GET(req: NextRequest) {
   const { error, session } = await requireAuth()
@@ -13,32 +13,20 @@ export async function GET(req: NextRequest) {
   const unlinked = unlinkedVendorResponse(session)
   if (unlinked) return unlinked
 
-  const filter = buildDashboardFilter(req.nextUrl.searchParams, session)
+  const filter = buildDashboardFilter(req.nextUrl.searchParams, session, await gaStaffCompanyScope(session))
 
-  const [stats, invoices] = await Promise.all([
-    getDashboardStats(filter),
-    prisma.invoice.findMany({
-      where: filter,
-      orderBy: { createdAt: 'desc' },
-      include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
-    }),
-  ])
+  // The workbook is the invoice sheet and nothing else. The 'KPI Summary'
+  // worksheet it used to open with (totals, per-status counts, aging buckets)
+  // is no longer wanted; removing it also removes the getDashboardStats() call
+  // that existed solely to fill it. The Invoices sheet below — its 20 columns
+  // and their value formats — is untouched.
+  const invoices = await prisma.invoice.findMany({
+    where: filter,
+    orderBy: { createdAt: 'desc' },
+    include: { vendor: { select: { name: true } }, company: { select: { name: true } }, createdBy: { select: { name: true } }, pic: { select: { name: true } } },
+  })
 
   const wb = new ExcelJS.Workbook()
-
-  const summary = wb.addWorksheet('KPI Summary')
-  summary.addRows([
-    ['Total Invoices', stats.totalInvoices],
-    ['Total Payable (open)', stats.totalPayable],
-    ['Overdue Count', stats.overdueCount],
-    ['Open (Awaiting Action)', stats.openCount],
-    [],
-    ['Status', 'Count'],
-    ...stats.statusBreakdown.map((s) => [s.status, s.count]),
-    [],
-    ['Aging Bucket', 'Amount'],
-    ...stats.agingBuckets.map((b) => [b.label, b.amount]),
-  ])
 
   const sheet = wb.addWorksheet('Invoices')
   sheet.columns = [

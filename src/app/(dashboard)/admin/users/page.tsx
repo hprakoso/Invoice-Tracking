@@ -2,9 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus } from 'lucide-react'
+import { ChevronDown, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/hooks/useI18n'
 
 interface UserRow {
@@ -14,18 +21,82 @@ interface UserRow {
   role: string
   vendorId: string | null
   isActive: boolean
+  handlesAllCompanies?: boolean
+  scopedCompanies?: { id: string; name: string }[]
 }
 
+type Scope = { handlesAllCompanies: boolean; companyIds: string[] }
+
 const ROLES = ['ADMIN', 'GA_STAFF', 'GA_MANAGER', 'VENDOR']
+
+// GA_STAFF responsible companies: "All" (a flag that also covers companies
+// added later) or an explicit subset. Shared by the create form and the table.
+// A multi-select dropdown: the menu stays open on each check (Base UI
+// CheckboxItem closeOnClick defaults to false) so several can be picked.
+function CompanyScopePicker({ companies, value, onChange }: {
+  companies: { id: string; name: string }[]
+  value: Scope
+  onChange: (next: Scope) => void
+}) {
+  const { t } = useI18n()
+  const selected = companies.filter(c => value.companyIds.includes(c.id))
+  const summary = value.handlesAllCompanies
+    ? t.dashboard.allCompanies
+    : selected.length === 1
+      ? selected[0].name
+      : selected.length > 1
+        ? t.userManagement.companyScopeSelected.replace('{count}', String(selected.length))
+        : null
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex h-8 w-56 max-w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2 text-sm">
+        <span className={`truncate ${summary ? '' : 'text-muted-foreground'}`}>
+          {summary ?? t.userManagement.companyScopePlaceholder}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-72">
+        <DropdownMenuCheckboxItem
+          checked={value.handlesAllCompanies}
+          onCheckedChange={checked => onChange({ ...value, handlesAllCompanies: checked })}
+        >
+          {t.userManagement.companyScopeAll}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {companies.map(c => (
+          <DropdownMenuCheckboxItem
+            key={c.id}
+            disabled={value.handlesAllCompanies}
+            checked={value.handlesAllCompanies || value.companyIds.includes(c.id)}
+            onCheckedChange={checked => onChange({
+              ...value,
+              companyIds: checked
+                ? [...value.companyIds, c.id]
+                : value.companyIds.filter(x => x !== c.id),
+            })}
+          >
+            {c.name}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const hasScope = (s: Scope) => s.handlesAllCompanies || s.companyIds.length > 0
 
 export default function AdminUsersPage() {
   const { t } = useI18n()
   const [users, setUsers] = useState<UserRow[]>([])
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([])
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
+  const emptyForm = { name: '', email: '', role: 'GA_STAFF', vendorId: '', companyIds: [] as string[], handlesAllCompanies: false }
+  const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  // Row whose responsible companies are being edited, with the draft scope.
+  const [editingScope, setEditingScope] = useState<({ id: string } & Scope) | null>(null)
 
   const fetchUsers = () =>
     fetch('/api/users').then(r => r.json()).then((d: unknown) => setUsers(Array.isArray(d) ? d : []))
@@ -34,6 +105,7 @@ export default function AdminUsersPage() {
     Promise.all([
       fetchUsers(),
       fetch('/api/vendors').then(r => r.json()).then((d: unknown) => setVendors(Array.isArray(d) ? d : [])),
+      fetch('/api/companies?includeInactive=true').then(r => r.json()).then((d: unknown) => setCompanies(Array.isArray(d) ? d : [])),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -46,6 +118,8 @@ export default function AdminUsersPage() {
     if (res.ok) {
       toast.success(t.userManagement.roleUpdated)
       fetchUsers()
+      // A newly promoted GA_STAFF has no companies yet — open the picker.
+      if (role === 'GA_STAFF') setEditingScope({ id, handlesAllCompanies: false, companyIds: [] })
     } else {
       const data = await res.json().catch(() => ({}))
       toast.error(data.error ?? t.userManagement.roleUpdateFailed)
@@ -117,18 +191,41 @@ export default function AdminUsersPage() {
     )
   }
 
+  async function saveScope() {
+    if (!editingScope) return
+    const { id, ...scope } = editingScope
+    const res = await fetch(`/api/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scope),
+    })
+    if (res.ok) {
+      toast.success(t.userManagement.companyScopeUpdated)
+      setEditingScope(null)
+      fetchUsers()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? t.userManagement.companyScopeUpdateFailed)
+    }
+  }
+
   async function createUser() {
     setSaving(true)
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, vendorId: form.role === 'VENDOR' ? form.vendorId || null : null }),
+      body: JSON.stringify({
+        ...form,
+        vendorId: form.role === 'VENDOR' ? form.vendorId || null : null,
+        companyIds: form.role === 'GA_STAFF' && !form.handlesAllCompanies ? form.companyIds : [],
+        handlesAllCompanies: form.role === 'GA_STAFF' && form.handlesAllCompanies,
+      }),
     })
     setSaving(false)
     if (res.ok) {
       toast.success(t.userManagement.userCreated)
       setShowCreate(false)
-      setForm({ name: '', email: '', role: 'GA_STAFF', vendorId: '', password: '' })
+      setForm(emptyForm)
       fetchUsers()
     } else {
       const data = await res.json().catch(() => ({}))
@@ -170,9 +267,23 @@ export default function AdminUsersPage() {
                 {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             )}
-            <Input placeholder={t.userManagement.initialPasswordPlaceholder} type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
           </div>
-          <Button onClick={createUser} disabled={saving || !form.name || !form.email || form.password.length < 8}>
+          {form.role === 'GA_STAFF' && (
+            <div className="rounded-lg border dark:border-gray-700 p-3">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">{t.userManagement.companyScopeLabel}</p>
+              <CompanyScopePicker
+                companies={companies}
+                value={form}
+                onChange={next => setForm(f => ({ ...f, ...next }))}
+              />
+              <p className="text-xs text-gray-400 mt-2">{t.userManagement.companyScopeHint}</p>
+            </div>
+          )}
+
+          {/* No password input: POST /api/users issues the initial credential
+              server-side and mails it to the new user. */}
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t.userManagement.initialPasswordNotice}</p>
+          <Button onClick={createUser} disabled={saving || !form.name || !form.email || (form.role === 'VENDOR' && !form.vendorId) || (form.role === 'GA_STAFF' && !hasScope(form))}>
             {t.userManagement.createUser}
           </Button>
         </div>
@@ -186,6 +297,7 @@ export default function AdminUsersPage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colName}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colEmail}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colRole}</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colCompanies}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.colActive}</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-500 dark:text-gray-400 font-medium">{t.userManagement.credentialsColumn}</th>
               </tr>
@@ -203,6 +315,41 @@ export default function AdminUsersPage() {
                     >
                       {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300 min-w-48">
+                    {u.role !== 'GA_STAFF' ? (
+                      <span className="text-gray-300 dark:text-gray-600">—</span>
+                    ) : editingScope?.id === u.id ? (
+                      <div className="space-y-2">
+                        <CompanyScopePicker
+                          companies={companies}
+                          value={editingScope}
+                          onChange={next => setEditingScope({ id: u.id, ...next })}
+                        />
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={saveScope} disabled={!hasScope(editingScope)}>{t.common.save}</Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingScope(null)}>{t.common.cancel}</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs">
+                          {u.handlesAllCompanies
+                            ? t.dashboard.allCompanies
+                            : u.scopedCompanies?.map(c => c.name).join(', ') || '—'}
+                        </span>
+                        <button
+                          onClick={() => setEditingScope({
+                            id: u.id,
+                            handlesAllCompanies: !!u.handlesAllCompanies,
+                            companyIds: u.scopedCompanies?.map(c => c.id) ?? [],
+                          })}
+                          className="text-xs text-blue-600 hover:underline shrink-0"
+                        >
+                          {t.common.edit}
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <button

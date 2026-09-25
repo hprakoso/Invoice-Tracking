@@ -13,7 +13,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useI18n } from '@/hooks/useI18n'
 import type { Dictionary } from '@/lib/i18n'
-import { formatIDR, parseAmountID } from '@/lib/format'
+import { formatIDR, parseAmountID, toIsoDateOnly } from '@/lib/format'
 import {
   ACCEPTED_MIME_TYPES,
   DROPZONE_ACCEPT,
@@ -46,11 +46,24 @@ const FIELD_DEFS: { key: string; labelKey: keyof Dictionary['upload'] }[] = [
   { key: 'po_number', labelKey: 'fieldPoNumber' },
   { key: 'invoice_date', labelKey: 'fieldInvoiceDate' },
   { key: 'due_date', labelKey: 'fieldDueDate' },
-  { key: 'currency', labelKey: 'fieldCurrency' },
+  // No currency row: the business bills in IDR only, so it is shown as a fixed
+  // value below the grid instead of being offered as an editable field. It was
+  // never submitted from here anyway — confirmAndSubmit has no `currency` key.
   { key: 'subtotal', labelKey: 'fieldSubtotal' },
   { key: 'tax_amount', labelKey: 'fieldTaxAmount' },
   { key: 'total_amount', labelKey: 'fieldTotalAmount' },
 ]
+
+// Extraction keys that are DateTime columns on `invoices` (invoice_date,
+// due_date), so they get a date input on the review step instead of a free-text
+// box. Chosen from the schema, not from the field name: po_number and
+// invoice_number read date-ish to a human but are strings, and both of these
+// columns are nullable, so an empty value stays legal.
+const DATE_FIELD_KEYS = new Set(['invoice_date', 'due_date'])
+
+// The only currency the business bills in. Displayed read-only on the review
+// step; the server enforces the same value (SUPPORTED_CURRENCIES).
+const FIXED_CURRENCY = 'IDR'
 
 // STEP 1 upload -> STEP 2 processing (uploading + ocr) -> STEP 3 review -> STEP 4 done.
 type UploadStage = 'upload' | 'uploading' | 'ocr' | 'review' | 'done'
@@ -555,8 +568,12 @@ export default function UploadPage() {
         invoiceNumber,
         poNumber,
         companyId: companyIdValue,
-        invoiceDate: editableValues['invoice_date'] || null,
-        dueDate: editableValues['due_date'] || null,
+        // Normalised, never the raw extraction: an unreadable value goes as
+        // null (and was flagged in the form above) rather than as a string the
+        // API would reject with a bare 400. Both columns are nullable, so null
+        // is a legal value here — the user was told a correction is needed.
+        invoiceDate: toIsoDateOnly(editableValues['invoice_date']) || null,
+        dueDate: toIsoDateOnly(editableValues['due_date']) || null,
         // parseAmountID, not parseFloat: '1.500.000' is one and a half million
         // here, and `?? null` rather than `|| null` so a genuine 0 (a
         // tax-exempt invoice) is stored as 0 instead of "unknown".
@@ -941,22 +958,42 @@ export default function UploadPage() {
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t.upload.reviewAndEdit}</h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {fields.map((field) => (
-                <div key={field.key}>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    {field.label}
-                    {(field.key === 'po_number' || field.key === 'invoice_number') && <span className="text-red-500"> *</span>}
-                  </label>
-                  <Input
-                    value={editableValues[field.key] ?? ''}
-                    onChange={(e) =>
-                      setEditableValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                    className="h-10 text-sm"
-                  />
-                  {!ocrFailed && !needsInvoiceSelection && <ConfidenceBar confidence={field.confidence} />}
-                </div>
-              ))}
+              {fields.map((field) => {
+                const raw = editableValues[field.key] ?? ''
+                const isDate = DATE_FIELD_KEYS.has(field.key)
+                // Extraction produced something, but not a date that can be read
+                // without guessing. It is neither coerced into a day the
+                // document may not show nor dropped behind the user's back: the
+                // raw text stays on screen with a correction prompt, and the
+                // picker is left empty for them to set.
+                const unreadableDate = isDate && raw !== '' && toIsoDateOnly(raw) === ''
+                return (
+                  <div key={field.key}>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      {field.label}
+                      {(field.key === 'po_number' || field.key === 'invoice_number') && <span className="text-red-500"> *</span>}
+                    </label>
+                    <Input
+                      type={isDate ? 'date' : 'text'}
+                      value={isDate ? toIsoDateOnly(raw) : raw}
+                      // due_date can never precede invoice_date — the server and
+                      // a CHECK constraint both enforce it, so the picker says so
+                      // up front rather than letting the submit come back 400.
+                      min={field.key === 'due_date' ? toIsoDateOnly(editableValues['invoice_date']) || undefined : undefined}
+                      onChange={(e) =>
+                        setEditableValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
+                      className="h-10 text-sm"
+                    />
+                    {unreadableDate && (
+                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                        {t.upload.dateUnreadable.replace('{value}', raw)}
+                      </p>
+                    )}
+                    {!ocrFailed && !needsInvoiceSelection && <ConfidenceBar confidence={field.confidence} />}
+                  </div>
+                )
+              })}
             </div>
 
             {/* Line Items */}
@@ -984,6 +1021,12 @@ export default function UploadPage() {
             )}
 
             <Separator />
+
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.fieldCurrency}</label>
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{FIXED_CURRENCY}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{t.upload.currencyFixedHint}</p>
+            </div>
 
             <div>
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">{t.upload.sendDateLabel}</label>

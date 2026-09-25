@@ -9,7 +9,32 @@ All Next.js routes live under `src/app/api/`. Every route calls `requireAuth()` 
 ### `GET /api/invoices`
 Auth: any authenticated user. `VENDOR` role is server-forced to `where.vendorId = session.user.vendorId` (query-param `vendorId` is ignored for vendors — prevents IDOR).
 
-Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`). The last four are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+Query params: `status`, `search` (matches `invoice_number`, case-insensitive), `from`/`to` (filters `due_date`), `vendorId` (non-vendor roles only), `companyId` (exact, `invoices.company_id`), `poNumber` (contains, case-insensitive), `picId` (exact), `amountMin`/`amountMax` (range on `total_amount`), plus `page`/`pageSize`. The filter params are applied by `applyInvoiceSearchFilters()` (`src/lib/services/dashboardStats.ts`), shared with the dashboard's filter builder so both surfaces accept the same params. Non-numeric `amountMin`/`amountMax` values are ignored rather than passed through as `NaN`.
+
+**GA_STAFF is scoped by company.** A `GA_STAFF` caller only receives invoices billed to a company it is responsible for (`_GaStaffCompanies`) **plus invoices with no company** (`invoices.company_id IS NULL`), resolved per request by `gaStaffCompanyScope()` (`src/lib/auth/helpers.ts`) and applied inside `buildDashboardFilter` as `OR: [{ companyId: { in: scope } }, { companyId: null }]`. A `GA_STAFF` with `users.handles_all_companies = true` is unrestricted, exactly like `ADMIN`. A `companyId` query param is intersected with that scope, never unioned — asking for a company outside it returns zero rows. `ADMIN` and `GA_MANAGER` remain organisation-wide; `VENDOR` is unaffected and stays scoped by `vendorId`. The same rule (`canSeeCompany()`) gates every single-invoice route — `GET`/`PATCH /api/invoices/[id]`, `PATCH .../stage`, `.../file`, `.../upload`, `.../ocr`, `.../documents/[documentId]` and its `/file` — which return **404** for an invoice outside the caller's scope, and the dashboard + Excel export, which share `buildDashboardFilter`.
+
+**Sorting.** `sort` + `dir` (`asc`/`desc`, default `createdAt desc`). `sort` is matched against a whitelist (`invoiceNumber`, `company`, `status`, `sendDate`, `deliveredDate`, `invoiceDate`, `dueDate`, `createdAt`, `totalAmount`, `picStage`); anything unrecognised falls back to `createdAt`, so no client string reaches Prisma's `orderBy`. Every sort carries `id desc` as a tiebreak because none of these columns is unique. Nullable date columns sort `nulls: 'last'` in both directions. Sorting is applied **before** `skip`/`take`, so it orders the whole filtered set.
+
+| Response field | Source |
+|---|---|
+| `company.id`, `company.name` | `companies.id`, `companies.name` via `invoices.company_id`; `null` when the invoice has no company |
+
+**Pagination is opt-in and the response body is unchanged — still a bare JSON array.**
+
+Omit `page` and `pageSize` and this route behaves exactly as it always has: one unbounded `findMany`, the same array, no extra headers. Send either and the slice is taken in the database (`skip`/`take`) and the metadata comes back in response headers rather than wrapping the body in an envelope — that would have been a breaking change to the contract this section documents, and the audit below found no need for one.
+
+| Header (paginated requests only) | Source |
+|---|---|
+| `X-Total-Count` | `formula`: `COUNT(invoices)` with the same `where`, before paging — **Not Stored** |
+| `X-Page` | `formula`: the clamped `?page` value — **Not Stored** |
+| `X-Page-Size` | `formula`: `?pageSize` clamped to 1..100, default 20 — **Not Stored** |
+| `X-Total-Pages` | `formula`: `ceil(X-Total-Count / X-Page-Size)`, min 1 — **Not Stored** |
+
+Filters are built **before** `skip`/`take`, so a search scans the whole table and pages the matches — never only the rows already on the active page. `page` is clamped the way `GET /api/audit` clamps it (`Number('abc')` is `NaN` and `?page=0`/`-1` is negative; either used to reach Prisma as `skip` and throw). A `page` past the last one returns `[]` rather than an error; the client resets to page 1 whenever a filter changes.
+
+`orderBy` is now `[{ createdAt: 'desc' }, { id: 'desc' }]`. The `id` tiebreak is required for correct paging, not cosmetic: `created_at` is not unique (the seed alone has 14 invoices sharing one value), so without a total order Postgres may repeat or drop rows across two `skip`/`take` pages. The order among ties was previously arbitrary, so making it deterministic changes no contract.
+
+**Consumer audit (2026-09-14).** The collection endpoint has exactly one `GET` consumer in the repository — `src/app/(dashboard)/invoices/page.tsx`. Verified from five independent angles: literal path grep across every file type; a call-site-first enumeration of every `fetch`/`EventSource`/`axios`/`XMLHttpRequest` in the repo; tests, root scripts, CI and deploy config; indirect consumers (there is no API-client or service layer — components call `fetch` directly, and `geminiChat.ts` queries Prisma rather than HTTP); and documentation. `src/app/(dashboard)/invoices/upload/page.tsx` also calls `/api/invoices` but with `POST`, so the `GET` contract does not reach it. Because the body shape is unchanged, none of this required a consumer migration.
 
 | Response field | Source |
 |---|---|
@@ -38,7 +63,20 @@ Writes: `invoices` row (`status = 'RECEIVED'`, `pic_stage` from body or default 
 ### `GET /api/invoices/[id]`
 Auth: any authenticated user; `VENDOR` gets 403 if `invoice.vendorId !== session.user.vendorId`.
 
-Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs). `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+Adds to the list-response shape above: `vendor` (full row, not just `id`/`name`), `company` (full `companies` row, nullable), `createdBy.role`, `pic.role`, `paidBy.{id,name,role}` (who marked it paid, via `invoices.paid_by`), `stageHistory[]` (`invoice_stage_history.*` for this invoice, ordered by `changed_at` ascending — the source for the detail page's per-stage duration display), `documents[]` (`invoice_documents.*`, ordered by `created_at` ascending — drives the detail page's document tabs), and `activity[]`. `pic` is forced to `null` for `VENDOR` callers — the PIC (GA Staff handling the hardcopy) is internal-only, not vendor-facing.
+
+**`activity[]` — the "Riwayat & PIC" source.**
+
+| Response field | Source |
+|---|---|
+| `activity[].id`, `.action`, `.metadata`, `.createdAt` | `audit_logs.id`, `.action`, `.metadata`, `.created_at` where `entity_type = 'invoice' AND entity_id = :id`, ordered by `created_at` ascending. Served by the existing `audit_logs_entity_type_entity_id_idx` (`@@index([entityType, entityId])`) — no migration |
+| `activity[].user.name`, `.user.role` | `users.name`, `users.role` via `audit_logs.user_id`; `null` when the row has no user |
+
+Both `entity_type` and `entity_id` are literals in the query, never client-supplied, and the query runs **after** the vendor-ownership 403 above — so `activity` carries exactly this endpoint's existing access rules and cannot surface another invoice's history. No new authorization rule was introduced: whoever may read the invoice may read its activity, the same way `stageHistory`, `items` and `documents` already behave.
+
+`action = 'invoice.stage_changed'` is excluded for every role: `invoice_stage_history` already holds one row per stage move (and is what the durations are computed from), so returning both would render each move twice.
+
+A PIC's comment has always been persisted here — `PATCH /api/invoices/[id]` writes it to `audit_logs.metadata.comment` — but this endpoint never returned audit rows, which is why the section only ever showed PIC stages.
 
 ### `PATCH /api/invoices/[id]`
 Auth: any authenticated user — authorization is field- and status-aware, not a flat role gate. Body validated by `updateInvoiceSchema`. The server computes which of the submitted fields the caller's role may write given the invoice's current `status` (`allowedFields()` in the route), silently drops the rest, and 403s if nothing survives:
@@ -141,7 +179,7 @@ Streams `status`, `driving_document`, `needs_invoice_selection`, `document_type`
 | `company.{companyId,status,matchedOn}` | `formula` — `matchCompany()` (`src/lib/companyMatch.ts`) over `companies` rows where `is_active = true`, keyed on `companies.npwp` then normalized `companies.name`. `status` is `MATCHED`/`UNMATCHED`/`AMBIGUOUS`; two or more hits is `AMBIGUOUS` and resolves to `companyId: null`, never a pick (`companies.name` has no unique constraint). **Not Stored** — the client sends the confirmed id back via `PATCH` |
 | `company.{extractedName,extractedNpwp,confidence}` | Gemini `company_name` / `company_npwp` fields (the invoice's bill-to block) — **Not Stored**. Surfaced alongside the verdict so the confirmation page can show what was *read* versus what it *matched* |
 | `field.value`, `field.confidence` (per invoice field) | Gemini vision extraction response (`extractInvoiceFields()`, `src/lib/services/geminiExtraction.ts`) — **Not Stored** as a distinct field, only the final parsed values persist |
-| Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted |
+| Persisted after stream: `invoiceDate`, `dueDate`, `currency`, `subtotal`, `taxAmount`, `totalAmount` | Written to `invoices.*` from the Gemini response, falling back to existing DB value if the field wasn't extracted. `currency` is accepted **only when it reads `IDR`** — any other code, however well-formed, is reported in `warning.fields[]` and the column keeps its existing value. There is no `currency` `field` event either: the business bills in Rupiah only, so the confirmation step shows it as a fixed value rather than something to review. Dates go through `toIsoDateOnly()` (`src/lib/format.ts`) — the same rule the confirmation form applies — so only the unambiguous `YYYY-MM-DD` form is stored; anything else (a slashed date, free text, an impossible day, an implausible year) is reported in `warning.fields[]` and the column is left at its current value rather than being reinterpreted |
 | `invoiceNumber` | **Streamed but deliberately NOT persisted here.** It's the field the duplicate check keys on, and that check lives only in `PATCH /api/invoices/[id]` — writing it here would slip past it. The client receives it via the `field` event and submits it through `PATCH`, which duplicate-checks it properly. See the note in the route for the two failures this caused when OCR did write it |
 | `po_number` (new), and `companyId` | **Streamed but deliberately NOT persisted here**, for the same class of reason: both gate the draft→live transition in `validateReadyToGoLive`, and writing them straight from OCR would satisfy that gate with data no human confirmed. They return through `PATCH` |
 | `ocrConfidence` | `invoices.ocr_confidence` ← `overall_confidence`, computed in `extractInvoiceFields()` as the average confidence of the 7 `CORE_FIELDS` that came back non-null (same formula the old Python service used). Unchanged by the new fields — `company_name`, `company_npwp` and `po_number` are deliberately **not** in `CORE_FIELDS`, so this metric means the same thing it always did |
@@ -200,7 +238,7 @@ Auth: any authenticated user (needed by the vendor upload wizard's company dropd
 Auth: `ADMIN`, `GA_STAFF` only. Body validated by `createCompanySchema`. Writes: `companies` row, `audit_logs` (`action: 'company.created'`).
 
 ### `PATCH /api/companies/[id]`
-Auth: `ADMIN`, `GA_STAFF` only. Body validated by `updateCompanySchema` (partial). Writes: `companies` row (partial update), `audit_logs` (`action: 'company.updated'`, `metadata: { fields }`).
+Auth: `ADMIN`, `GA_STAFF` only. Body validated by `updateCompanySchema` (partial). Writes: `companies` row (partial update), `audit_logs` (`action: 'company.updated'`, `metadata: { fields }`). Serves two callers on the admin page: the full-record edit form (name/npwp/address/city/email) and the activate/deactivate toggle (`isActive` alone).
 
 ### `DELETE /api/companies/[id]`
 Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` (no row is actually deleted — invoices already pointing at it keep a valid FK). Writes `audit_logs` (`action: 'company.deactivated'`).
@@ -210,7 +248,22 @@ Auth: `ADMIN`, `GA_STAFF` only. Soft-delete: sets `companies.is_active = false` 
 ### `GET /api/dashboard`
 Auth: any authenticated user. `VENDOR` role scoped to `vendorId = session.user.vendorId` on every query below, server-forced (query-param `vendorId` is ignored for vendors, same IDOR protection as `GET /api/invoices`). Aggregation logic and the filter-building are shared with the export route via `getDashboardStats()`/`buildDashboardFilter()` (`src/lib/services/dashboardStats.ts`), so the two always agree.
 
-Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`. Every field below — KPIs, chart data, and the table — reflects the same filtered set; there's no partially-filtered view.
+Query params (all optional, all combine with AND): `search` (matches `invoice_number`, case-insensitive), `status`, `vendorId` (non-vendor roles only), `companyId`, `from`/`to` (filters `due_date`), plus `poNumber`/`picId`/`amountMin`/`amountMax` via the shared `applyInvoiceSearchFilters()`, plus `kpi`.
+
+**`kpi` — the selected KPI card, acting as a dashboard filter.** The four cards are clickable; each is identified by the *business predicate* behind its figure, never by its UI label (an unrecognised value, including a label string, is ignored and echoed back as `null`):
+
+| `kpi` | Card | Predicate AND-ed onto the filter |
+|---|---|---|
+| *(absent)* | Total Invoices | none — this card is the reset |
+| `payable` | Total Tagihan | `status NOT IN ('PAID','CLOSED','REJECTED')` |
+| `open` | Invoice Terbuka | same as `payable` |
+| `overdue` | Jatuh Tempo | the above, plus `due_date < jakartaDayStart()` |
+
+Applied by `applyKpiScope()` as `{ AND: [filter, ...] }`, so it can only ever **narrow** — the `VENDOR` scoping inside `filter` cannot be overwritten by a card — and it does not collide with the per-bucket `due_date` the aging aggregates set on top.
+
+`kpi` is deliberately **not** part of `buildDashboardFilter()`: that builder also backs `GET /api/invoices` (which must not start honouring it), and it is what the KPI figures are computed from. So `totalInvoices`, `totalPayable`, `overdueCount` and `openCount` **ignore** `kpi` and keep their existing business definition, while `statusBreakdown`, `agingBuckets`, `monthlyTrend`, `statusByMonth`, `companyBreakdown`, `stageLeadTimes` and `recentInvoices` all follow it. `GET /api/dashboard/export` also ignores `kpi` — only the dashboard is card-filtered.
+
+Aside from `kpi`, every field below reflects the same filtered set; there's no partially-filtered view.
 
 | Response field | Source |
 |---|---|
@@ -224,13 +277,13 @@ Query params (all optional, all combine with AND): `search` (matches `invoice_nu
 | `statusByMonth[]` | `formula`: trailing 12 UTC months — `{month, entered, accepted}`, counting invoices created that month currently in `status = 'RECEIVED'` (entered) vs `status = 'PAID'` (accepted). A pipeline-health proxy, not a true historical flow rate — see `StatusFlowChart.tsx` |
 | `companyBreakdown[]` | `formula`: `GROUP BY invoices.company_id` over the filtered set → `{companyId, companyName, count, totalAmount}`, sorted by `totalAmount` descending. Company names come from a second `companies` query (Prisma `groupBy` can't include a relation). Invoices with no company are kept as a `companyId: null` row rather than dropped — a missing bill-to is worth seeing |
 | `stageLeadTimes[]` | `formula`: `foldStageLeadTimes()` over `invoice_stage_history` rows for the filtered invoices → `{stage, avgDays, completed, currentCount}` for all 5 stages in workflow order. A stage's duration is the gap to the **next** history row of the same invoice; the last row per invoice is still open, so it counts toward `currentCount` (invoices sitting there now) but **not** the average. Rows are ordered by `(invoice_id, changed_at)`, which is what keeps every gap non-negative even when a stage was recorded out of workflow order. `avgDays` is null when no invoice has completed that stage — rendered as "—", not 0 |
-| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set) + `vendor.name` + `company.name` |
+| `recentInvoices[]` | `invoices.*` (10 most recent by `created_at` within the filtered set, narrowed by `kpi`) + `vendor.name` + `company.name` |
+| `kpi` | `formula`: the accepted `?kpi` value, or `null` — **Not Stored** |
 
 ### `GET /api/dashboard/export`
-Auth: any authenticated user, same `VENDOR` scoping and query params as `GET /api/dashboard` (same `buildDashboardFilter()`). **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
+Auth: any authenticated user, same `VENDOR` scoping and filter params as `GET /api/dashboard` (same `buildDashboardFilter()`). It does **not** honour `kpi` — the KPI-card filter scopes the dashboard only. **Not Stored** — generates an `.xlsx` file on demand via `exceljs`, streamed as the response body (`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), not persisted anywhere.
 
-- Sheet "KPI Summary": same fields/formulas as `GET /api/dashboard` above, computed over the same filtered set (`totalInvoices`, `totalPayable`, `overdueCount`, `openCount`, `statusBreakdown`, `agingBuckets`).
-- Sheet "Invoices": one row per invoice matching the active filters (unfiltered = every invoice, same as the dashboard's default view), columns Invoice Number/**PO Number**/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/**PIC Stage**/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
+- Sheet "Invoices" — **the only sheet**: one row per invoice matching the active filters (unfiltered = every invoice, same as the dashboard's default view), columns Invoice Number/**PO Number**/Vendor/**Company (Bill To)**/Invoice Date/Due Date/Send Date/Delivered Date/PIC/Status/**PIC Stage**/Currency/Subtotal/Tax/Total/Paid Date/Paid Amount/Created By/Created At/Notes, all sourced from `invoices.*` + `vendor.name` + `company.name` + `createdBy.name` + `pic.name`.
 
 ## Audit
 
@@ -264,13 +317,19 @@ Auth: `ADMIN`, `GA_MANAGER` only, rate-limited **10 requests/min/user**. Body `{
 ## Users
 
 ### `GET /api/users`
-Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive}` — `passwordHash` is never selected/returned.
+Auth: `ADMIN`, `GA_STAFF`, `GA_MANAGER` (broad read access so the invoice detail page's PIC-reassignment dropdown can populate for non-admin roles). Optional `?role=` filter. Returns `users.{id,name,email,role,vendorId,isActive,handlesAllCompanies}` plus `scopedCompanies: [{ id, name }]` (`_GaStaffCompanies` → `companies.id`, `companies.name`; empty for non-`GA_STAFF`) — `passwordHash` is never selected/returned.
 
 ### `POST /api/users`
-Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod). Writes: `users` row (`password_hash` = `bcrypt.hash(password, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `must_change_password` defaults to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+Auth: `ADMIN` only. Body validated by `createUserSchema` (Zod): `{ name, email, role, vendorId?, companyIds?, handlesAllCompanies? }`. A `GA_STAFF` must carry `handlesAllCompanies: true` or at least one `companyIds` entry (400 otherwise); every id must be an existing `companies.id` (400 otherwise). For other roles both are ignored.
+
+**The body carries no password.** Since 2026-09-17 the initial credential is issued server-side, so the browser never supplies, sees or transmits one; a `password` key sent by a client is dropped by zod before it can reach bcrypt. The value comes from `INITIAL_USER_PASSWORD` (env, default `P@ssw0rd`), configured the same way `prisma/seed.ts` configures `DEMO_PASSWORD`. A shared, known starting credential is only safe because it is single-use — see `must_change_password` below.
+
+Writes: `users` row (`password_hash` = `bcrypt.hash(INITIAL_USER_PASSWORD, 12)`, matching the hashing convention in `auth.ts`/`seed.ts`; `vendor_id` set only when `role='VENDOR'`; `handles_all_companies` and `_GaStaffCompanies` rows set only when `role='GA_STAFF'`; `must_change_password` set explicitly to `true` — the account must set its own password before reaching anything past `/change-password`, enforced in `middleware.ts`), `audit_logs` (`action: 'user.created'`, `metadata: { email, role }`).
+
+Then sends a welcome email to the new address via the shared `sendEmail()`/`renderEmailLayout()` (**Not Stored**) carrying the login email and the initial password. Delivery is best-effort by design: `sendEmail` is already a no-op when `RESEND_API_KEY` is unset, and the call is additionally wrapped so a transport-level throw cannot fail the request — the account exists and is usable either way, and a 500 here would push the admin into retrying into a duplicate-email error. The plaintext credential is never persisted, never logged and never present in the response, whose `select` returns only `id`, `name`, `email`, `role`, `vendorId`, `isActive`, `handlesAllCompanies`, `scopedCompanies`.
 
 ### `PATCH /api/users/[id]`
-Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
+Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password?, companyIds?, handlesAllCompanies? }`. Response adds `handlesAllCompanies` and `scopedCompanies` (same sources as `GET`). Rejects (400) if the resulting role is `VENDOR` with no `vendorId`. Returns 409 on an email collision (`users.email` is `@unique`) instead of surfacing a Prisma `P2002` as a 500.
 
 `email` and `password` are the **admin-side counterpart to the vendor credential lockdown**: a vendor may change neither its own login email nor (after the forced first change) its own password, so this route is the only path for either. Without it the restriction would be a dead end.
 
@@ -279,6 +338,8 @@ Auth: `ADMIN` only. Body: `{ role?, isActive?, vendorId?, email?, password? }`. 
 | `role` | `users.role`, and `users.vendor_id` forced to null for non-VENDOR | unchanged |
 | `isActive` | `users.is_active` | unchanged; deactivated users fail login at `authorize()` (`!user.isActive` in `auth.ts`) |
 | `vendorId` | `users.vendor_id` | unchanged |
+| `companyIds` | `_GaStaffCompanies` (`set` — replaces the whole list) | `GA_STAFF` only; omitted = unchanged. Any role other than `GA_STAFF` has its rows cleared and `handles_all_companies` forced false |
+| `handlesAllCompanies` | `users.handles_all_companies` | `GA_STAFF` only; omitted = unchanged |
 | `email` | `users.email` | the login identity |
 | `password` | `users.password_hash` = `bcrypt.hash(password, 12)` **and `users.must_change_password = true`** | applies to every role. The value an admin types is always a handover secret, never the account's live credential — the recipient is forced to replace it at their next sign-in, so no admin ends up holding a working vendor password |
 
@@ -290,6 +351,7 @@ Audit rows are now per credential event rather than one blanket `user.role_updat
 | email actually changed | `user.email_changed` | `{ from, to }` |
 | `password` supplied | `user.password_reset` | `{ role, mustChangePassword: true }` |
 | `isActive` supplied | `user.active_changed` | `{ isActive }` |
+| `companyIds` or `handlesAllCompanies` supplied for a `GA_STAFF` | `user.company_scope_changed` | `{ handlesAllCompanies, companyIds }` (values after the update) |
 | none of the above (e.g. `vendorId` only) | `user.updated` | `{ fields }` |
 
 > **A reset does not evict a live session.** Sessions are stateless JWTs with no revocation mechanism, so an existing browser session keeps working until the token expires. To cut off access immediately, deactivate the account (`{ isActive: false }`) and then reset the password.
@@ -318,14 +380,14 @@ Auth: `ADMIN` only. 404 if `type` isn't one of the four known values. Body valid
 ### `GET /api/cron/reminders`
 Auth: `Authorization: Bearer <CRON_SECRET>` header — checked inside the route (not `requireAuth`/`requireRole`, since there's no NextAuth session). `src/middleware.ts` explicitly excludes `/api/cron/**` from its session-required gate so the request reaches the route at all. Registered in `vercel.json` → `crons` (`0 1 * * *`, daily — Vercel Hobby plan caps cron at once/day; see `docs/PRODUCTION_PLAN.md` §4.2). Runs `checkDueDates()` (`src/lib/services/reminderScheduler.ts`), same logic previously invoked hourly by `node-cron` from `src/instrumentation.ts` (removed — doesn't survive serverless scale-to-zero).
 
-Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for open invoices (`status NOT IN ('PAID','CLOSED','REJECTED')`, `OPEN_STATUSES` in `reminderScheduler.ts`) due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window — written only when `in_app_enabled` is true. Also sends one summary email (via Resend) to the same recipients plus `extra_emails` when `email_enabled` is true — not deduplicated beyond the cron's own once-daily schedule. The whole type is skipped when `is_active` is false, or when neither channel is enabled. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
+Writes: `notifications` rows (`type: 'due_soon'|'overdue'`) for open invoices (`status NOT IN ('PAID','CLOSED','REJECTED')`, `OPEN_STATUSES` in `reminderScheduler.ts`) due within `reminder_settings.days_before` (default 3, `due_soon` only) or overdue, recipients = active users in `reminder_settings.recipient_roles`, deduplicated per `(userId, invoiceId, type)` within a 24h window — written only when `in_app_enabled` is true. Also sends one summary email (via Resend) to the same recipients plus `extra_emails` when `email_enabled` is true — not deduplicated beyond the cron's own once-daily schedule. **Company scope:** a `GA_STAFF` recipient without `users.handles_all_companies` gets in-app rows only for invoices of its `_GaStaffCompanies` companies plus company-less ones (`scopedFor()` → `canSeeCompany()`), and instead of the shared summary email receives its own email listing only those rows (same treatment `VENDOR` recipients already had); unscoped recipients and `extra_emails` share the one combined email. The whole type is skipped when `is_active` is false, or when neither channel is enabled. Returns `{ ok, dueSoonCount, overdueCount, notificationsCreated }`.
 
 ## Invoice-event notifications
 
 Two `reminder_settings`-gated triggers, fired inline from the invoice routes (not the cron job):
 
 - **`status_changed`** — `PATCH /api/invoices/[id]`, whenever `status` actually changes value. Notifies every active `VENDOR`-role user linked to the invoice's `vendorId` — `recipientRoles` is not consulted for this type (the recipient is always the invoice's own vendor). Also fires on a duplicate auto-rejection, which is exactly when the vendor most needs to know.
-- **`stage_assigned`** — `PATCH /api/invoices/[id]/stage`, when `pic_stage` changes value. Notifies active users in the configured `recipientRoles` (default `GA_STAFF`/`GA_MANAGER`) and **never the vendor** — see that route above for why.
+- **`stage_assigned`** — `PATCH /api/invoices/[id]/stage`, when `pic_stage` changes value. Notifies active users in the configured `recipientRoles` (default `GA_STAFF`/`GA_MANAGER`) and **never the vendor** — see that route above for why. A company-scoped `GA_STAFF` is skipped (email and in-app) unless the invoice's `company_id` is one of its companies or null — `canSeeCompany(companyScopeOf(user), invoices.company_id)`.
 
 Both are gated by their `reminder_settings` row: `isActive`, plus `inAppEnabled`/`emailEnabled` independently.
 
@@ -340,4 +402,3 @@ No auth. Runs `SELECT 1` against the database. Returns `{ status: 'ok'|'degraded
 
 ### `POST /api/auth/[...nextauth]`, `GET /api/auth/[...nextauth]`
 NextAuth v5 handler (`src/lib/auth/auth.ts`). Credentials provider: looks up `users.email`, checks `users.is_active`, verifies `bcrypt.compare(password, users.password_hash)`. On success, JWT carries `id`, `role`, `vendorId` (all from `users.*`); session mirrors the JWT.
-
